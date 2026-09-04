@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from sbh_data_bank.ingest.load import LoadOutcome, load_file, load_workbook
-from sbh_data_bank.ingest.reader import open_source
+from sbh_data_bank.ingest.reader import HeaderNotFoundError, open_source
 from sbh_data_bank.registry.loader import SpecRegistry, load_spec
 from sbh_data_bank.registry.spec import ReadSpec, SourceSpec
 from sbh_data_bank.transforms.ndc import SetNdcDirectory
@@ -498,3 +498,89 @@ class TestTotalsFooter:
         assert load.footer is None
         assert load.counters.rows_read == 1
         assert load.counters.rows_quarantined == 1
+
+
+class TestHeaderMarker:
+    """ABC delivers the same 26 columns with one title row above the header as a
+    workbook, and two lines - a `sep=` declaration plus a title - as a CSV. A
+    fixed preamble count cannot serve both, and two variants cannot be told
+    apart because their headers are identical. So the header is located by a
+    column name instead of by counting junk lines."""
+
+    SPEC = {
+        "key": "wholesaler.abc.purchases",
+        "name": "ABC",
+        "vendor": "AmerisourceBergen",
+        "variants": [
+            {
+                "name": "invoice_detail",
+                "detect": {"require_all": ["Account #", "NDC"]},
+                "read": {"header_marker": "Account #"},
+                "columns": [
+                    {"target": "account_number", "sources": ["Account #"]},
+                    {"target": "ndc", "sources": ["NDC"], "type": "ndc"},
+                ],
+            }
+        ],
+    }
+
+    def _spec(self) -> SourceSpec:
+        return SourceSpec.model_validate(self.SPEC)
+
+    def test_finds_the_header_under_one_preamble_line(self, tmp_path):
+        path = _write(
+            tmp_path,
+            "ABC_Purchases.csv",
+            "Purchases-Invoice Detail-Run Date-03/07/2026",
+            "Account #,NDC",
+            "0100461951,00310304000",
+        )
+        load = load_file(path, self._spec())
+        assert load.ok
+        assert load.rows[0].values["account_number"] == "0100461951"
+
+    def test_finds_the_header_under_two_preamble_lines(self, tmp_path):
+        """The same spec, unchanged, on the CSV form of the same report."""
+        path = _write(
+            tmp_path,
+            "ABC_Purchases.csv",
+            "sep=,",
+            "Purchases-Invoice Detail-Run Date-02/05/2026",
+            "Account #,NDC",
+            "0100461951,00310304000",
+        )
+        load = load_file(path, self._spec())
+        assert load.ok
+        assert load.counters.rows_ok == 1
+
+    def test_finds_the_header_with_no_preamble_at_all(self, tmp_path):
+        path = _write(tmp_path, "ABC_Purchases.csv", "Account #,NDC", "0100461951,00310304000")
+        assert load_file(path, self._spec()).ok
+
+    def test_leading_zeros_survive_because_the_account_is_text(self, tmp_path):
+        """ABC accounts are 0100583154 in the extracts and 100583154 in the
+        Master COGS List. An integer conversion would erase the distinction."""
+        path = _write(tmp_path, "ABC_Purchases.csv", "Account #,NDC", "0100583154,00310304000")
+        assert load_file(path, self._spec()).rows[0].values["account_number"] == "0100583154"
+
+    def test_line_numbers_are_correct_regardless_of_preamble_length(self, tmp_path):
+        path = _write(
+            tmp_path, "ABC.csv", "sep=,", "title", "Account #,NDC", "0100461951,00310304000"
+        )
+        assert load_file(path, self._spec()).rows[0].line_number == 4
+
+    def test_a_missing_marker_fails_loudly(self, tmp_path):
+        """Falling back to "probably row 0" is how a report title gets read as a
+        header and every column binds to nothing."""
+        path = _write(tmp_path, "ABC.csv", "Nothing,Like,It", "1,2,3")
+        with pytest.raises(HeaderNotFoundError, match="not found"):
+            load_file(path, self._spec())
+
+    def test_marker_matching_ignores_case_and_punctuation(self, tmp_path):
+        path = _write(tmp_path, "ABC.csv", "title", "ACCOUNT#,NDC", "0100461951,00310304000")
+        assert load_file(path, self._spec()).ok
+
+    def test_a_spec_cannot_declare_both_mechanisms(self):
+        """Two answers to "where is the header" is one too many."""
+        with pytest.raises(ValueError, match="not both"):
+            ReadSpec(header_marker="Account #", preamble_lines=2)

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from sbh_data_bank.registry.binding import Binding
+from sbh_data_bank.registry.headers import normalize_header
 from sbh_data_bank.registry.spec import FieldType, OnError, PiiClass, ReadSpec
 from sbh_data_bank.transforms.ndc import NdcDirectory, normalize_ndc
 from sbh_data_bank.transforms.values import (
@@ -47,6 +48,7 @@ from sbh_data_bank.transforms.values import (
 
 __all__ = [
     "CellError",
+    "HeaderNotFoundError",
     "QuarantinedRow",
     "RawRow",
     "ReadCounters",
@@ -120,15 +122,52 @@ def _trim_trailing_empty(cells: list[Any]) -> list[str]:
     return out
 
 
+class HeaderNotFoundError(ValueError):
+    """The declared header marker was not found near the top of the file.
+
+    Loud on purpose. The alternative - falling back to "probably row 0" - is
+    how a report title gets read as a header and every column binds to nothing.
+    """
+
+
+def _matches_marker(cells: list[Any], marker: str) -> bool:
+    wanted = normalize_header(marker)
+    return any(normalize_header(c) == wanted for c in cells)
+
+
 def _csv_header_and_rows(
     source: Path | BinaryIO, read: ReadSpec
 ) -> tuple[list[str], Iterator[RawRow]]:
     handle = _open_text(source, read)
-    for _ in range(read.preamble_lines):
-        handle.readline()
     reader = csv.reader(handle, delimiter=read.delimiter)
-    header = _trim_trailing_empty(next(reader, []))
-    header_line = read.preamble_lines + 1
+
+    if read.header_marker is not None:
+        # Scan for the row that carries the marker. ABC delivers the same 26
+        # columns with one title row above the header as a workbook and two
+        # lines - a sep= declaration plus a title - as a CSV, so a fixed count
+        # cannot serve both and the marker has to locate the header instead.
+        header: list[str] = []
+        skipped = 0
+        for candidate in reader:
+            skipped += 1
+            if _matches_marker(candidate, read.header_marker):
+                header = _trim_trailing_empty(candidate)
+                break
+            if skipped >= read.max_preamble_scan:
+                raise HeaderNotFoundError(
+                    f"header marker {read.header_marker!r} not found in the first "
+                    f"{read.max_preamble_scan} rows"
+                )
+        else:
+            raise HeaderNotFoundError(
+                f"header marker {read.header_marker!r} not found - file ended first"
+            )
+        header_line = skipped
+    else:
+        for _ in range(read.preamble_lines):
+            handle.readline()
+        header = _trim_trailing_empty(next(reader, []))
+        header_line = read.preamble_lines + 1
 
     def rows() -> Iterator[RawRow]:
         try:
@@ -149,10 +188,33 @@ def _excel_header_and_rows(
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     worksheet = workbook[sheet]
     stream = worksheet.iter_rows(values_only=True)
-    for _ in range(read.preamble_lines):
-        next(stream, None)
-    header = _trim_trailing_empty(list(next(stream, ())))
-    header_line = read.preamble_lines + 1
+
+    if read.header_marker is not None:
+        header = []
+        skipped = 0
+        for candidate in stream:
+            skipped += 1
+            cells = list(candidate)
+            if _matches_marker(cells, read.header_marker):
+                header = _trim_trailing_empty(cells)
+                break
+            if skipped >= read.max_preamble_scan:
+                workbook.close()
+                raise HeaderNotFoundError(
+                    f"header marker {read.header_marker!r} not found in the first "
+                    f"{read.max_preamble_scan} rows of sheet {sheet!r}"
+                )
+        else:
+            workbook.close()
+            raise HeaderNotFoundError(
+                f"header marker {read.header_marker!r} not found in sheet {sheet!r}"
+            )
+        header_line = skipped
+    else:
+        for _ in range(read.preamble_lines):
+            next(stream, None)
+        header = _trim_trailing_empty(list(next(stream, ())))
+        header_line = read.preamble_lines + 1
 
     def rows() -> Iterator[RawRow]:
         try:

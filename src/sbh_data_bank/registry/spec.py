@@ -297,8 +297,32 @@ class ReadSpec(BaseModel):
     """
 
     preamble_lines: int = Field(default=0, ge=0, le=100)
-    """Lines to discard before the header. The ABC CSV opens with ``sep=,`` and
-    a report title; Athena exports carry a title row."""
+    """Fixed number of lines to discard before the header.
+
+    Use when the count is genuinely stable. Athena exports carry exactly one
+    title row in every delivery, so a fixed count is honest there.
+    """
+
+    header_marker: str | None = None
+    """A column name that identifies the header row, scanned for from the top.
+
+    Preferred over ``preamble_lines`` wherever the preamble is not stable, and
+    it is not stable more often than one would like. ABC delivers the same 26
+    columns as a workbook with one title row above the header, and as a CSV
+    with a ``sep=,`` declaration *and* a title - two lines. A single fixed count
+    cannot serve both, and two variants cannot be told apart because their
+    headers are identical, so the count has to stop being the thing that
+    locates the header.
+
+    This stays declarative. It says "the header is the first row containing a
+    column called X", which is a statement about the file's structure that a
+    human wrote down - not a sniffer guessing where the data starts. If the
+    marker is absent from the first ``max_preamble_scan`` rows the read fails
+    loudly rather than picking a row.
+    """
+
+    max_preamble_scan: int = Field(default=30, ge=1, le=200)
+    """How far to look for ``header_marker`` before giving up."""
 
     encoding: str = "utf-8-sig"
     delimiter: str = ","
@@ -307,6 +331,15 @@ class ReadSpec(BaseModel):
 
     footer: FooterPolicy = FooterPolicy.NONE
     """Whether the last row is a totals line, and its figures a control check."""
+
+    @model_validator(mode="after")
+    def _check_header_location(self) -> Self:
+        if self.header_marker is not None and self.preamble_lines:
+            raise ValueError(
+                "give either preamble_lines or header_marker, not both - two answers to "
+                "'where is the header' is one too many"
+            )
+        return self
 
     @model_validator(mode="after")
     def _check_sheet_selection(self) -> Self:
