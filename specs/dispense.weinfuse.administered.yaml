@@ -1,0 +1,325 @@
+# WeInfuse administered drugs - clinic administration events.
+#
+# Two variants, because WeInfuse moved to a new reporting module in the June
+# 2026 drop. The export went from 33 CSV columns to 35 XLSX ones and renamed 14
+# of them: Inner NDC to Inner NDC Code, Billing Code (HCPCS) to HCPCS, Date to
+# Appointment Date, Unit Price to Price, and so on. Both variants land on one
+# set of canonical names, so nothing downstream learns which module wrote a row.
+#
+# NATURAL KEY. (Order ID, Inventory Item ID) is unique across all 51,178 rows of
+# the 2023-2026 extract. The earlier validation pack recorded this source as
+# "candidate key unknown - best returned 25,738 duplicates out of 51,178"; it
+# had been testing Weinfuse UID plus Appointment ID. Inventory Item ID is the
+# discriminator, because one appointment administers several inventory items.
+#
+# The legacy Administered export and the BuyBill export are nearly identical -
+# 33 columns each, differing only in Location/Type versus Location Name/Vendor.
+# The detectors below use exactly those columns to keep them apart, since
+# reading one as the other would mix medical-benefit administrations with
+# buy-and-bill ones.
+
+key: dispense.weinfuse.administered
+name: WeInfuse - Administered Drugs
+vendor: WeInfuse
+group: "2 Dispenses"
+catalog_names: ['Weinfuses - Administered Drug']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'weinfuse.*administereddrugs(?!.*buybill)'
+  - 'weinfuse_administered'
+
+natural_key: [order_id, inventory_item_id]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: reporting_module_2026
+    description: >
+      35-column workbook from the reporting module
+      introduced in the June 2026 drop. Adds Inventory Type and Date of
+      Birth Date; renames 14 columns.
+    detect:
+      require_all: ['Inventory Type', 'Inner NDC Code', 'Billing Units']
+    columns:
+      # unnamed export artifact at this position, not data
+      - target: group_id
+        sources: ['Group ID']
+        type: text
+      - target: group_name
+        sources: ['Group Name']
+        type: text
+      - target: location_id
+        sources: ['Location ID']
+        type: text
+        description: >
+          The site key. The 340B verification plan requires this to
+          attribute a dispense to a clinic, because ABC account 0100583154 is
+          shared across all three clinics and Cardinal 2057234776 across two -
+          account number alone cannot separate them.
+      - target: location
+        sources: ['Location Name', 'Location']
+        type: text
+      - target: order_series_id
+        sources: ['Order Series ID']
+        type: text
+      - target: order_id
+        sources: ['Order ID']
+        type: text
+        required: true
+      - target: inventory_type
+        sources: ['Inventory Type']
+        type: text
+        description: >
+          Called Type in the legacy export and Inventory Type in the new
+          module, and it carried the vendor name (Henry Schein, Curascript) in the
+          legacy form. Worth checking before it is used as a channel signal.
+      - target: appointment_id
+        sources: ['Appointment ID']
+        type: text
+      - target: appointment_status
+        sources: ['Appointment Status']
+        type: text
+      - target: patient_identifier
+        sources: ['Patient Identifier']
+        type: text
+        pii: join_key
+      - target: weinfuse_uid
+        sources: ['WeInfuse UID', 'Weinfuse UID']
+        type: text
+        pii: join_key
+      - target: patient_first_name
+        sources: ['Patient First Name']
+        type: text
+        pii: direct
+      - target: patient_last_name
+        sources: ['Patient Last Name']
+        type: text
+        pii: direct
+      - target: provider_first_name
+        sources: ['Provider First Name']
+        type: text
+      - target: provider_last_name
+        sources: ['Provider Last Name']
+        type: text
+      - target: provider_npi
+        sources: ['Provider NPI']
+        type: text
+      - target: inventory_item_id
+        sources: ['Inventory Item ID']
+        type: text
+        required: true
+        description: >
+          The discriminator that makes a row unique. One appointment
+          administers several inventory items, which is why keys built on
+          appointment alone showed 25,738 duplicates in 51,178 rows.
+      - target: inner_ndc
+        sources: ['Inner NDC Code', 'Inner NDC']
+        type: ndc
+      - target: outer_ndc
+        sources: ['Outer NDC Code', 'Outer NDC']
+        type: ndc
+        description: >
+          The package NDC, where inner_ndc is the unit. Both captured; the
+          pair is an input to package-to-billing-unit conversion.
+      - target: label_name
+        sources: ['Label Name']
+        type: text
+      - target: strength
+        sources: ['Strength']
+        type: decimal
+      - target: uom
+        sources: ['UOM']
+        type: text
+      - target: lot
+        sources: ['Lot']
+        type: text
+      - target: expiration
+        sources: ['Expiration Date', 'Expiration']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: primary_insurance_plan
+        sources: ['Primary Insurance', 'Primary Insurance Plan']
+        type: text
+      - target: secondary_insurance_plan
+        sources: ['Secondary Insurance', 'Secondary Insurance Plan']
+        type: text
+      - target: tertiary_insurance_plan
+        sources: ['Tertiary Insurance', 'Tertiary Insurance Plan']
+        type: text
+      - target: billing_code_hcpcs
+        sources: ['HCPCS', 'Billing Code (HCPCS)']
+        type: text
+      - target: billing_units
+        sources: ['Billing Units']
+        type: decimal
+        control_total: true
+        description: >
+          HCPCS billing units, NOT packages. Wholesalers ship packages, so
+          no comparison between the two is valid without multiplying purchases by
+          BILLUNITSPKG from the ASP crosswalk. That conversion is reconciliation
+          work; this is the figure it starts from.
+      - target: administration_date
+        sources: ['Appointment Date', 'Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: administration_time
+        sources: ['Appointment Time', 'Time']
+        type: text
+      - target: created_at
+        sources: ['Created Date', 'Created At']
+        type: text
+      - target: date_of_birth
+        sources: ['Date of Birth Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: unit_price
+        sources: ['Price', 'Unit Price']
+        type: currency
+        description: >
+          A rate - deliberately not a control total.
+  - name: legacy_export
+    description: >
+      33-column CSV export used through the March 2026
+      drop. Distinguished from BuyBill by carrying Type and Location
+      where BuyBill carries Vendor and Location Name.
+    detect:
+      require_all: ['Type', 'Inner NDC', 'Billing Units']
+      require_none: ['Inventory Type', 'Vendor']
+    columns:
+      - target: group_id
+        sources: ['Group ID']
+        type: text
+      - target: group_name
+        sources: ['Group Name']
+        type: text
+      - target: location_id
+        sources: ['Location ID']
+        type: text
+        description: >
+          The site key. The 340B verification plan requires this to
+          attribute a dispense to a clinic, because ABC account 0100583154 is
+          shared across all three clinics and Cardinal 2057234776 across two -
+          account number alone cannot separate them.
+      - target: location
+        sources: ['Location', 'Location Name']
+        type: text
+      - target: order_series_id
+        sources: ['Order Series ID']
+        type: text
+      - target: order_id
+        sources: ['Order ID']
+        type: text
+        required: true
+      - target: inventory_type
+        sources: ['Type']
+        type: text
+        description: >
+          Called Type in the legacy export and Inventory Type in the new
+          module, and it carried the vendor name (Henry Schein, Curascript) in the
+          legacy form. Worth checking before it is used as a channel signal.
+      - target: appointment_id
+        sources: ['Appointment ID']
+        type: text
+      - target: appointment_status
+        sources: ['Appointment Status']
+        type: text
+      - target: weinfuse_uid
+        sources: ['Weinfuse UID', 'WeInfuse UID']
+        type: text
+        pii: join_key
+      - target: patient_identifier
+        sources: ['Patient Identifier']
+        type: text
+        pii: join_key
+      - target: patient_first_name
+        sources: ['Patient First Name']
+        type: text
+        pii: direct
+      - target: patient_last_name
+        sources: ['Patient Last Name']
+        type: text
+        pii: direct
+      - target: provider_first_name
+        sources: ['Provider First Name']
+        type: text
+      - target: provider_last_name
+        sources: ['Provider Last Name']
+        type: text
+      - target: provider_npi
+        sources: ['Provider NPI']
+        type: text
+      - target: inventory_item_id
+        sources: ['Inventory Item ID']
+        type: text
+        required: true
+        description: >
+          The discriminator that makes a row unique. One appointment
+          administers several inventory items, which is why keys built on
+          appointment alone showed 25,738 duplicates in 51,178 rows.
+      - target: inner_ndc
+        sources: ['Inner NDC', 'Inner NDC Code']
+        type: ndc
+      - target: outer_ndc
+        sources: ['Outer NDC', 'Outer NDC Code']
+        type: ndc
+        description: >
+          The package NDC, where inner_ndc is the unit. Both captured; the
+          pair is an input to package-to-billing-unit conversion.
+      - target: label_name
+        sources: ['Label Name']
+        type: text
+      - target: strength
+        sources: ['Strength']
+        type: decimal
+      - target: uom
+        sources: ['UOM']
+        type: text
+      - target: lot
+        sources: ['Lot']
+        type: text
+      - target: expiration
+        sources: ['Expiration', 'Expiration Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: primary_insurance_plan
+        sources: ['Primary Insurance Plan', 'Primary Insurance']
+        type: text
+      - target: secondary_insurance_plan
+        sources: ['Secondary Insurance Plan', 'Secondary Insurance']
+        type: text
+      - target: tertiary_insurance_plan
+        sources: ['Tertiary Insurance Plan', 'Tertiary Insurance']
+        type: text
+      - target: unit_price
+        sources: ['Unit Price', 'Price']
+        type: currency
+        description: >
+          A rate - deliberately not a control total.
+      - target: billing_code_hcpcs
+        sources: ['Billing Code (HCPCS)', 'HCPCS']
+        type: text
+      - target: billing_units
+        sources: ['Billing Units']
+        type: decimal
+        control_total: true
+        description: >
+          HCPCS billing units, NOT packages. Wholesalers ship packages, so
+          no comparison between the two is valid without multiplying purchases by
+          BILLUNITSPKG from the ASP crosswalk. That conversion is reconciliation
+          work; this is the figure it starts from.
+      - target: administration_date
+        sources: ['Date', 'Appointment Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: administration_time
+        sources: ['Time', 'Appointment Time']
+        type: text
+      - target: created_at
+        sources: ['Created At', 'Created Date']
+        type: text

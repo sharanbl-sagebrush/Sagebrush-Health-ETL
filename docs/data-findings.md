@@ -232,6 +232,62 @@ the data that has to be checked against the data.
 
 ---
 
+## 10. Three "unknown" natural keys, resolved
+
+**Status: closed in the specs.**
+
+The earlier validation pack listed five sources whose business key it could not
+find. Three of them are WeInfuse, and all three are `(Order ID, Inventory Item
+ID)` or a subset:
+
+| Source | Pack's finding | Actual key | Verified against |
+|---|---|---|---|
+| WeInfuse Administered | "best returned 25,738 duplicates of 51,178" | `(order_id, inventory_item_id)` | 51,178 rows, unique |
+| WeInfuse BuyBill | "2 candidates, both 22,173 duplicates of 45,013" | `(order_id, inventory_item_id)` | 45,013 rows, unique |
+| WeInfuse Patients | declared `UQ_weinfuse_patient` | `patient_identifier` | 1,918 rows, unique |
+
+The pack had been testing `Weinfuse UID + Appointment ID`. **`Inventory Item ID`
+is the discriminator** — one appointment administers several inventory items, so
+any key without it collides by construction. `(Appointment ID, Inventory Item
+ID)` is equally unique; `Order ID` is preferred as the more granular of the two.
+
+Still open from that list: Allscripts eRx and Athena Encounters/Prescriptions.
+
+## 11. WeInfuse writes two temporal shapes in one file
+
+**Status: closed in the spec.**
+
+The Patients export carries plain ISO dates for anything a human entered
+(`Date of Birth`, `Primary Insurance Effective Date` — `1960-02-22`) and UTC
+timestamps for anything the system stamped (`Last Updated`, `Primary Insurance
+Entered At` — `2025-02-14 17:13:35 UTC`).
+
+Declaring the wrong one quarantined all 1,918 rows on the first run of the spec.
+That is the intended behaviour: a declared format that no longer matches must
+stop the load rather than be reinterpreted. Under the previous implementation,
+which passed no format at all, `pandas` would have parsed both and nobody would
+have known which interpretation it chose.
+
+## 12. The new WeInfuse module drops Location ID from the patient report
+
+**Status: open — worth raising with WeInfuse.**
+
+The Patients report went from 48 columns to 23 in the new reporting module.
+Lost: `Weinfuse UID`, separate first and last name, `Sex`, `Ethnicity`, `Race`,
+`Preferred Language`, all insurance detail beyond a plan name, `Group ID` — and
+`Location ID`.
+
+`Location ID` is the site key. The 340B verification plan depends on it to
+attribute activity to a clinic, precisely because shared wholesaler accounts
+cannot: ABC `0100583154` serves all three clinics and Cardinal `2057234776`
+serves two. The new patient report carries only a location *name*.
+
+The administered-drugs export still carries `Location ID`, so dispense-level
+attribution survives. But if the patient report is ever the only source of a
+patient's site, that link degrades from an identifier to a name match.
+
+---
+
 ## Open questions
 
 1. **When did `Class` → `Class_New` take effect?** 28 of 121 accounts were

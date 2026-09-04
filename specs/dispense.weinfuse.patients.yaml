@@ -1,0 +1,322 @@
+# WeInfuse patient master - a dimension, not a transaction feed.
+#
+# The most PHI-dense of the WeInfuse sources: name, date of birth, email, three
+# telephone numbers, postal address, emergency contact and three insurance
+# member IDs. Direct identifiers are classified so they land encrypted; the
+# WeInfuse UID and Patient Identifier stay in clear as join keys.
+#
+# The new reporting module cut this report almost in half - 48 columns to 23.
+# Lost: Weinfuse UID, separate first and last name, Sex, Ethnicity, Race,
+# Preferred Language, all insurance detail beyond a plan name, and both Group ID
+# and Location ID.
+#
+# LOCATION ID IS THE LOSS THAT MATTERS. It is the site key the 340B verification
+# plan relies on to attribute activity to a clinic, because shared wholesaler
+# accounts cannot do it. The new report carries only a location *name*. The
+# administered-drugs export still carries Location ID, so dispense attribution
+# survives - but if this report is ever the only source of a patient's site,
+# that link is now a name match rather than an identifier.
+#
+# Natural key: Patient Identifier is unique across all 1,918 rows, as is
+# Weinfuse UID. Patient Identifier is used because the new module dropped the
+# UID entirely.
+#
+# Two temporal shapes in one file, and they are not interchangeable: plain ISO
+# dates for anything a human entered (date of birth, insurance effective date)
+# and UTC timestamps for anything the system stamped (last updated, entered at).
+# Declaring the wrong one quarantined all 1,918 rows on the first run of this
+# spec - which is the intended behaviour, since a format that no longer matches
+# must stop the load rather than be silently reinterpreted.
+
+key: dispense.weinfuse.patients
+name: WeInfuse - Patients
+vendor: WeInfuse
+group: "2 Dispenses"
+catalog_names: ['Weinfuse - Patients']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'weinfuse.*patients'
+
+natural_key: [patient_identifier]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: reporting_module_2026
+    description: >
+      23-column workbook from the new reporting module.
+      Substantially reduced; notably carries no Location ID.
+    detect:
+      require_all: ['Patient ID', 'Status', 'Substatus']
+    columns:
+      # unnamed export artifact at this position, not data
+      - target: group_name
+        sources: ['Group', 'Group Name']
+        type: text
+      - target: location_name
+        sources: ['Location', 'Location Name']
+        type: text
+      - target: last_updated
+        sources: ['Created Date', 'Last Updated']
+        type: date
+        date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
+      - target: patient_name
+        sources: ['Patient Name']
+        type: text
+        pii: direct
+      - target: patient_identifier
+        sources: ['Patient ID', 'Patient Identifier']
+        type: text
+        required: true
+        pii: join_key
+      - target: date_of_birth
+        sources: ['DOB', 'Date of Birth']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+        pii: direct
+      - target: status
+        sources: ['Status']
+        type: text
+      - target: substatus
+        sources: ['Substatus']
+        type: text
+      - target: mobile_phone
+        sources: ['Mobile Phone']
+        type: text
+        pii: direct
+      - target: home_phone
+        sources: ['Home Phone']
+        type: text
+        pii: direct
+      - target: email
+        sources: ['Email']
+        type: text
+        pii: direct
+      - target: primary_insurance_plan
+        sources: ['Primary Insurance Plan']
+        type: text
+      - target: secondary_insurance_plan
+        sources: ['Secondary Insurance Plan']
+        type: text
+      - target: tertiary_insurance_plan
+        sources: ['Tertiary Insurance Plan']
+        type: text
+      - target: address_line_1
+        sources: ['Address Line 1']
+        type: text
+        pii: direct
+      - target: address_line_2
+        sources: ['Address Line 2']
+        type: text
+        pii: direct
+      - target: city
+        sources: ['City']
+        type: text
+        pii: quasi
+      - target: state
+        sources: ['State']
+        type: text
+        pii: quasi
+      - target: zip_code
+        sources: ['Zip Code']
+        type: text
+        pii: quasi
+      - target: emergency_contact_name
+        sources: ['Emergency Contact', 'Emergency Contact Name']
+        type: text
+        pii: direct
+      - target: emergency_contact_phone
+        sources: ['Emergency Contact Phone']
+        type: text
+        pii: direct
+      - target: emergency_contact_relationship
+        sources: ['Emergency Contact Relationship']
+        type: text
+  - name: legacy_export
+    description: >
+      48-column CSV with full demographics and three
+      tiers of insurance detail.
+    detect:
+      require_all: ['Patient Identifier', 'Primary Insurance Member ID']
+      require_none: ['Substatus']
+    columns:
+      - target: group_id
+        sources: ['Group ID']
+        type: text
+      - target: group_name
+        sources: ['Group Name', 'Group']
+        type: text
+      - target: location_id
+        sources: ['Location ID']
+        type: text
+      - target: location_name
+        sources: ['Location Name', 'Location']
+        type: text
+      - target: weinfuse_uid
+        sources: ['Weinfuse UID', 'WeInfuse UID']
+        type: text
+        pii: join_key
+      - target: patient_identifier
+        sources: ['Patient Identifier', 'Patient ID']
+        type: text
+        required: true
+        pii: join_key
+      - target: first_name
+        sources: ['First Name']
+        type: text
+        pii: direct
+      - target: middle_initial
+        sources: ['Middle Initial']
+        type: text
+        pii: direct
+      - target: last_name
+        sources: ['Last Name']
+        type: text
+        pii: direct
+      - target: date_of_birth
+        sources: ['Date of Birth', 'DOB']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+        pii: direct
+      - target: sex
+        sources: ['Sex']
+        type: text
+        pii: quasi
+      - target: ethnicity
+        sources: ['Ethnicity']
+        type: text
+        pii: quasi
+      - target: race
+        sources: ['Race']
+        type: text
+        pii: quasi
+      - target: preferred_language
+        sources: ['Preferred Language']
+        type: text
+        pii: quasi
+      - target: email
+        sources: ['Email']
+        type: text
+        pii: direct
+      - target: mobile_phone
+        sources: ['Mobile Phone']
+        type: text
+        pii: direct
+      - target: work_phone
+        sources: ['Work Phone']
+        type: text
+        pii: direct
+      - target: home_phone
+        sources: ['Home Phone']
+        type: text
+        pii: direct
+      - target: address_line_1
+        sources: ['Address Line 1']
+        type: text
+        pii: direct
+      - target: address_line_2
+        sources: ['Address Line 2']
+        type: text
+        pii: direct
+      - target: city
+        sources: ['City']
+        type: text
+        pii: quasi
+      - target: state
+        sources: ['State']
+        type: text
+        pii: quasi
+      - target: zip_code
+        sources: ['Zip Code']
+        type: text
+        pii: quasi
+      - target: emergency_contact_name
+        sources: ['Emergency Contact Name', 'Emergency Contact']
+        type: text
+        pii: direct
+      - target: emergency_contact_phone
+        sources: ['Emergency Contact Phone']
+        type: text
+        pii: direct
+      - target: emergency_contact_relationship
+        sources: ['Emergency Contact Relationship']
+        type: text
+      - target: last_updated
+        sources: ['Last Updated', 'Created Date']
+        type: date
+        date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
+      - target: primary_insurance_id
+        sources: ['Primary Insurance ID']
+        type: text
+      - target: primary_insurance_name
+        sources: ['Primary Insurance Name']
+        type: text
+      - target: primary_insurance_type
+        sources: ['Primary Insurance Type']
+        type: text
+      - target: primary_insurance_member_id
+        sources: ['Primary Insurance Member ID']
+        type: text
+        pii: direct
+      - target: primary_insurance_group_id
+        sources: ['Primary Insurance Group ID']
+        type: text
+      - target: primary_insurance_entered_at
+        sources: ['Primary Insurance Entered At']
+        type: date
+        date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
+      - target: primary_insurance_effective_date
+        sources: ['Primary Insurance Effective Date']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+      - target: secondary_insurance_id
+        sources: ['Secondary Insurance ID']
+        type: text
+      - target: secondary_insurance_name
+        sources: ['Secondary Insurance Name']
+        type: text
+      - target: secondary_insurance_type
+        sources: ['Secondary Insurance Type']
+        type: text
+      - target: secondary_insurance_member_id
+        sources: ['Secondary Insurance Member ID']
+        type: text
+        pii: direct
+      - target: secondary_insurance_group_id
+        sources: ['Secondary Insurance Group ID']
+        type: text
+      - target: secondary_insurance_entered_at
+        sources: ['Secondary Insurance Entered At']
+        type: date
+        date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
+      - target: secondary_insurance_effective_date
+        sources: ['Secondary Insurance Effective Date']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+      - target: tertiary_insurance_id
+        sources: ['Tertiary Insurance ID']
+        type: text
+      - target: tertiary_insurance_name
+        sources: ['Tertiary Insurance Name']
+        type: text
+      - target: tertiary_insurance_type
+        sources: ['Tertiary Insurance Type']
+        type: text
+      - target: tertiary_insurance_member_id
+        sources: ['Tertiary Insurance Member ID']
+        type: text
+        pii: direct
+      - target: tertiary_insurance_group_id
+        sources: ['Tertiary Insurance Group ID']
+        type: text
+      - target: tertiary_insurance_entered_at
+        sources: ['Tertiary Insurance Entered At']
+        type: date
+        date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
+      - target: tertiary_insurance_effective_date
+        sources: ['Tertiary Insurance Effective Date']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']

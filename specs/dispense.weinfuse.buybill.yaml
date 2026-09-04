@@ -1,0 +1,174 @@
+# WeInfuse buy-and-bill administered drugs.
+#
+# DISCONTINUED. The delivery catalogue for the June 2026 drop records this
+# source as "not in the new reporting module", and no file arrived in that drop.
+# Its 45,013 historical rows stay in the warehouse and remain reconcilable; the
+# lifecycle marking simply stops its absence being raised as a freshness alert
+# every week from now on.
+#
+# This matters more than the row count suggests: the 340B verification plan
+# scoped its entire reconciliation to dbo.weinfuse_buybill_administered. The
+# feed that work was built on has stopped, and whatever replaces it needs
+# deciding before buy-and-bill reconciliation can be brought forward.
+#
+# Natural key (Order ID, Inventory Item ID) is unique across all 45,013 rows.
+# The earlier validation pack recorded "2 candidates, both returned 22,173
+# duplicates out of 45,013".
+
+key: dispense.weinfuse.buybill
+name: WeInfuse - Buy and Bill Administered Drugs
+vendor: WeInfuse
+group: "2 Dispenses"
+catalog_names: ['Weinfuses - BuyBill Administered Drug']
+lifecycle: discontinued
+expected_cadence_days: null
+
+filename_patterns:
+  - 'weinfuse.*buybill'
+
+natural_key: [order_id, inventory_item_id]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: legacy_export
+    description: >
+      33 columns. Distinguished from the legacy
+      Administered export by carrying Vendor and Location Name where
+      that one carries Type and Location.
+    detect:
+      require_all: ['Vendor', 'Inner NDC', 'Billing Units']
+      require_none: ['Inventory Type', 'Type']
+    columns:
+      - target: group_id
+        sources: ['Group ID']
+        type: text
+      - target: group_name
+        sources: ['Group Name']
+        type: text
+      - target: location_id
+        sources: ['Location ID']
+        type: text
+        description: >
+          The site key. The 340B verification plan requires this to
+          attribute a dispense to a clinic, because ABC account 0100583154 is
+          shared across all three clinics and Cardinal 2057234776 across two -
+          account number alone cannot separate them.
+      - target: location_name
+        sources: ['Location Name']
+        type: text
+      - target: order_series_id
+        sources: ['Order Series ID']
+        type: text
+      - target: order_id
+        sources: ['Order ID']
+        type: text
+        required: true
+      - target: appointment_id
+        sources: ['Appointment ID']
+        type: text
+      - target: appointment_status
+        sources: ['Appointment Status']
+        type: text
+      - target: weinfuse_uid
+        sources: ['Weinfuse UID', 'WeInfuse UID']
+        type: text
+        pii: join_key
+      - target: patient_identifier
+        sources: ['Patient Identifier']
+        type: text
+        pii: join_key
+      - target: patient_first_name
+        sources: ['Patient First Name']
+        type: text
+        pii: direct
+      - target: patient_last_name
+        sources: ['Patient Last Name']
+        type: text
+        pii: direct
+      - target: provider_first_name
+        sources: ['Provider First Name']
+        type: text
+      - target: provider_last_name
+        sources: ['Provider Last Name']
+        type: text
+      - target: provider_npi
+        sources: ['Provider NPI']
+        type: text
+      - target: vendor
+        sources: ['Vendor']
+        type: text
+        description: >
+          Supplier of the administered item - Henry Schein, Curascript. This
+          is the only place CuraScript appears in any ingested feed; its purchase data
+          is not obtainable ("no access on reporting tool"), which is why the 340B
+          verification plan treats CSD-routed replenishment as a known gap.
+      - target: inventory_item_id
+        sources: ['Inventory Item ID']
+        type: text
+        required: true
+        description: >
+          The discriminator that makes a row unique. One appointment
+          administers several inventory items, which is why keys built on
+          appointment alone showed 25,738 duplicates in 51,178 rows.
+      - target: inner_ndc
+        sources: ['Inner NDC', 'Inner NDC Code']
+        type: ndc
+      - target: outer_ndc
+        sources: ['Outer NDC', 'Outer NDC Code']
+        type: ndc
+        description: >
+          The package NDC, where inner_ndc is the unit. Both captured; the
+          pair is an input to package-to-billing-unit conversion.
+      - target: label_name
+        sources: ['Label Name']
+        type: text
+      - target: strength
+        sources: ['Strength']
+        type: decimal
+      - target: uom
+        sources: ['UOM']
+        type: text
+      - target: lot
+        sources: ['Lot']
+        type: text
+      - target: expiration
+        sources: ['Expiration', 'Expiration Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: primary_insurance_plan
+        sources: ['Primary Insurance Plan', 'Primary Insurance']
+        type: text
+      - target: secondary_insurance_plan
+        sources: ['Secondary Insurance Plan', 'Secondary Insurance']
+        type: text
+      - target: tertiary_insurance_plan
+        sources: ['Tertiary Insurance Plan', 'Tertiary Insurance']
+        type: text
+      - target: unit_price
+        sources: ['Unit Price', 'Price']
+        type: currency
+        description: >
+          A rate - deliberately not a control total.
+      - target: billing_code_hcpcs
+        sources: ['Billing Code (HCPCS)', 'HCPCS']
+        type: text
+      - target: billing_units
+        sources: ['Billing Units']
+        type: decimal
+        control_total: true
+        description: >
+          HCPCS billing units, NOT packages. Wholesalers ship packages, so
+          no comparison between the two is valid without multiplying purchases by
+          BILLUNITSPKG from the ASP crosswalk. That conversion is reconciliation
+          work; this is the figure it starts from.
+      - target: date
+        sources: ['Date']
+        type: text
+      - target: time
+        sources: ['Time']
+        type: text
+      - target: created_at
+        sources: ['Created At', 'Created Date']
+        type: text
