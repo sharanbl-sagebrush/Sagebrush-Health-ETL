@@ -71,12 +71,21 @@ MONTHLY_PAYMENTS = [
 
 class TestAllSpecsAreSound:
     def test_every_spec_loads_and_keys_are_unique(self, registry):
-        assert len(registry) == 3
-        assert [s.key for s in registry] == [
+        """Deliberately not a fixed list. Asserting the exact set of shipped
+        specs means every new source breaks an unrelated test, which trains
+        people to update the expectation without reading it."""
+        keys = [s.key for s in registry]
+        assert keys, "no specs loaded"
+        assert len(keys) == len(set(keys))
+        assert keys == sorted(keys)
+
+    def test_the_sources_this_module_asserts_on_are_present(self, registry):
+        for key in (
             "finance.monthly_payments",
             "reference.wholesaler_accounts",
             "wholesaler.cardinal.invoice",
-        ]
+        ):
+            assert registry.get(key) is not None, key
 
     def test_no_spec_leaves_a_date_column_to_inference(self, registry):
         for spec in registry:
@@ -90,6 +99,35 @@ class TestAllSpecsAreSound:
             for variant in spec.variants:
                 targets = {c.target for c in variant.columns}
                 assert set(spec.natural_key) <= targets, spec.key
+
+    def test_control_totals_are_only_on_numeric_columns(self, registry):
+        """Summing text is meaningless, and a meaningless control total is worse
+        than none because somebody will try to reconcile against it."""
+        numeric = {FieldType.CURRENCY, FieldType.DECIMAL, FieldType.INTEGER}
+        for spec in registry:
+            for variant in spec.variants:
+                for column in variant.columns:
+                    if column.control_total:
+                        assert column.type in numeric, f"{spec.key}.{column.target}"
+
+    def test_a_prohibited_column_is_never_part_of_a_key(self, registry):
+        """A value that never lands cannot identify a row."""
+        for spec in registry:
+            for variant in spec.variants:
+                for column in variant.columns:
+                    if column.pii is PiiClass.PROHIBITED:
+                        assert column.target not in spec.natural_key, spec.key
+
+    def test_a_prohibited_column_is_never_required(self, registry):
+        for spec in registry:
+            for variant in spec.variants:
+                for column in variant.columns:
+                    if column.pii is PiiClass.PROHIBITED:
+                        assert not column.required, f"{spec.key}.{column.target}"
+
+    def test_every_spec_has_at_least_one_loading_variant(self, registry):
+        for spec in registry:
+            assert any(v.loads for v in spec.variants), spec.key
 
     def test_no_spec_has_an_empty_natural_key(self, registry):
         """An empty key means append-only with no dedup. Legitimate for some
