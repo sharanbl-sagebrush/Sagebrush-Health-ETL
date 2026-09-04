@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "recon340"
+name = "SBH-DATA-BANK"
 version = "0.1.0"
 description = "340B reconciliation platform - configuration-driven ingestion and reconciliation for covered entities"
 requires-python = ">=3.11"

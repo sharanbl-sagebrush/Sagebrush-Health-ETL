@@ -1,14 +1,16 @@
-# recon340
+# SBH_DATA_BANK
 
-A 340B reconciliation platform for covered entities. Configuration-driven ingestion,
-inventory and financial reconciliation, built so that every number it produces can be
-traced to the rows and rule versions that made it.
+Sagebrush Health's pharmacy data bank. Configuration-driven ingestion of vendor
+extracts into an append-only, entity-scoped warehouse, built so that every row can be
+traced to the file, batch and rule version that produced it.
 
-Working name. See `docs/` for the architecture and build plan.
+Reconciliation comes later and is deliberately out of scope until the ETL is signed off
+against the definition of done in `docs/architecture-and-plan.md`.
 
 ## Status
 
 Phase A, in progress. Foundation modules only; nothing is wired to a database yet.
+Scope is the ETL through to canonical, entity-resolved events. Not reconciliation.
 
 | Module | State |
 |---|---|
@@ -19,7 +21,7 @@ Phase A, in progress. Foundation modules only; nothing is wired to a database ye
 ## Layout
 
 ```
-src/recon340/
+src/sbh_data_bank/
   core/         tenant context, effective dating, run identity, clock
   transforms/   the named transform vocabulary used by source specs
   registry/     source specs - how a vendor file becomes rows

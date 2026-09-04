@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from recon340.transforms.ndc import ResolutionMethod, SetNdcDirectory, normalize_ndc
+from sbh_data_bank.transforms.ndc import ResolutionMethod, SetNdcDirectory, normalize_ndc
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "ndc_ground_truth_mckesson.json"
 

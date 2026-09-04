@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from recon340.transforms.ndc import (
+from sbh_data_bank.transforms.ndc import (
     NdcResolution,
     ResolutionMethod,
     SetNdcDirectory,

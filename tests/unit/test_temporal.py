@@ -12,7 +12,7 @@ from datetime import date
 
 import pytest
 
-from recon340.core.temporal import (
+from sbh_data_bank.core.temporal import (
     DateRange,
     OverlappingVersionsError,
     TemporalSet,

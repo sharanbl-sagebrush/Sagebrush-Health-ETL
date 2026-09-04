@@ -88,17 +88,16 @@ customer rather than a project.
 
 ## Module architecture
 
-Python namespace package. Working name `recon340` — cheap to change now, painful later, so
-settle it before Phase A starts.
+Python namespace package `sbh_data_bank`; database `SBH_DATA_BANK`.
 
 ### Tier 0 — Foundation
 
-**`recon340.core`** — Tenant context as an explicit, required parameter rather than an ambient
+**`sbh_data_bank.core`** — Tenant context as an explicit, required parameter rather than an ambient
 global, so a query that forgets tenant scoping does not compile. Effective-dated config
 resolution (`resolve(key, tenant, as_of)`). Run and batch identity. Audit trail. Injected clock
 for deterministic replay. Typed errors.
 
-**`recon340.store`** — Azure SQL access, forward-only migrations, and the ledger primitives:
+**`sbh_data_bank.store`** — Azure SQL access, forward-only migrations, and the ledger primitives:
 batch registration, row lineage, temporal views. Keep the connection-pool design from
 `src/db/connection.py`; it is the best-engineered file in the recovered source (correct pyodbc
 thread handling, liveness check, rollback-on-return). Extend it with tenant routing and
@@ -124,7 +123,7 @@ delete-by-date-range class of bug cannot occur.
 
 ### Tier 1 — Configuration and master data
 
-**`recon340.registry`** — The source spec model. This is the centrepiece of configurability and
+**`sbh_data_bank.registry`** — The source spec model. This is the centrepiece of configurability and
 must cover every axis of variation found across the 18 existing parsers:
 
 - *Identity*: filename pattern plus a header-content fingerprint, so a renamed file still
@@ -157,7 +156,7 @@ where `str(row.get(x, "") or "").strip()` stores the literal string `"nan"` in t
 wholesaler parsers (NaN is truthy, so the `or ""` never fires); and `safe_date`'s `fmt`
 parameter, which is declared but never passed, leaving every date to pandas' inference.
 
-**`recon340.masterdata`** — Tenant, covered entity, site, wholesaler and TPA accounts, and
+**`sbh_data_bank.masterdata`** — Tenant, covered entity, site, wholesaler and TPA accounts, and
 crucially **effective-dated program enrollment**. Also the NDC dimension, versioned HCPCS/ASP
 crosswalk snapshots, drug scope (Part B vs Part D), chart of accounts, and the period calendar.
 
@@ -167,7 +166,7 @@ what keeps a second customer cheap.
 
 ### Tier 2 — Ingestion
 
-**`recon340.ingest`** — Acquire (blob, SFTP, upload) → identify → read → type → validate →
+**`sbh_data_bank.ingest`** — Acquire (blob, SFTP, upload) → identify → read → type → validate →
 quarantine → commit as one batch. Keep three ideas from `staging_pipeline.py`, which are the
 best parts of the recovered source: the single-transaction raw + quarantine + promote commit,
 the quarantine threshold abort, and SHA-256 file dedup keyed on `(name, hash, status)`. Drop
@@ -180,7 +179,7 @@ therefore reported `promoted=0` on runs that were working.
 
 ### Tier 3 — Canonicalization
 
-**`recon340.canonical`** — The seam that makes the product multi-entity. Vendor records become
+**`sbh_data_bank.canonical`** — The seam that makes the product multi-entity. Vendor records become
 `PurchaseLine`, `AdministrationEvent`, `ClaimEvent`, `RemittanceLine`, `GLEntry`,
 `PatientEncounter`. Reconciliation is written once against canonical types, so a new wholesaler
 is a new spec and zero reconciliation changes. Three hard problems live here:
@@ -209,14 +208,14 @@ must apply and may not.
 
 ### Tier 4 — Quality
 
-**`recon340.expectations`** — The DB_Validation_Pack's 138 checks become declarative rules that
+**`sbh_data_bank.expectations`** — The DB_Validation_Pack's 138 checks become declarative rules that
 run on every batch, with results stored as first-class data. Completeness, uniqueness, validity,
 referential integrity and reconciliation, per source and per canonical type. Validation stops
 being a consulting engagement and becomes a property of the pipeline.
 
 ### Tier 5 — Reconciliation
 
-**`recon340.match`** — One generic, declarative match engine serving both 340B and accounting
+**`sbh_data_bank.match`** — One generic, declarative match engine serving both 340B and accounting
 reconciliation. A match spec declares left dataset and filter, right dataset and filter, grain
 (entity, site, NDC, period), an **ordered list of passes** (exact key → tolerance → windowed
 fuzzy), the measure being compared with its unit and conversion, and the outcome taxonomy with
@@ -227,31 +226,31 @@ Keep the plugin-registry pattern from `engine.py` — it is genuinely well facto
 `cogs_method` declares FIFO but only average-cost SQL exists, and `include_buybill_revenue`
 emits a SQL comment instructing an operator to hand-edit a view.
 
-**`recon340.inventory`** — 340B inventory, accumulator and replenishment reconciliation, grained
+**`sbh_data_bank.inventory`** — 340B inventory, accumulator and replenishment reconciliation, grained
 by entity and site rather than pooled globally. Resolves the double-subtraction risk in
 `purchased − dispensed − claimed` by classifying each canonical event to a channel explicitly,
 so a physical dispense cannot be counted on both sides.
 
-**`recon340.financial`** — The four accounting reconciliations from the roadmap (wholesaler
+**`sbh_data_bank.financial`** — The four accounting reconciliations from the roadmap (wholesaler
 invoices vs AP/GL, TPA remittances vs bank/GL, inventory valuation and COGS to GL, 340B savings
 and true-up), the period model with immutable closed periods, and the close pack. GL, AP and
 bank exports are ordinary source specs with drift detection.
 
 ### Tier 6 — Operations and delivery
 
-**`recon340.cases`** — Unified exception management for both 340B and accounting exceptions:
+**`sbh_data_bank.cases`** — Unified exception management for both 340B and accounting exceptions:
 reason codes, assignment, resolution, SLA, full audit. Replaces the discrepancy log whose dedup
 guard prevents re-raising.
 
-**`recon340.orchestrate`** — Run graph with dependencies, retries, freshness and missed-run
+**`sbh_data_bank.orchestrate`** — Run graph with dependencies, retries, freshness and missed-run
 detection. Azure Container Apps jobs rather than a WebJob plus a Flask keep-alive; the
 unauthenticated `POST /run` endpoint does not carry over.
 
-**`recon340.api`** (FastAPI) and **`webapp`** (React) — Entra ID SSO, roles from security
+**`sbh_data_bank.api`** (FastAPI) and **`webapp`** (React) — Entra ID SSO, roles from security
 groups. Screens per the roadmap, plus two that are specific to this design: the simulation diff
 view and the source-onboarding wizard.
 
-**`recon340.observe`** — Metrics, alerts, source freshness.
+**`sbh_data_bank.observe`** — Metrics, alerts, source freshness.
 
 ## Multi-tenancy
 
@@ -261,40 +260,124 @@ Per-tenant Key Vault secrets and blob containers. Config rows tenant-scoped with
 inheritance. Secrets never in files — the recovered `settings.yaml` carries a plaintext SQL
 admin password, which is the posture being replaced.
 
+## Scope boundary: what counts as "the ETL"
+
+The instruction is to finish the ETL, have it be production ready, and never come back to
+it. That is achievable, but only if three things that sound like reconciliation are built
+inside the ETL rather than after it. Each one, deferred, forces a return trip that
+reprocesses every row already loaded.
+
+**1. Entity and site resolution belongs to the ETL.** This is the defect that sank the
+previous system: `vw_inventory_reconciliation` pools every covered entity and clinic into
+one global `(ndc, week)` bucket because nothing upstream ever resolved a row to a site.
+Resolution depends on effective-dated account mappings, on WeInfuse `location_id`, and on
+shared accounts that cannot be attributed from an account number alone. Adding that later
+means re-deriving it for every historical row. It is cheap now and expensive later, so it
+is in scope.
+
+**2. The canonical event model belongs to the ETL.** If the ETL lands only per-vendor raw
+tables, then building reconciliation later necessarily changes the schema, which means
+reprocessing. Landing `PurchaseLine`, `AdministrationEvent`, `ClaimEvent`,
+`RemittanceLine`, `PatientEncounter` now means reconciliation is later written against a
+stable contract and the ETL is genuinely finished.
+
+**3. The inputs to unit conversion must be captured at load.** Conversion itself is
+reconciliation work and is deferred. But package size, billing units, HCPCS code, UOM,
+strength and the ASP crosswalk version in force on the transaction date have to be
+captured and versioned *at load time*, because they are not recoverable afterwards from a
+row that dropped them. Capture now, convert later.
+
+Everything else that is genuinely reconciliation - the match engine, inventory
+reconciliation, the four accounting matches, period close, discrepancy triage - is out of
+scope and comes after.
+
+## Definition of done for the ETL
+
+Not a status report. Every line below is a check that runs, and the ETL is not finished
+until all of them pass.
+
+### Correctness of what lands
+
+- Every destination column is typed. No `NVARCHAR(MAX)` catch-alls outside the raw layer.
+- NDC normalized with `ndc11`, `ndc_raw` and `ndc_resolution_method` on every row;
+  ambiguous and lossy values quarantined rather than guessed.
+- Dates parsed with explicit per-source formats. Nothing left to pandas inference.
+- Money parsed to `DECIMAL`. No currency strings, thousands separators or `$` survive.
+- No literal `"nan"`, `"none"`, `"null"` or `"N/A"` string in any column, anywhere.
+- Quantities stored with their unit, alongside package size and billing-unit factors.
+- Every row carries tenant, covered entity, site, source file, batch, spec version and
+  row hash, or an explicit `UNRESOLVED` marker with a reason.
+
+### Behaviour under replay
+
+- Reloading any single file changes nothing.
+- Replaying the entire history twice produces a byte-identical current state.
+- A corrected re-delivery supersedes the prior version; it does not duplicate it.
+- Late-arriving data lands without altering any previously reported answer.
+
+### Completeness
+
+- All 18 sources plus the reference loads, each with a golden fixture running in CI.
+- Per-load control totals reconciled against the source file: row count in, rows landed,
+  rows quarantined, and a summed money column where the file has one. A load that cannot
+  account for every row it read fails.
+
+### Failure handling
+
+- Every rejected row is in quarantine with reason codes and its full payload.
+- Quarantine is reprocessable after a fix without re-running the whole file.
+- One bad row never fails a file. One bad file never fails a run.
+- Schema drift - a new or missing vendor column - is reported and actioned per policy,
+  never silently dropped.
+
+### Operations
+
+- No secret in any file. Key Vault with managed identity.
+- CI runs lint, unit tests and every golden fixture on each pull request.
+- Deployment is repeatable from source (infrastructure as code).
+- Alerts fire on: run failed, expected source missing for N days, quarantine rate spike,
+  control-total mismatch. The six silent missed runs in the old system are the bug this
+  closes.
+- A runbook exists for each alert.
+
+### Multi-tenancy
+
+- `tenant_id` non-null and enforced on every table.
+- Onboarding a second covered entity requires configuration only, demonstrated by
+  actually doing it for a synthetic tenant in CI.
+
 ## Sequencing
 
-Breadth-first per the decision taken. Roughly 18 weeks at focused pace.
+Reconciliation deferred. Roughly 10 weeks to a finished ETL.
 
-**Phase A — Foundation, weeks 1–2.** New database and migrations. Ledger primitives. Tenant,
-CE and site model. Source spec registry and transform vocabulary. NDC dimension and correct
-normalization. Expectations engine. Cardinal end to end, file to canonical `PurchaseLine`, with
-a golden fixture. The skeleton is complete; it simply knows one source.
-*Gate:* Cardinal loads, reloads idempotently, and a deliberately corrupted file quarantines
-cleanly.
+**Phase A - Foundation, weeks 1-2.** New `SBH_DATA_BANK` database and migrations. Ledger
+primitives. Tenant, covered entity and site model. Source spec registry and transform
+vocabulary. NDC dimension and normalization. Expectations engine. Cardinal end to end,
+file to canonical `PurchaseLine`, with a golden fixture.
+*Gate:* Cardinal loads, reloads idempotently, and a deliberately corrupted file
+quarantines cleanly.
 
-**Phase B — All 18 sources, weeks 3–6.** A spec per source, each with a golden fixture and
-expectations, replaying full history from the files already on disk. Versioned ASP crosswalk
-and account reference loads.
-*Gate:* every source lands typed, entity-resolved and reproducible, with a per-source quality
-report. Re-running the whole history changes nothing.
+**Phase B - All 18 sources, weeks 3-6.** A spec per source with a golden fixture and
+expectations, replaying full history from the files on disk. Versioned ASP crosswalk and
+account reference loads.
+*Gate:* every source lands typed and reproducible with a per-source quality report;
+replaying the whole history twice changes nothing.
 
-**Phase C — Master data completeness, weeks 5–7 (overlaps B).** Site-resolution rules including
-shared accounts. Effective-dated program enrollment. UoM conversion. Part B / Part D scope.
-*Gate:* the 340B verification plan's assertions pass — zero matched activity on
-Southington-only accounts after 2025-07-17, no shared-account inventory attributed to the CT
-site after that date, Nevada and Orangeburg disambiguated by WeInfuse `location_id`.
+**Phase C - Entity resolution and canonical completeness, weeks 5-8 (overlaps B).**
+Site-resolution strategies including shared accounts. Effective-dated program enrollment.
+Conversion inputs captured. Part B / Part D scope flags.
+*Gate:* the 340B verification plan's assertions hold at the data layer - no purchase on a
+Southington-only account resolves to Southington after 2025-07-17, and Nevada and
+Orangeburg are separable on shared ABC and Cardinal accounts.
 
-**Phase D — 340B inventory reconciliation, weeks 7–10.** Match engine, inventory reconciliation,
-explanation records, simulation. Working sessions with you as the 340B authority.
-*Gate:* one month and a chosen NDC set match a hand reconciliation, signed off in writing.
+**Phase D - Production hardening, weeks 8-10.** Secrets, CI, infrastructure as code,
+deployment, alerting, runbook, operator CLI for quarantine and replay. The second-tenant
+onboarding drill.
+*Gate:* every line of the definition of done above passes.
 
-**Phase E — Financial reconciliation and close, weeks 10–13.** GL, AP and bank specs. Four match
-specs. Period model and close pack.
-*Gate:* one real month-end close produced by the pipeline with every unmatched item reasoned.
-
-**Phase F — Product layer, weeks 12–18 (overlaps E).** API, app, onboarding wizard, simulation
-UI, tenant provisioning.
-*Gate:* three staff who do not write SQL complete a weekly review unaided.
+**Then, and only then, reconciliation.** The match engine, 340B inventory reconciliation,
+the four accounting reconciliations, period close and the product layer - planned
+separately once the ETL is signed off.
 
 ## Verification
 
@@ -315,7 +398,6 @@ Every phase carries executable proof, not a status report.
 
 ## Open items
 
-- Product and namespace name — settle before Phase A.
 - Repository location and hosting (GitHub organization owned by Sagebrush).
 - Azure subscription and resource group for the new database and Container Apps environment.
 - CSD / CuraScript is not ingested and is the cleanest site disambiguator for Nevada versus
