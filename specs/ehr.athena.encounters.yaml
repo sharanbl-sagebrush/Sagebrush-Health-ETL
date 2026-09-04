@@ -1,0 +1,86 @@
+# Athena encounter report.
+#
+# Header is on row 1: every Athena export opens with a "REPORT NAME :" title.
+#
+# Column names are truncated abbreviations - cln enc date, prvdrlstnme, sendto
+# provdr - which is the vendor's own convention, not corruption.
+#
+# NO NATURAL KEY, though Athena has one: the Prescription report exposes the
+# encounter id as `cln enc id` and this report does not carry it. See notes.
+#
+# No 2023 data exists for this source.
+
+key: ehr.athena.encounters
+name: Athena - Encounter Report
+vendor: Athena
+group: "5 Athena"
+catalog_names: ['Encounter Report']
+lifecycle: active
+expected_cadence_days: 7
+coverage_start: "2024-01-01"
+
+filename_patterns:
+  - 'athena.*encounter'
+
+natural_key: []
+
+on_new_column: warn
+on_missing_column: fail
+notes: >
+  No natural key. (patientid, cln enc date) leaves 13,729
+  duplicate rows across 18,574; adding order dprtmnt changes nothing, and adding
+  sendto provdr still leaves 1,092. Only all six populated columns together are
+  unique, which is the row hash by another name.
+  
+  There are no exact-duplicate rows, so the row hash is a sound identity. Athena
+  holds an encounter id - the Prescription report exposes it as `cln enc id` - so
+  adding it here would give this report a real key.
+
+variants:
+  - name: encounters_11
+    detect:
+      require_all: ['cln enc date', 'patientid', 'cln enc status']
+    read:
+      preamble_lines: 1
+    columns:
+      - target: cln_enc_date
+        sources: ['cln enc date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: order_dprtmnt
+        sources: ['order dprtmnt']
+        type: text
+      - target: cln_enc_status
+        sources: ['cln enc status']
+        type: text
+      - target: sendto_provdr
+        sources: ['sendto provdr']
+        type: text
+      - target: patientid
+        sources: ['patientid']
+        type: text
+        required: true
+        pii: join_key
+      - target: patient_lastname
+        sources: ['patient lastname']
+        type: text
+        pii: direct
+      - target: patient_firstname
+        sources: ['patient firstname']
+        type: text
+        pii: direct
+      - target: patientdob
+        sources: ['patientdob']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: prvdr_npi_no
+        sources: ['prvdr npi no']
+        type: text
+      - target: prvdrlstnme
+        sources: ['prvdrlstnme']
+        type: text
+      - target: prvdrfrstnme
+        sources: ['prvdrfrstnme']
+        type: text

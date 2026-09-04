@@ -1,0 +1,429 @@
+# Curve monthly services - billed charges from the practice-management system.
+#
+# 122 columns, 230,192 rows, 260 MB. The previous pipeline never loaded this
+# source at all.
+#
+# CARRIES SSN, classified prohibited: matched so drift checks still see it, then
+# discarded before any value reaches the raw layer, quarantine or a log.
+#
+# Overlaps Monthly Payments - both carry Voucher_Number, Service_ID, IsVoided,
+# VisitLocAbbr, ProcCode and Fee. They appear to be charges and transactions from
+# one system, and which is authoritative for revenue is an open question in
+# docs/data-findings.md.
+#
+# NO NATURAL KEY. See notes.
+
+key: ehr.curve.monthly_services
+name: Curve - Monthly Services
+vendor: Curve / Allscripts
+group: "3 AllscriptsCurve"
+catalog_names: ['Monthly services']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'curve.*monthly service'
+
+natural_key: []
+
+on_new_column: warn
+on_missing_column: fail
+notes: >
+  No natural key. (Voucher_Number, Service_ID) leaves 5,803
+  duplicate rows across 230,192, and Service_ID alone leaves the same, so the
+  voucher adds nothing. There are no exact-duplicate rows, so the row hash is a
+  sound identity; the missing piece is a line-sequence number the export does not
+  carry. Monthly Payments, from the same practice-management system, does carry
+  SeqNum - worth asking whether this report can include it too.
+  
+  Five SSRS artifact columns (Textbox108, Textbox101, Textbox78, Textbox53,
+  Textbox38) lead the file and are excluded from matching.
+
+variants:
+  - name: services_122
+    detect:
+      require_all: ['Voucher_Number', 'Service_ID', 'ProcCode']
+    columns:
+      # unnamed export artifact at this position, not data
+      # unnamed export artifact at this position, not data
+      # unnamed export artifact at this position, not data
+      # unnamed export artifact at this position, not data
+      # unnamed export artifact at this position, not data
+      - target: clientid
+        sources: ['ClientID']
+        type: text
+        pii: join_key
+      - target: voucher_number
+        sources: ['Voucher_Number']
+        type: text
+        required: true
+      - target: service_id
+        sources: ['Service_ID']
+        type: text
+        required: true
+      - target: isvoided
+        sources: ['IsVoided']
+        type: text
+      - target: voidsign
+        sources: ['VoidSign']
+        type: decimal
+      - target: patient_number
+        sources: ['Patient_Number']
+        type: text
+        pii: join_key
+      - target: lname
+        sources: ['LName']
+        type: text
+        pii: direct
+      - target: fname
+        sources: ['FName']
+        type: text
+        pii: direct
+      - target: mi
+        sources: ['MI']
+        type: text
+      - target: dob
+        sources: ['DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: gender
+        sources: ['Gender']
+        type: text
+        pii: quasi
+      - target: maritalstatus
+        sources: ['MaritalStatus']
+        type: text
+        pii: quasi
+      - target: ssn
+        sources: ['SSN']
+        type: text
+        pii: prohibited
+      - target: phone
+        sources: ['Phone']
+        type: text
+        pii: direct
+      - target: workphone
+        sources: ['WorkPhone']
+        type: text
+        pii: direct
+      - target: cellphone
+        sources: ['CellPhone']
+        type: text
+        pii: direct
+      - target: email
+        sources: ['Email']
+        type: text
+        pii: direct
+      - target: patstreet1
+        sources: ['PatStreet1']
+        type: text
+        pii: direct
+      - target: patstreet2
+        sources: ['PatStreet2']
+        type: text
+        pii: direct
+      - target: patcity
+        sources: ['PatCity']
+        type: text
+        pii: quasi
+      - target: patstate
+        sources: ['PatState']
+        type: text
+        pii: quasi
+      - target: patzipcode
+        sources: ['PatZipCode']
+        type: text
+        pii: quasi
+      - target: patcomments1
+        sources: ['PatComments1']
+        type: text
+      - target: contcomments
+        sources: ['ContComments']
+        type: text
+      - target: mrn
+        sources: ['MRN']
+        type: text
+        pii: join_key
+      - target: accttype
+        sources: ['AcctType']
+        type: text
+      - target: postdate
+        sources: ['PostDate']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: plcsvc
+        sources: ['PlcSvc']
+        type: text
+      - target: plcsvcdesc
+        sources: ['PlcSvcDesc']
+        type: text
+      - target: posbillcode
+        sources: ['POSBillCode']
+        type: text
+      # unnamed export artifact at this position, not data
+      - target: visitlocabbr
+        sources: ['VisitLocAbbr']
+        type: text
+      - target: visitlocdesc
+        sources: ['VisitLocDesc']
+        type: text
+      - target: actprov
+        sources: ['ActProv']
+        type: text
+      - target: actprovname
+        sources: ['ActProvName']
+        type: text
+      - target: actprovsuffix
+        sources: ['ActProvSuffix']
+        type: text
+      - target: actprovnpi
+        sources: ['ActProvNPI']
+        type: text
+      - target: billprovcode
+        sources: ['BillProvCode']
+        type: text
+      - target: billprovname
+        sources: ['BillProvName']
+        type: text
+      - target: billprovsuffix
+        sources: ['BillProvSuffix']
+        type: text
+      - target: billprovnpi
+        sources: ['BillProvNPI']
+        type: text
+      - target: refprovcode
+        sources: ['RefProvCode']
+        type: text
+      - target: refprovname
+        sources: ['RefProvName']
+        type: text
+      - target: svcdate
+        sources: ['SvcDate']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: svcdatefrom
+        sources: ['SvcDateFrom']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: svcdateto
+        sources: ['SvcDateTo']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: billdate
+        sources: ['BillDate']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: billmedia
+        sources: ['BillMedia']
+        type: text
+      - target: billdateorig
+        sources: ['BillDateOrig']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: billmediaorig
+        sources: ['BillMediaOrig']
+        type: text
+      - target: billdateinit
+        sources: ['BillDateInit']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: inscat
+        sources: ['InsCat']
+        type: text
+      - target: inscatname
+        sources: ['InsCatName']
+        type: text
+      - target: carrier
+        sources: ['Carrier']
+        type: text
+      - target: carriername
+        sources: ['CarrierName']
+        type: text
+      - target: proccat
+        sources: ['ProcCat']
+        type: text
+      - target: proccatname
+        sources: ['ProcCatName']
+        type: text
+      - target: inscatorig
+        sources: ['InsCatOrig']
+        type: text
+      - target: inscatorigname
+        sources: ['InsCatOrigName']
+        type: text
+      - target: division
+        sources: ['Division']
+        type: text
+      - target: divisionname
+        sources: ['DivisionName']
+        type: text
+      - target: dept
+        sources: ['Dept']
+        type: text
+      - target: deptdesc
+        sources: ['DeptDesc']
+        type: text
+      - target: carrierorig
+        sources: ['CarrierOrig']
+        type: text
+      - target: carrierorigname
+        sources: ['CarrierOrigName']
+        type: text
+      - target: origcarpayornum
+        sources: ['OrigCarPayorNum']
+        type: text
+      - target: originscertnum
+        sources: ['OrigInsCertNum']
+        type: text
+      - target: curcarpayornum1
+        sources: ['CurCarPayorNum1']
+        type: text
+      - target: curinscertnum
+        sources: ['CurInsCertNum']
+        type: text
+      - target: postmonth
+        sources: ['PostMonth']
+        type: text
+      - target: encounter
+        sources: ['Encounter']
+        type: text
+      - target: proccode
+        sources: ['ProcCode']
+        type: text
+      - target: procdesc
+        sources: ['ProcDesc']
+        type: text
+      - target: billingcode
+        sources: ['BillingCode']
+        type: text
+      - target: modifiers
+        sources: ['Modifiers']
+        type: text
+      - target: fee
+        sources: ['Fee']
+        type: currency
+        control_total: true
+      - target: units
+        sources: ['Units']
+        type: decimal
+        control_total: true
+      - target: dxcode1
+        sources: ['DxCode1']
+        type: text
+      - target: dxdesc1
+        sources: ['DxDesc1']
+        type: text
+      - target: dxcode2
+        sources: ['DxCode2']
+        type: text
+      - target: dxdesc2
+        sources: ['DxDesc2']
+        type: text
+      - target: dxcode3
+        sources: ['DxCode3']
+        type: text
+      - target: dxdesc3
+        sources: ['DxDesc3']
+        type: text
+      - target: dxcode4
+        sources: ['DxCode4']
+        type: text
+      - target: dxdesc4
+        sources: ['DxDesc4']
+        type: text
+      - target: totpmt
+        sources: ['TotPmt']
+        type: text
+      - target: totadj
+        sources: ['TotAdj']
+        type: text
+      - target: totref
+        sources: ['TotRef']
+        type: text
+      # unnamed export artifact at this position, not data
+      # unnamed export artifact at this position, not data
+      - target: pricarrier
+        sources: ['PriCarrier']
+        type: text
+      - target: pricarriername
+        sources: ['PriCarrierName']
+        type: text
+      - target: pricertnum
+        sources: ['PriCertNum']
+        type: text
+      - target: seccarrier
+        sources: ['SecCarrier']
+        type: text
+      - target: seccarriername
+        sources: ['SecCarrierName']
+        type: text
+      - target: seccertnum
+        sources: ['SecCertNum']
+        type: text
+      - target: tercarrier
+        sources: ['TerCarrier']
+        type: text
+      - target: tercarriername
+        sources: ['TerCarrierName']
+        type: text
+      - target: tercertnum
+        sources: ['TerCertNum']
+        type: text
+      - target: workrvu
+        sources: ['WorkRVU']
+        type: decimal
+      - target: mprvu
+        sources: ['MPRVU']
+        type: text
+      - target: facrvu1
+        sources: ['FacRVU1']
+        type: text
+      - target: nonfacrvu
+        sources: ['NonFacRVU']
+        type: text
+      - target: operatorname
+        sources: ['OperatorName']
+        type: text
+      - target: batchnum
+        sources: ['BatchNum']
+        type: text
+      - target: claimnum
+        sources: ['ClaimNum']
+        type: text
+      - target: apptresourceabbr
+        sources: ['ApptResourceAbbr']
+        type: text
+      - target: apptresource
+        sources: ['ApptResource']
+        type: text
+      - target: apptypeabbr
+        sources: ['AppTypeAbbr']
+        type: text
+      - target: appdesc
+        sources: ['AppDesc']
+        type: text
+      - target: appcoveragetype
+        sources: ['AppCoverageType']
+        type: text
+        pii: quasi
+      - target: encounternum
+        sources: ['EncounterNum']
+        type: text
+      - target: pif_1
+        sources: ['PIF_1']
+        type: text
+      - target: pif_2
+        sources: ['PIF_2']
+        type: text
+      - target: pif_3
+        sources: ['PIF_3']
+        type: text
+      - target: pif_4
+        sources: ['PIF_4']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: pif_5
+        sources: ['PIF_5']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']

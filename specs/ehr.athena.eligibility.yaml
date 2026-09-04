@@ -1,0 +1,73 @@
+# Athena patient eligibility - the 340B qualifying-event validation report.
+#
+# A snapshot as of a date, not a period extract - the filename carries "as of"
+# rather than a range, and each delivery restates every patient's current
+# qualifying event.
+#
+# Natural key: patientid, unique across all 23,188 rows. The only Athena report
+# with a real key.
+#
+# The qualifying-event dates are the evidence that a dispense is 340B-eligible,
+# which makes this the most compliance-relevant of the three Athena reports.
+
+key: ehr.athena.eligibility
+name: Athena - Patient Eligibility (QE Validation)
+vendor: Athena
+group: "5 Athena"
+catalog_names: ['Patient Eligibility report - QE Validation']
+lifecycle: active
+expected_cadence_days: null
+
+filename_patterns:
+  - 'athena.*eligibility'
+
+natural_key: [patientid]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: eligibility_10
+    detect:
+      require_all: ['patientid', 'reg dprtmnt', 'curr dprtmnt']
+    read:
+      preamble_lines: 1
+    columns:
+      - target: patientid
+        sources: ['patientid']
+        type: text
+        required: true
+        pii: join_key
+      - target: patientdob
+        sources: ['patientdob']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: patient_firstname
+        sources: ['patient firstname']
+        type: text
+        pii: direct
+      - target: patient_lastname
+        sources: ['patient lastname']
+        type: text
+        pii: direct
+      - target: reg_dprtmnt
+        sources: ['reg dprtmnt']
+        type: text
+      - target: curr_dprtmnt
+        sources: ['curr dprtmnt']
+        type: text
+      - target: ptnt_vldtn_nwst_qlfyng_vnt
+        sources: ['ptnt vldtn nwst qlfyng vnt']
+        type: text
+      - target: ptnt_vldtn_ldst_qlfyng_vnt
+        sources: ['ptnt vldtn ldst qlfyng vnt']
+        type: text
+      - target: ptnt_dt_f_nwst_qlfyng_vnt
+        sources: ['ptnt dt f nwst qlfyng vnt']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: ptnt_dt_f_ldst_qlfyng_vnt
+        sources: ['ptnt dt f ldst qlfyng vnt']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']

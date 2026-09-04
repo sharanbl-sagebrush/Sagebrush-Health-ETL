@@ -288,6 +288,130 @@ patient's site, that link degrades from an identifier to a name match.
 
 ---
 
+## 13. Natural keys for every source, tested against the data
+
+**Status: closed.** Every key below was probed against the full 2023–2026
+extract, not sampled.
+
+The earlier validation pack listed five sources as "candidate key unknown". Two
+had keys nobody had found; three genuinely have none, and that turns out to be a
+fact about the reports rather than a gap in the analysis.
+
+### Sources with a real key
+
+| Source | Key | Rows tested |
+|---|---|---:|
+| Cardinal invoice detail | `account, invoice, invoice_line` | 20,602 |
+| McKesson Purchasing Detail | `invoice_credit_number, mckesson_item_number` | 6,163 |
+| McKesson Custom | `invoice_credit_number, mckesson_item_number, po_number` | 6,165 |
+| **WeInfuse Administered** | **`order_id, inventory_item_id`** | 51,178 |
+| **WeInfuse BuyBill** | **`order_id, inventory_item_id`** | 45,013 |
+| **WeInfuse Patients** | **`patient_identifier`** | 1,918 |
+| Pharmaforce claims | `claim_id` — unique across *both* site files | 196,187 |
+| PRXP | `rx_transaction_id` | 5,133 |
+| Wellpartner claims | `transaction` | 42,018 |
+| Wellpartner invoices | `invoice, wholesaler, account, date` | 7,700 |
+| **Athena eligibility** | **`patientid`** | 23,188 |
+| Master COGS List | `source_sheet, payee, account_number, location` | 121 |
+| Monthly Payments | `clientid, voucher_number, service_id, seqnum` | 1,287,742 |
+
+The three WeInfuse answers were the pack's open items. `Inventory Item ID` is
+the discriminator — one appointment administers several inventory items, so any
+key without it collides by construction. The pack had been testing
+`Weinfuse UID + Appointment ID`.
+
+### Sources with no key, and why
+
+| Source | Best candidate | Residual duplicates |
+|---|---|---:|
+| Allscripts eRx | `imreenc_code, imremed_code, refill` | 14,325 of 132,974 |
+| Curve Appointments | `patient_number, appointment_datetime` | 11,385 of 199,591 |
+| Curve Monthly Services | `voucher_number, service_id` | 5,803 of 230,192 |
+| Athena Encounters | `patientid, enc_date, dprtmnt, provdr` | 1,092 of 18,574 |
+| Athena Prescriptions | `cln_enc_id, order_id, icd10_code` | 74 of 28,018 |
+
+**Athena Prescriptions explains the whole category.** One prescription order
+appears once per ICD-10 diagnosis linked to it — order 1861 on encounter 432
+arrives twice, identical except `Z113` against `Z206`. The grain of the report is
+order-by-diagnosis, not order. These are denormalised report extracts, not
+transaction logs, and no subset of their columns identifies a row because the
+vendor never intended one to.
+
+Row identity therefore falls back to the row hash, which is sound for four of
+the five: they contain no exact-duplicate rows. **Allscripts eRx is the
+exception** — 8,100 of its 132,974 rows are identical across all 21 columns, so
+even a row hash cannot separate them. That source needs snapshot semantics at
+ledger time: a delivery replaces its date range rather than merging into it.
+
+A spec that declares no natural key is now required to record which candidates
+were tested and why none is unique. It is a finding about the data, and it
+should read like one.
+
+### Worth requesting from the vendors
+
+- **Allscripts**: an order identifier. Would remove the duplicate problem outright.
+- **Curve Appointments**: an appointment id. Curve holds one internally — Monthly
+  Services and Monthly Payments both reference vouchers and services by id — so
+  this is a reporting omission rather than a modelling one.
+- **Curve Monthly Services**: a line-sequence number. Monthly Payments, from the
+  same system, carries `SeqNum`; this report does not.
+- **Athena Encounters**: the encounter id. The Prescription report already
+  exposes it as `cln enc id`.
+
+## 14. Curve Monthly Services carries SSN
+
+**Status: closed in the spec.**
+
+Not just Monthly Payments. `Curve_Monthly Services` also carries `SSN`, along
+with name, date of birth, address and three telephone numbers — 122 columns and
+230,192 rows the previous pipeline never loaded at all.
+
+Classified `prohibited`, so the column is matched (drift and column-count checks
+still see it) and then discarded before any value reaches the raw layer,
+quarantine or a log.
+
+Curve Appointments carries patient *and guarantor* names, addresses, dates of
+birth, phones and email, though no SSN.
+
+---
+
+## 15. Typing columns by name misses real columns; typing by value does not
+
+**Status: closed in how specs are authored.**
+
+While writing the Curve specs I typed date columns with a name rule — anything
+ending in `date`, plus a short list. Against `Curve_Monthly Services` that
+matched three columns and **missed seven**:
+
+| Missed | Why the name rule failed |
+|---|---|
+| `DOB` | does not contain "date" |
+| `SvcDateFrom`, `SvcDateTo` | do not *end* in "date" |
+| `BillDateOrig`, `BillDateInit` | same |
+| `PIF_4`, `PIF_5` | names say nothing at all; both hold dates |
+
+Seven real date columns would have landed as text. Nothing would have failed —
+which is precisely the problem, because a date stored as a string does not
+announce itself and is only discovered when a reconciliation joins on it and
+quietly matches nothing.
+
+Specs are now typed by sampling the column's actual values and detecting a
+format that at least 98% of them parse under. The threshold matters: a lower one
+mistypes a text column that happens to contain a few date-like values, and then
+quarantines every other row in it.
+
+Two columns in Curve Appointments — `DateTime_Bumped` and `CM_Date_Of_Injury` —
+are empty in every delivery so far, so no format is detectable from values.
+Those are typed by hand to match their siblings, with a note saying why. An
+undetectable column is a decision for a person, not a default.
+
+The same pass caught `Check_In_Time` and `Check_Out_Time`, which a name rule
+reads as timestamps and which are in fact bare `HHMM` integers — `1454` for
+14:54, with no date part. They are kept as text, because resolving them to a
+timestamp means assuming which day they belong to.
+
+---
+
 ## Open questions
 
 1. **When did `Class` → `Class_New` take effect?** 28 of 121 accounts were

@@ -1,0 +1,121 @@
+# Allscripts eRx - prescribed medication orders.
+#
+# NO NATURAL KEY. See notes: every candidate leaves thousands of duplicates, and
+# 8,100 rows are identical across all 21 columns. A report extract, not a
+# transaction log.
+#
+# Carries both LOCATION_NAME1 and LOCATION_NAME. The previous parser handled
+# this with a hand-written `or` fallback for this one case; they are two
+# distinct columns and are mapped as such.
+
+key: ehr.allscripts.erx
+name: Allscripts - Prescribe Medication (eRx)
+vendor: Allscripts
+group: "3 AllscriptsCurve"
+catalog_names: ['ERX - Prescribe Medication']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'allscripts.*prescibe'
+  - 'allscripts.*prescribe'
+
+natural_key: []
+
+on_new_column: warn
+on_missing_column: fail
+notes: >
+  No natural key exists in the delivered columns. Candidates tested
+  against all 132,974 rows of the 2023-2026 extract: IMREMED_CODE (87,824
+  duplicate rows), IMREENC_CODE + IMREMED_CODE (14,683), the same plus Refill
+  (14,325), and DEM_EXTERNALID + ORDERED_DATE + IMREMED_CODE (16,250).
+  
+  Worse, 8,100 rows are exact duplicates across every column, so even the row hash
+  cannot separate them. This is a denormalised report extract rather than a
+  transaction log, and it needs snapshot semantics at ledger time: a delivery
+  replaces its date range rather than being merged into it. Asking Allscripts for
+  an order identifier would remove the problem entirely and is worth doing.
+
+variants:
+  - name: erx_21
+    detect:
+      require_all: ['IMREMED_CODE', 'ORDERED_DATE', 'MED_TITLE']
+    columns:
+      - target: location_name1
+        sources: ['LOCATION_NAME1']
+        type: text
+        description: >
+          Both LOCATION_NAME1 and LOCATION_NAME exist in this file.
+          The previous parser carried a bespoke `or` fallback for exactly this
+          pair; here they are simply two distinct columns, mapped separately.
+      - target: ordered_date
+        sources: ['ORDERED_DATE']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: med_title
+        sources: ['MED_TITLE']
+        type: text
+      - target: imremed_code
+        sources: ['IMREMED_CODE']
+        type: text
+      - target: pharmacy
+        sources: ['Pharmacy']
+        type: text
+      - target: prov_firstname
+        sources: ['PROV_FIRSTNAME']
+        type: text
+        pii: direct
+      - target: prov_lastname
+        sources: ['PROV_LASTNAME']
+        type: text
+        pii: direct
+      - target: npi
+        sources: ['NPI']
+        type: text
+      - target: dem_firstname
+        sources: ['DEM_FIRSTNAME']
+        type: text
+        pii: direct
+      - target: dem_lastname
+        sources: ['DEM_LASTNAME']
+        type: text
+        pii: direct
+      - target: dob
+        sources: ['DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: dem_externalid
+        sources: ['DEM_EXTERNALID']
+        type: text
+        pii: join_key
+      - target: addr_emailaddress
+        sources: ['ADDR_EMAILADDRESS']
+        type: text
+        pii: direct
+      - target: addr_phone
+        sources: ['ADDR_PHONE']
+        type: text
+        pii: direct
+      - target: imreenc_code
+        sources: ['IMREENC_CODE']
+        type: text
+      - target: location_name
+        sources: ['LOCATION_NAME']
+        type: text
+      - target: qty
+        sources: ['QTY']
+        type: decimal
+      - target: qty_unit
+        sources: ['QTY_UNIT']
+        type: text
+      - target: med_quantitytext
+        sources: ['MED_QUANTITYTEXT']
+        type: text
+      - target: refill
+        sources: ['Refill']
+        type: text
+      - target: icd_10
+        sources: ['ICD_10']
+        type: text

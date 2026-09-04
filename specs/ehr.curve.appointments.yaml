@@ -1,0 +1,403 @@
+# Curve appointment details.
+#
+# 101 columns, 199,591 rows, 143 MB. Never loaded by the previous pipeline.
+#
+# NO NATURAL KEY - the export carries no appointment identifier. See notes.
+#
+# Heavily identifying: patient and guarantor names, addresses, dates of birth,
+# telephone numbers and email. Classified so they land encrypted.
+
+key: ehr.curve.appointments
+name: Curve - Appointment Details by Date
+vendor: Curve / Allscripts
+group: "3 AllscriptsCurve"
+catalog_names: ['Encounter']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'curve.*appointment'
+
+natural_key: []
+
+on_new_column: warn
+on_missing_column: fail
+notes: >
+  Three temporal shapes, none interchangeable: plain dates
+  (Patient_DOB, Date_Of_Account) as MM/DD/YYYY, timestamps (Appointment_DateTime,
+  DateTime_Scheduled) as MM/DD/YYYY H:MM with a non-padded hour, and
+  Check_In_Time / Check_Out_Time as bare HHMM integers - 1454 for 14:54 - with no
+  date part at all. The last of those are kept as text, because resolving them to
+  a timestamp means assuming which day they belong to.
+  
+  No natural key. The export carries no appointment identifier at
+  all; (Patient_Number, Appointment_DateTime) leaves 11,385 duplicate rows across
+  199,591. Ten rows are exact duplicates across all 101 columns.
+  
+  Curve holds an appointment id internally - Monthly Services and Monthly Payments
+  both reference vouchers and services by id - so this is a reporting omission
+  rather than a modelling one, and worth requesting.
+
+variants:
+  - name: appointments_101
+    detect:
+      require_all: ['Patient_Number', 'ResDesc', 'Resource_Abbr']
+    columns:
+      - target: resdesc
+        sources: ['ResDesc']
+        type: text
+      - target: resource_abbr
+        sources: ['Resource_Abbr']
+        type: text
+      - target: resource_group
+        sources: ['Resource_Group']
+        type: text
+      - target: resource_specialty
+        sources: ['Resource_Specialty']
+        type: text
+      - target: patient_last_name
+        sources: ['Patient_Last_Name']
+        type: text
+        pii: direct
+      - target: patient_first_name
+        sources: ['Patient_First_Name']
+        type: text
+        pii: direct
+      - target: patient_number
+        sources: ['Patient_Number']
+        type: text
+        pii: join_key
+      - target: street1
+        sources: ['Street1']
+        type: text
+        pii: direct
+      - target: street2
+        sources: ['Street2']
+        type: text
+        pii: direct
+      - target: city
+        sources: ['City']
+        type: text
+        pii: quasi
+      - target: state
+        sources: ['State']
+        type: text
+        pii: quasi
+      - target: zip_code
+        sources: ['ZIP_Code']
+        type: text
+        pii: quasi
+      - target: patient_dob
+        sources: ['Patient_DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: patient_age
+        sources: ['Patient_Age']
+        type: text
+        pii: quasi
+      - target: patient_gender
+        sources: ['Patient_Gender']
+        type: text
+        pii: quasi
+      - target: patient_primary_phone
+        sources: ['Patient_Primary_Phone']
+        type: text
+        pii: direct
+      - target: patient_cell_phone
+        sources: ['Patient_Cell_Phone']
+        type: text
+        pii: direct
+      - target: patient_work_phone
+        sources: ['Patient_Work_Phone']
+        type: text
+        pii: direct
+      - target: patient_pcp
+        sources: ['Patient_PCP']
+        type: text
+      - target: patient_usual_provider
+        sources: ['Patient_Usual_Provider']
+        type: text
+      - target: patient_ref_provider
+        sources: ['Patient_Ref_Provider']
+        type: text
+      - target: patient_email
+        sources: ['Patient_Email']
+        type: text
+        pii: direct
+      - target: guar_last_name
+        sources: ['Guar_Last_Name']
+        type: text
+        pii: direct
+      - target: guar_first_name
+        sources: ['Guar_First_Name']
+        type: text
+        pii: direct
+      - target: guar_account_number
+        sources: ['Guar_Account_Number']
+        type: text
+        pii: direct
+      - target: guar_street1
+        sources: ['Guar_Street1']
+        type: text
+        pii: direct
+      - target: guar_street2
+        sources: ['Guar_Street2']
+        type: text
+        pii: direct
+      - target: guar_city
+        sources: ['Guar_City']
+        type: text
+        pii: direct
+      - target: guar_state
+        sources: ['Guar_State']
+        type: text
+        pii: direct
+      - target: guar_zip_code
+        sources: ['Guar_Zip_Code']
+        type: text
+        pii: direct
+      - target: guar_dob
+        sources: ['Guar_DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: guar_gender
+        sources: ['Guar_Gender']
+        type: text
+        pii: direct
+      - target: guar_home_phone
+        sources: ['Guar_Home_Phone']
+        type: text
+        pii: direct
+      - target: guar_cell_phone
+        sources: ['Guar_Cell_Phone']
+        type: text
+        pii: direct
+      - target: guar_email
+        sources: ['Guar_Email']
+        type: text
+        pii: direct
+      - target: prim_policy_carrier_name
+        sources: ['Prim_Policy_Carrier_Name']
+        type: text
+      - target: prim_policy_carrier_category_descr
+        sources: ['Prim_Policy_Carrier_Category_Descr']
+        type: text
+      - target: certificate_number
+        sources: ['Certificate_Number']
+        type: text
+      - target: prim_emp_abbreviation
+        sources: ['Prim_Emp_Abbreviation']
+        type: text
+      - target: prim_emp_name
+        sources: ['Prim_Emp_Name']
+        type: text
+      - target: sec_policy_carrier
+        sources: ['Sec_Policy_Carrier']
+        type: text
+      - target: sec_policy_category
+        sources: ['Sec_Policy_Category']
+        type: text
+      - target: sec_certificate_number1
+        sources: ['Sec_Certificate_Number1']
+        type: text
+      - target: sec_emp_abbreviation
+        sources: ['Sec_Emp_Abbreviation']
+        type: text
+      - target: sec_emp_name
+        sources: ['Sec_Emp_Name']
+        type: text
+      - target: account_type
+        sources: ['Account_Type']
+        type: text
+      - target: date_of_account
+        sources: ['Date_Of_Account']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: patient_date_registered
+        sources: ['Patient_Date_Registered']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: registration_last_modified_by
+        sources: ['Registration_Last_Modified_By']
+        type: text
+      - target: appointment_datetime
+        sources: ['Appointment_DateTime']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+      - target: duration
+        sources: ['Duration']
+        type: text
+      - target: status1
+        sources: ['Status1']
+        type: text
+      - target: datetime_scheduled
+        sources: ['DateTime_Scheduled']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+      - target: scheduled_by
+        sources: ['Scheduled_By']
+        type: text
+      - target: datetime_confirmed
+        sources: ['DateTime_Confirmed']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+      - target: confirmed_by
+        sources: ['Confirmed_By']
+        type: text
+      - target: datetime_cancelled
+        sources: ['DateTime_Cancelled']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+      - target: cancellation_reason
+        sources: ['Cancellation_Reason']
+        type: text
+      - target: cancelled_by
+        sources: ['Cancelled_By']
+        type: text
+      - target: datetime_acknowledged
+        sources: ['DateTime_Acknowledged']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+      - target: acknowledged_by
+        sources: ['Acknowledged_By']
+        type: text
+      - target: datetime_bumped
+        sources: ['DateTime_Bumped']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        description: >
+          Unpopulated in all deliveries so far. Typed to match the
+          other DateTime_ columns on the reasonable assumption Curve writes
+          them alike; if a value ever fails to parse the row quarantines,
+          which is the outcome that gets it looked at.
+      - target: bumped_by
+        sources: ['Bumped_By']
+        type: text
+      - target: bumped_reason
+        sources: ['Bumped_Reason']
+        type: text
+      - target: check_in_time
+        sources: ['Check_In_Time']
+        type: text
+        description: >
+          HHMM with no separator and no date - 1454 for 14:54. Not a
+          timestamp, and not resolvable to one without assuming it belongs to
+          the appointment date.
+      - target: check_out_time
+        sources: ['Check_Out_Time']
+        type: text
+        description: >
+          HHMM with no separator and no date, as Check_In_Time.
+      - target: appointment_type_description
+        sources: ['Appointment_Type_Description']
+        type: text
+      - target: appointment_category_description
+        sources: ['Appointment_Category_Description']
+        type: text
+      - target: coverage_type
+        sources: ['Coverage_Type']
+        type: text
+        pii: quasi
+      - target: visit_type
+        sources: ['Visit_Type']
+        type: text
+      - target: schlocdesc
+        sources: ['SchLocDesc']
+        type: text
+      - target: schdeptdesc
+        sources: ['SchDeptDesc']
+        type: text
+      - target: refprov
+        sources: ['RefProv']
+        type: text
+      - target: refdocspec
+        sources: ['RefDocSpec']
+        type: text
+      - target: refdocorg
+        sources: ['RefDocOrg']
+        type: text
+      - target: copayment_amount
+        sources: ['CoPayment_Amount']
+        type: text
+      - target: specialist_copay_amount
+        sources: ['Specialist_CoPay_Amount']
+        type: text
+      - target: selfpaybalance
+        sources: ['SelfPayBalance']
+        type: text
+      - target: insurance_balance
+        sources: ['Insurance_Balance']
+        type: text
+      - target: net_balance
+        sources: ['Net_Balance']
+        type: text
+      - target: comments
+        sources: ['Comments']
+        type: text
+      - target: authorization_number
+        sources: ['Authorization_Number']
+        type: text
+      - target: date_of_referral
+        sources: ['Date_Of_Referral']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: referral_expiration_date
+        sources: ['Referral_Expiration_Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: referral_is_required
+        sources: ['Referral_Is_Required']
+        type: text
+      - target: referral_status
+        sources: ['Referral_Status']
+        type: text
+      - target: authorized_visits1
+        sources: ['Authorized_Visits1']
+        type: text
+      - target: visits_remaining1
+        sources: ['Visits_Remaining1']
+        type: text
+      - target: emp_abbreviation
+        sources: ['Emp_Abbreviation']
+        type: text
+      - target: emp_name
+        sources: ['Emp_Name']
+        type: text
+      - target: cm_emp_abbreviation
+        sources: ['CM_Emp_Abbreviation']
+        type: text
+      - target: cm_emp_name
+        sources: ['CM_Emp_Name']
+        type: text
+      - target: cm_carrier_abbr
+        sources: ['CM_Carrier_Abbr']
+        type: text
+      - target: cm_carrier_name
+        sources: ['CM_Carrier_Name']
+        type: text
+      - target: cm_case_status_id
+        sources: ['CM_Case_Status_ID']
+        type: text
+      - target: cm_date_of_injury
+        sources: ['CM_Date_Of_Injury']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        description: >
+          Unpopulated in all deliveries so far; typed to match its siblings.
+      - target: cm_case_claim_number
+        sources: ['CM_Case_Claim_Number']
+        type: text
+      - target: cm_typeofpayer_id
+        sources: ['CM_TypeOfPayer_ID']
+        type: text
+      - target: cm_subscriber
+        sources: ['CM_Subscriber']
+        type: text
+      - target: cm_certificate_no
+        sources: ['CM_Certificate_No']
+        type: text
+      - target: cm_relationship
+        sources: ['CM_Relationship']
+        type: text

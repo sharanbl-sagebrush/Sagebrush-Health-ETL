@@ -1,0 +1,118 @@
+# Athena prescription report.
+#
+# Header is on row 1: a "REPORT NAME :" title precedes it.
+#
+# NO NATURAL KEY, structurally: one order appears once per linked ICD-10
+# diagnosis, so the grain is order-by-diagnosis rather than order. See notes.
+#
+# No 2023 data exists for this source.
+
+key: ehr.athena.prescriptions
+name: Athena - Prescription Report
+vendor: Athena
+group: "5 Athena"
+catalog_names: ['Prescription Report']
+lifecycle: active
+expected_cadence_days: 7
+coverage_start: "2024-01-01"
+
+filename_patterns:
+  - 'athena.*prescription'
+
+natural_key: []
+
+on_new_column: warn
+on_missing_column: fail
+notes: >
+  No natural key, and the reason is structural. One prescription
+  order appears once per ICD-10 diagnosis linked to it: order 1861 on encounter
+  432 arrives twice, identical except for Z113 against Z206. So order id alone
+  leaves 24,763 duplicate rows across 28,018, and (cln enc id, order id) leaves
+  5,930 - the figure the earlier validation pack reported.
+  
+  Adding the diagnosis code gets to 74 residual duplicates of 28,018, which is
+  close but not a key. 47 rows are exact duplicates across all 20 columns.
+  
+  The grain of this report is order-by-diagnosis, not order. Reconciling it at
+  order level requires collapsing diagnoses first, or a report at one row per
+  order.
+
+variants:
+  - name: prescriptions_20
+    detect:
+      require_all: ['order chartdate', 'order id', 'cln enc id']
+    read:
+      preamble_lines: 1
+    columns:
+      - target: order_chartdate
+        sources: ['order chartdate']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: order_type_grp
+        sources: ['order type grp']
+        type: text
+      - target: order_desc
+        sources: ['order desc']
+        type: text
+      - target: quantity_prescribed
+        sources: ['quantity prescribed']
+        type: text
+      - target: cln_enc_id
+        sources: ['cln enc id']
+        type: text
+        required: true
+      - target: patientid
+        sources: ['patientid']
+        type: text
+        required: true
+        pii: join_key
+      - target: patient_lastname
+        sources: ['patient lastname']
+        type: text
+        pii: direct
+      - target: patient_firstname
+        sources: ['patient firstname']
+        type: text
+        pii: direct
+      - target: patientdob
+        sources: ['patientdob']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: sendto_provdr
+        sources: ['sendto provdr']
+        type: text
+      - target: prvdr_npi_no
+        sources: ['prvdr npi no']
+        type: text
+      - target: prvdrfrstnme
+        sources: ['prvdrfrstnme']
+        type: text
+      - target: prvdrlstnme
+        sources: ['prvdrlstnme']
+        type: text
+      - target: cd_10_clncl_rdr_dgnss_cd
+        sources: ['cd-10 clncl rdr dgnss cd']
+        type: text
+      - target: icd10_clncl_ordr_diagdescr
+        sources: ['icd10 clncl ordr diagdescr']
+        type: text
+      - target: order_name
+        sources: ['order name']
+        type: text
+      - target: order_id
+        sources: ['order id']
+        type: text
+        required: true
+      - target: no_of_refills
+        sources: ['no. of refills']
+        type: text
+      - target: patient_email
+        sources: ['patient email']
+        type: text
+        pii: direct
+      - target: patient_homephone
+        sources: ['patient homephone']
+        type: text
+        pii: direct
