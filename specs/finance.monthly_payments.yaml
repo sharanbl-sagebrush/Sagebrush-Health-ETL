@@ -1,0 +1,456 @@
+# Monthly Payments - practice-management transaction ledger, one file per month.
+#
+# 40 files covering 2023-04 to 2026-07, roughly 1.29 million rows, 116 columns,
+# a single stable header across every file. This is charges, payments,
+# adjustments and transfers from the practice-management system, and it is the
+# revenue side of financial reconciliation.
+#
+# THE DEFECT THIS SPEC EXISTS TO AVOID
+#
+# Amounts are written in accounting notation - ($40.00) means minus forty.
+# 227,284 of 1,287,742 rows across the 40 files are parenthesised, 17.6%. The
+# previous currency cleaner stripped $ , and whitespace but not parentheses, so
+# every one of them became NULL. Because they are all credits, adjustments and
+# transfers, the loss ran one way: the old parser totals $231,207,544.28 where
+# the correct signed figure is $191,240,346.67, an overstatement of
+# $39,967,197.61. `type: currency` handles this and there is a regression test.
+#
+# PHI
+#
+# The highest-PHI file in the estate. SSN is populated on 69% of rows and is
+# never needed to reconcile a payment, so it is classified `prohibited`: the
+# column is matched, so drift and column-count checks still see it, and then
+# discarded without its value reaching the raw layer, quarantine or any log.
+# Name, DOB, address, email and telephone are `direct` and encrypted at rest.
+# ClientID, PatNum and MRN stay in clear as join keys.
+#
+# DATES
+#
+# Three different formats in one file: TransDate as 6/17/2025, TransMonth as
+# "Jun 2025", PostMonth as "Oct 2025". PostMonth can be months after
+# TransMonth, so period assignment must use the posting month deliberately
+# rather than assuming it follows the transaction date.
+#
+# OPEN QUESTION
+#
+# This overlaps `Curve_Monthly Services` - both carry Voucher_Number,
+# Service_ID, IsVoided, VisitLocAbbr, ProcCode and Fee. They appear to be
+# transactions and charges from the same system. Confirm whether both are
+# needed before relying on either for revenue totals.
+
+key: finance.monthly_payments
+name: Monthly Payments - PM transaction ledger
+vendor: Sagebrush Practice Management
+group: Finance
+catalog_names: ["Monthly Payments"]
+lifecycle: active
+expected_cadence_days: 31
+coverage_start: "2023-04-01"
+
+filename_patterns:
+  - "monthly.*payments"
+
+# Handles both "Monthly Payments 2025-06.csv" and the partial-period form
+# "Monthly Payments 2026-07 upto 07212026.csv".
+period_from_filename: 'monthly payments (?P<year>\d{4})-(?P<month>\d{2})'
+
+# A transaction line is identified by its voucher, service and sequence within
+# the month. ClientID scopes it; the period keeps two months that reuse a
+# sequence number apart.
+natural_key: [clientid, voucher_number, service_id, seqnum]
+
+# 116 columns is a wide, stable contract. A vendor change on either side is
+# worth stopping for rather than absorbing.
+on_new_column: fail
+on_missing_column: fail
+
+variants:
+  - name: pm_ledger_116
+    description: >
+      The single observed shape - 116 columns, identical across all 40 monthly
+      files from 2023-04 to 2026-07.
+    detect:
+      require_all: ["ClientID", "Voucher_Number", "Service_ID", "TransCode", "Amount"]
+    read:
+      skip_trailing_blank_rows: true
+    columns:
+      - target: clientid
+        sources: ["ClientID"]
+        type: text
+        pii: join_key
+        required: true
+      - target: voucher_number
+        sources: ["Voucher_Number"]
+        type: text
+        required: true
+      - target: service_id
+        sources: ["Service_ID"]
+        type: text
+        required: true
+      - target: seqnum
+        sources: ["SeqNum"]
+        type: integer
+        required: true
+      - target: isvoided
+        sources: ["IsVoided"]
+        type: boolean
+      - target: voidsign
+        sources: ["VoidSign"]
+        type: integer
+      - target: voidflag
+        sources: ["VoidFlag"]
+        type: text
+      - target: transcatid
+        sources: ["TransCatID"]
+        type: text
+      - target: transcat
+        sources: ["TransCat"]
+        type: text
+      - target: transcatdesc
+        sources: ["TransCatDesc"]
+        type: text
+      - target: transtype
+        sources: ["TransType"]
+        type: text
+      - target: transcodeid
+        sources: ["TransCodeID"]
+        type: text
+      - target: transcode
+        sources: ["TransCode"]
+        type: text
+      - target: transdesc
+        sources: ["TransDesc"]
+        type: text
+      - target: amount
+        sources: ["Amount"]
+        type: currency
+        required: true
+      - target: transdate
+        sources: ["TransDate"]
+        type: date
+        date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
+        required: true
+      - target: transmonth
+        sources: ["TransMonth"]
+        type: date
+        date_formats: ["%b %Y", "%B %Y"]
+      - target: date_paid
+        sources: ["Date_Paid"]
+        type: date
+        date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
+      - target: reimbcatid
+        sources: ["ReimbCatID"]
+        type: text
+      - target: reimbcat
+        sources: ["ReimbCat"]
+        type: text
+      - target: reimbcatdesc
+        sources: ["ReimbCatDesc"]
+        type: text
+      - target: reimbcommentid
+        sources: ["ReimbCommentID"]
+        type: text
+      - target: reimbcomment
+        sources: ["ReimbComment"]
+        type: text
+      - target: reimbcmtdesc
+        sources: ["ReimbCmtDesc"]
+        type: text
+      - target: inscatremid
+        sources: ["InsCatRemID"]
+        type: text
+      - target: inscatrem
+        sources: ["InsCatRem"]
+        type: text
+      - target: inscatremname
+        sources: ["InsCatRemName"]
+        type: text
+      - target: carrierremid
+        sources: ["CarrierRemID"]
+        type: text
+      - target: carrierrem
+        sources: ["CarrierRem"]
+        type: text
+      - target: carrierremname
+        sources: ["CarrierRemName"]
+        type: text
+      - target: inscatremcurid
+        sources: ["InsCatRemCurID"]
+        type: text
+      - target: inscatremcur
+        sources: ["InsCatRemCur"]
+        type: text
+      - target: inscatremcurname
+        sources: ["InsCatRemCurName"]
+        type: text
+      - target: carrierremcurid
+        sources: ["CarrierRemCurID"]
+        type: text
+      - target: carrierremcur
+        sources: ["CarrierRemCur"]
+        type: text
+      - target: carrierremcurname
+        sources: ["CarrierRemCurName"]
+        type: text
+      - target: inscatid
+        sources: ["InsCatID"]
+        type: text
+      - target: inscat
+        sources: ["InsCat"]
+        type: text
+      - target: inscatname
+        sources: ["InsCatName"]
+        type: text
+      - target: carrierid
+        sources: ["CarrierID"]
+        type: text
+      - target: carrier
+        sources: ["Carrier"]
+        type: text
+      - target: carriername
+        sources: ["CarrierName"]
+        type: text
+      - target: inscatorigid
+        sources: ["InsCatOrigID"]
+        type: text
+      - target: inscatorig
+        sources: ["InsCatOrig"]
+        type: text
+      - target: inscatorigname
+        sources: ["InsCatOrigName"]
+        type: text
+      - target: carrierorigid
+        sources: ["CarrierOrigID"]
+        type: text
+      - target: carrierorig
+        sources: ["CarrierOrig"]
+        type: text
+      - target: carrierorigname
+        sources: ["CarrierOrigName"]
+        type: text
+      - target: reference
+        sources: ["Reference"]
+        type: text
+      - target: patnum
+        sources: ["PatNum"]
+        type: text
+        pii: join_key
+      - target: mrn
+        sources: ["MRN"]
+        type: text
+        pii: join_key
+      - target: lname
+        sources: ["LName"]
+        type: text
+        pii: direct
+      - target: fname
+        sources: ["FName"]
+        type: text
+        pii: direct
+      - target: mi
+        sources: ["MI"]
+        type: text
+        pii: direct
+      - target: dob
+        sources: ["DOB"]
+        type: text
+        pii: direct
+      - target: gender
+        sources: ["Gender"]
+        type: text
+        pii: quasi
+      - target: maritalstatus
+        sources: ["MaritalStatus"]
+        type: text
+        pii: quasi
+      - target: ssn
+        sources: ["SSN"]
+        type: text
+        pii: prohibited
+      - target: phone
+        sources: ["Phone"]
+        type: text
+        pii: direct
+      - target: workphone
+        sources: ["WorkPhone"]
+        type: text
+        pii: direct
+      - target: cellphone
+        sources: ["CellPhone"]
+        type: text
+        pii: direct
+      - target: email
+        sources: ["Email"]
+        type: text
+        pii: direct
+      - target: patstreet1
+        sources: ["PatStreet1"]
+        type: text
+        pii: direct
+      - target: patstreet2
+        sources: ["PatStreet2"]
+        type: text
+        pii: direct
+      - target: patcity
+        sources: ["PatCity"]
+        type: text
+        pii: quasi
+      - target: patstate
+        sources: ["PatState"]
+        type: text
+        pii: quasi
+      - target: patzipcode
+        sources: ["PatZipCode"]
+        type: text
+        pii: quasi
+      - target: postmonth
+        sources: ["PostMonth"]
+        type: date
+        date_formats: ["%b %Y", "%B %Y"]
+      - target: svcdate
+        sources: ["SvcDate"]
+        type: date
+        date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
+      - target: svcdatefrom
+        sources: ["SvcDateFrom"]
+        type: date
+        date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
+      - target: svcdateto
+        sources: ["SvcDateTo"]
+        type: date
+        date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
+      - target: actprovid
+        sources: ["ActProvID"]
+        type: text
+      - target: actprov
+        sources: ["ActProv"]
+        type: text
+      - target: actprovname
+        sources: ["ActProvName"]
+        type: text
+      - target: actprovsuffix
+        sources: ["ActProvSuffix"]
+        type: text
+      - target: billprovid
+        sources: ["BillProvID"]
+        type: text
+      - target: billprov
+        sources: ["BillProv"]
+        type: text
+      - target: billprovname
+        sources: ["BillProvName"]
+        type: text
+      - target: billprovsuffix
+        sources: ["BillProvSuffix"]
+        type: text
+      - target: refprovid
+        sources: ["RefProvID"]
+        type: text
+      - target: refprov
+        sources: ["RefProv"]
+        type: text
+      - target: refprovname
+        sources: ["RefProvName"]
+        type: text
+      - target: refprovsuffix
+        sources: ["RefProvSuffix"]
+        type: text
+      - target: divisionid
+        sources: ["DivisionID"]
+        type: text
+      - target: division
+        sources: ["Division"]
+        type: text
+      - target: divisionname
+        sources: ["DivisionName"]
+        type: text
+      - target: deptid
+        sources: ["DeptID"]
+        type: text
+      - target: dept
+        sources: ["Dept"]
+        type: text
+      - target: deptdesc
+        sources: ["DeptDesc"]
+        type: text
+      - target: plcsvcid
+        sources: ["PlcSvcID"]
+        type: text
+      - target: plcsvc
+        sources: ["PlcSvc"]
+        type: text
+      - target: plcsvcdesc
+        sources: ["PlcSvcDesc"]
+        type: text
+      - target: visitloc
+        sources: ["VisitLoc"]
+        type: text
+      - target: visitlocabbr
+        sources: ["VisitLocAbbr"]
+        type: text
+      - target: visitlocdesc
+        sources: ["VisitLocDesc"]
+        type: text
+      - target: proccatid
+        sources: ["ProcCatID"]
+        type: text
+      - target: proccat
+        sources: ["ProcCat"]
+        type: text
+      - target: proccatname
+        sources: ["ProcCatName"]
+        type: text
+      - target: proccode
+        sources: ["ProcCode"]
+        type: text
+      - target: procdesc
+        sources: ["ProcDesc"]
+        type: text
+      - target: billingcode
+        sources: ["BillingCode"]
+        type: text
+      - target: modifiers
+        sources: ["Modifiers"]
+        type: text
+      - target: dxcode1
+        sources: ["DxCode1"]
+        type: text
+      - target: dxdesc1
+        sources: ["DxDesc1"]
+        type: text
+      - target: dxcode2
+        sources: ["DxCode2"]
+        type: text
+      - target: dxdesc2
+        sources: ["DxDesc2"]
+        type: text
+      - target: dxcode3
+        sources: ["DxCode3"]
+        type: text
+      - target: dxdesc3
+        sources: ["DxDesc3"]
+        type: text
+      - target: dxcode4
+        sources: ["DxCode4"]
+        type: text
+      - target: dxdesc4
+        sources: ["DxDesc4"]
+        type: text
+      - target: fee
+        sources: ["Fee"]
+        type: currency
+      - target: units
+        sources: ["Units"]
+        type: decimal
+      - target: operatorname
+        sources: ["OperatorName"]
+        type: text
+      - target: batchcategory
+        sources: ["BatchCategory"]
+        type: text
+      - target: batchnum
+        sources: ["BatchNum"]
+        type: text
+      - target: workrvu
+        sources: ["WorkRVU"]
+        type: decimal

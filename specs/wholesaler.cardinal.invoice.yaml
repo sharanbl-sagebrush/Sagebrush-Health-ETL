@@ -1,0 +1,174 @@
+# Cardinal Health invoice extract.
+#
+# Two genuinely different reports arrive under similar names:
+#
+#   invoice_detail   17 columns, has NDC, invoice line number and quantities.
+#                    This is the one reconciliation needs.
+#   invoice_summary   9 columns, no NDC, no line number, no quantity.
+#                    Invoice-level totals only.
+#
+# The 3-year history file `Cardinal_Invoice 01012023-03062026.xlsx` is the
+# summary; the April 16th pull `Cardinal_Invoice Review 01012023-04162026.csv`
+# is the detail report and covers the same period, 20,603 rows with NDC on
+# 20,602 of them. So no re-request to Cardinal is needed - but the two must not
+# be confused, which is why the summary detector requires NDC to be *absent*.
+#
+# Two date formats are in circulation for the same detail report: ISO in the
+# April pull, US in the February pull. Both are declared and tried in order.
+# They cannot be confused with each other: an ISO string never matches %m/%d/%Y.
+#
+# Note the filename `Cardinal_Invoice 01012023-...` contains no 2023 data at
+# all - invoice dates run 2024 to 2026. Filenames are a routing hint only.
+
+key: wholesaler.cardinal.invoice
+name: Cardinal Health - Invoice Review
+vendor: Cardinal Health
+group: "1 Wholesalers"
+catalog_names: ["Cardinal"]
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - "cardinal.*invoice"
+
+# Cardinal invoice lines are uniquely identified by invoice and line number.
+# The account is included because the same Cardinal invoice numbering is not
+# guaranteed unique across the 67 Sagebrush accounts.
+natural_key: [account_number, invoice_number, invoice_line_number]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: invoice_detail
+    description: >
+      17-column line-level report. The reconciliation source.
+    detect:
+      require_all: ["NDC", "Invoice Line #", "Ship Qty"]
+    read:
+      skip_trailing_blank_rows: true
+    columns:
+      - target: account_number
+        sources: ["Account #"]
+        type: text
+        required: true
+        description: >
+          Cardinal account. Maps to a site via the Master COGS List on
+          (payee, account, location) - not on account alone, which is not unique.
+      - target: account_name
+        sources: ["Account Name"]
+        type: text
+      - target: account_alias
+        sources: ["Account Alias"]
+        type: text
+        description: Free-text location hint, e.g. "Rosemont Las Vegas Location".
+      - target: po_number
+        sources: ["PO #"]
+        type: text
+      - target: invoice_number
+        sources: ["Invoice #"]
+        type: text
+        required: true
+      - target: invoice_line_number
+        sources: ["Invoice Line #"]
+        type: text
+        required: true
+        description: >
+          Kept as text, not integer. Cardinal zero-pads it ("000010") and the
+          leading zeros are part of the identifier.
+      - target: invoice_date
+        sources: ["Invoice Date"]
+        type: date
+        required: true
+        date_formats: ["%Y-%m-%d", "%m/%d/%Y"]
+      - target: invoice_type
+        sources: ["Invoice Type"]
+        type: text
+      - target: purchase_or_return
+        sources: ["Purchase/Return"]
+        type: text
+        required: true
+        description: >
+          Distinguishes a purchase from a return. A return must not be summed
+          as a purchase.
+      - target: cin
+        sources: ["CIN"]
+        type: text
+        description: Cardinal item number.
+      - target: ndc
+        sources: ["NDC"]
+        type: ndc
+        required: true
+      - target: trade_name
+        sources: ["Trade Name"]
+        type: text
+      - target: generic_name
+        sources: ["Generic Name"]
+        type: text
+      - target: unit_price
+        sources: ["Unit price (Current Invoice)"]
+        type: currency
+      - target: ordered_quantity
+        sources: ["Original Ordered Qty"]
+        type: decimal
+      - target: shipped_quantity
+        sources: ["Ship Qty"]
+        type: decimal
+        required: true
+        description: >
+          Quantity in packages, not billing units. Conversion to billing units
+          uses BILLUNITSPKG from the ASP crosswalk and is reconciliation work;
+          the package figure is captured here so that conversion is possible.
+      - target: purchase_amount
+        sources: ["Purchase Dollars (Exclude Taxes, Fees & Surcharges)"]
+        type: currency
+        required: true
+        description: Ships as "$3,767.71 " with a trailing space.
+
+  - name: invoice_summary
+    description: >
+      9-column invoice-level report with no NDC. Cannot support NDC-level
+      reconciliation; retained so the file is recognised rather than
+      misread as the detail report.
+    detect:
+      require_all: ["Invoice #", "Purchase/Return"]
+      require_none: ["NDC", "Invoice Line #"]
+    columns:
+      - target: account_number
+        sources: ["Account #"]
+        type: text
+        required: true
+      - target: account_name
+        sources: ["Account Name"]
+        type: text
+      - target: account_alias
+        sources: ["Account Alias"]
+        type: text
+      - target: po_number
+        sources: ["PO #"]
+        type: text
+      - target: invoice_number
+        sources: ["Invoice #"]
+        type: text
+        required: true
+      - target: invoice_line_number
+        sources: ["Invoice Line #"]
+        type: text
+        description: >
+          Never present in this variant. Declared so the natural key is
+          satisfiable; it lands null and the row is identified by invoice alone.
+      - target: invoice_date
+        sources: ["Invoice Date"]
+        type: date
+        required: true
+        date_formats: ["%Y-%m-%d", "%m/%d/%Y"]
+      - target: invoice_type
+        sources: ["Invoice Type"]
+        type: text
+      - target: purchase_or_return
+        sources: ["Purchase/Return"]
+        type: text
+      - target: purchase_amount
+        sources: ["Purchase Dollars (Exclude Taxes, Fees & Surcharges)"]
+        type: currency
+        required: true

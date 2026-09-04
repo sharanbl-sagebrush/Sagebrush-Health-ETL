@@ -1,0 +1,159 @@
+# Master COGS List - the wholesaler account register maintained by finance.
+#
+# This is the file that makes entity resolution possible. Without it a purchase
+# row carries an account number and nothing else, which is how the previous
+# reconciliation came to pool every covered entity into one global (NDC, week)
+# bucket.
+#
+# Two things it supplies that nothing else does:
+#
+#   1. Account to site. `(payee, account_number, location)` is unique across all
+#      121 Master Sheet rows. `account_number` alone is NOT - McKesson 62766
+#      maps to three different classes across five rows - so any resolution
+#      keyed on account number alone mis-attributes.
+#
+#   2. The channel split, in `category`. "Buy and bill 340B (owned clinics)" vs
+#      "Prescription 340B (Owned & Community Outreach Clinics)". This is what
+#      stops a buy-and-bill administration at a clinic and a TPA claim through a
+#      contract pharmacy being counted as two separate events - the
+#      double-subtraction risk in the old purchased - dispensed - claimed
+#      formula.
+#
+# It also carries the CuraScript account map for all 10 accounts even though
+# CuraScript purchase data is not ingested at all ("no access on reporting
+# tool"), which is the cleanest available disambiguator between the Nevada and
+# Orangeburg sites.
+#
+# Two variants, because the workbook holds both a consolidated Master Sheet and
+# a working tab per wholesaler. Per the decision of 2026-09-04 the Master Sheet
+# is authoritative; the vendor tabs are ingested anyway so that the five rows on
+# which they disagree can be reported rather than quietly lost. The known
+# disagreement is McKesson 79926915: "Fire Mesa ID" in Master, "Fire Mesa
+# Rheumatology" in the McKesson tab.
+#
+# `class_current` and `class_proposed` are both landed without interpretation,
+# per the same decision. 28 of 121 accounts differ between them, mostly
+# Unassigned -> CVS (Wellpartner) / PharmaForce / PRXP, and no effective date
+# was recorded. Until one is supplied, entity resolution reports UNRESOLVED for
+# those 28 accounts rather than guessing which classification was in force.
+
+key: reference.wholesaler_accounts
+name: Master COGS List - wholesaler account register
+vendor: Sagebrush Finance
+group: Reference
+catalog_names: ["Master COGS List"]
+lifecycle: active
+expected_cadence_days: null
+
+filename_patterns:
+  - "master.*cogs"
+  - "wholesaler.*account"
+
+# The account register is a dimension, not a transaction feed: a full
+# re-delivery replaces the previous picture. Identity is the finance-side
+# composite that is actually unique.
+natural_key: [source_sheet, payee, account_number, location]
+
+on_new_column: fail
+on_missing_column: fail
+
+variants:
+  - name: master_sheet
+    description: >
+      The consolidated, authoritative register. Carries both the current and
+      proposed classification.
+    detect:
+      require_all: ["Payee", "Class", "Class_New", "Account No"]
+    read:
+      sheet: "Master Sheet"
+      sheet_name_column: source_sheet
+    columns:
+      - target: source_sheet
+        type: text
+        description: >
+          Injected by the reader. Constant for this variant, but present so the
+          natural key has the same shape across both variants and the two can be
+          compared row for row.
+      - target: payee
+        sources: ["Payee"]
+        type: text
+        required: true
+        description: >
+          Wholesaler as finance names them. Contains vendor spellings that must
+          be preserved here and normalized in the dimension - "Speciality" for
+          Specialty, for instance.
+      - target: class_current
+        sources: ["Class"]
+        type: text
+        description: Classification in force. Mixes clinic sites with contract-pharmacy channels.
+      - target: class_proposed
+        sources: ["Class_New"]
+        type: text
+        description: >
+          Proposed reclassification. No effective date was recorded, so this is
+          landed uninterpreted. One row has this empty.
+      - target: class_changed_flag
+        sources: ["Changed?"]
+        type: text
+        required: true
+        description: >
+          Finance's own Yes/No marker. Kept as text rather than boolean because
+          it is a human annotation and its vocabulary is not guaranteed.
+      - target: category
+        sources: ["Category"]
+        type: text
+        required: true
+        description: >
+          GL category. Encodes the buy-and-bill versus retail-340B channel
+          split that reconciliation depends on.
+      - target: account_number
+        sources: ["Account No", "Account no"]
+        type: text
+        required: true
+        description: >
+          Text, never numeric. ABC accounts appear here without a leading zero
+          (100583154) where the wholesaler extracts use 0100583154, so leading
+          zeros are significant and an integer conversion would destroy them.
+      - target: location
+        sources: ["Location"]
+        type: text
+        required: true
+        description: >
+          Ship-to description, and the field that disambiguates a reused account
+          number. Contains embedded newlines - multi-line postal addresses - and
+          leading spaces, both preserved.
+
+  - name: vendor_tab
+    description: >
+      One working tab per wholesaler, five columns, no Class_New. Ingested only
+      so disagreements with the Master Sheet can be reported.
+    detect:
+      require_all: ["Payee", "Class", "Category", "Location"]
+      require_none: ["Class_New"]
+    read:
+      sheet_pattern: "^(Cardinal|R&S|Mckesson|Cura|ABC)$"
+      sheet_name_column: source_sheet
+    columns:
+      - target: source_sheet
+        type: text
+        description: Worksheet the row came from, injected by the reader.
+      - target: payee
+        sources: ["Payee"]
+        type: text
+        required: true
+      - target: class_current
+        sources: ["Class"]
+        type: text
+      - target: category
+        sources: ["Category"]
+        type: text
+        required: true
+      - target: account_number
+        sources: ["Account No", "Account no"]
+        type: text
+        required: true
+        description: The R&S tab spells this header "Account no", lower-case n.
+      - target: location
+        sources: ["Location"]
+        type: text
+        required: true
