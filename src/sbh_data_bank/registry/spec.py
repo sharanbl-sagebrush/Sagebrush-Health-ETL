@@ -46,6 +46,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "ColumnSpec",
+    "FooterPolicy",
+    "VariantAction",
     "DriftPolicy",
     "FieldType",
     "OnError",
@@ -136,6 +138,51 @@ class DriftPolicy(StrEnum):
     optional columns routinely."""
 
 
+class VariantAction(StrEnum):
+    """What to do with a file once its variant is known."""
+
+    LOAD = "load"
+    """Read it and land the rows. The normal case."""
+
+    RECOGNISE_ONLY = "recognise_only"
+    """Identify the file, then land nothing.
+
+    For a report the vendor still produces but which has been superseded by a
+    better one covering the same ground. Cardinal is the live example: the
+    9-column invoice summary carries the same invoices as the 17-column detail
+    report but without NDC, line number or quantity, and the April 2026 detail
+    pull covers the whole period. Loading both would double-count every
+    purchase.
+
+    Recognising it still matters. Dropping the variant entirely would leave the
+    file unidentifiable, and an unidentified file is either an alert somebody
+    has to chase or - worse, if a detector were loosened to accommodate it - a
+    summary read as though it were detail. This says "we know exactly what this
+    is, and we are deliberately not loading it", which is a different and much
+    safer statement.
+    """
+
+
+class FooterPolicy(StrEnum):
+    """How to treat a trailing summary row."""
+
+    NONE = "none"
+    """No footer expected. A trailing row that looks like one still
+    quarantines, because it is not data."""
+
+    TOTALS_ROW = "totals_row"
+    """The last row is a totals line: key columns empty, numeric columns
+    populated.
+
+    The Cardinal detail export ends with one, and it is worth far more than an
+    annoyance to skip. The vendor is stating what the file should sum to, so
+    the footer becomes an independent control total - arithmetic we did not
+    perform, checked against arithmetic we did. Landing it instead would have
+    added $20,147,607.39 of phantom purchases to a $20,147,607.39 file,
+    doubling it exactly.
+    """
+
+
 class SourceLifecycle(StrEnum):
     """Whether a source is expected to deliver."""
 
@@ -173,7 +220,15 @@ class ColumnSpec(BaseModel):
 
     type: FieldType = FieldType.TEXT
     required: bool = False
-    """A required column absent from the file is a drift failure, not a null."""
+    """Two things, deliberately: the column must exist in the file, and each
+    row must have a value for it.
+
+    Column-absent is drift and blocks the file per the source's policy.
+    Value-absent quarantines that one row. Splitting these into two flags reads
+    tidier and gets used wrongly - a field declared "required" that silently
+    accepts blanks is worse than no declaration at all, and it is how a
+    completely empty row lands as a purchase with null everything.
+    """
 
     date_formats: list[str] = Field(default_factory=list)
     """strptime formats, tried in order. Required for DATE columns and rejected
@@ -184,6 +239,15 @@ class ColumnSpec(BaseModel):
 
     pii: PiiClass = PiiClass.NONE
     on_error: OnError = OnError.QUARANTINE
+
+    control_total: bool = False
+    """Whether this column is additive and worth totalling as a control figure.
+
+    Only for extended amounts, never for rates. Summing a unit price produces a
+    number with no meaning, and a meaningless control total is worse than none
+    because somebody will eventually try to reconcile against it.
+    """
+
     description: str = ""
 
     @model_validator(mode="after")
@@ -240,6 +304,9 @@ class ReadSpec(BaseModel):
     delimiter: str = ","
     skip_trailing_blank_rows: bool = True
     """Cardinal detail exports end with a fully empty row."""
+
+    footer: FooterPolicy = FooterPolicy.NONE
+    """Whether the last row is a totals line, and its figures a control check."""
 
     @model_validator(mode="after")
     def _check_sheet_selection(self) -> Self:
@@ -299,7 +366,27 @@ class SchemaVariant(BaseModel):
     detect: VariantDetector
     read: ReadSpec = Field(default_factory=ReadSpec)
     columns: list[ColumnSpec] = Field(min_length=1)
+    action: VariantAction = VariantAction.LOAD
+    superseded_by: str | None = None
+    """Name of the variant that replaces this one. Required when the action is
+    recognise_only, so the reason is recorded next to the decision rather than
+    in a commit message."""
     description: str = ""
+
+    @property
+    def loads(self) -> bool:
+        return self.action is VariantAction.LOAD
+
+    @model_validator(mode="after")
+    def _check_action(self) -> Self:
+        if self.action is VariantAction.RECOGNISE_ONLY and not self.superseded_by:
+            raise ValueError(
+                f"variant {self.name!r} is recognise_only and must name the variant "
+                "that supersedes it"
+            )
+        if self.action is VariantAction.LOAD and self.superseded_by:
+            raise ValueError(f"variant {self.name!r} loads, so it cannot be superseded")
+        return self
 
     @model_validator(mode="after")
     def _targets_are_unique(self) -> Self:
@@ -378,6 +465,15 @@ class SourceSpec(BaseModel):
         names = [v.name for v in self.variants]
         if len(names) != len(set(names)):
             raise ValueError(f"{self.key}: variant names must be unique, got {names}")
+
+        for variant in self.variants:
+            if variant.superseded_by and variant.superseded_by not in names:
+                raise ValueError(
+                    f"{self.key}: variant {variant.name!r} is superseded by "
+                    f"{variant.superseded_by!r}, which does not exist"
+                )
+        if not any(v.loads for v in self.variants):
+            raise ValueError(f"{self.key}: no variant loads anything")
 
         for pattern in self.filename_patterns:
             try:

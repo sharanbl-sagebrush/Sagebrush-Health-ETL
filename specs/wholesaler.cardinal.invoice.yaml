@@ -13,6 +13,9 @@
 # 20,602 of them. So no re-request to Cardinal is needed - but the two must not
 # be confused, which is why the summary detector requires NDC to be *absent*.
 #
+# Only the detail report is loaded. The summary is recognised and skipped, so
+# the same purchases are not counted twice.
+#
 # Two date formats are in circulation for the same detail report: ISO in the
 # April pull, US in the February pull. Both are declared and tried in order.
 # They cannot be confused with each other: an ISO string never matches %m/%d/%Y.
@@ -47,6 +50,10 @@ variants:
       require_all: ["NDC", "Invoice Line #", "Ship Qty"]
     read:
       skip_trailing_blank_rows: true
+      # The export ends with a totals line - key columns blank, quantities and
+      # amount populated. Recognised rather than landed, and its figures are
+      # checked against ours.
+      footer: totals_row
     columns:
       - target: account_number
         sources: ["Account #"]
@@ -111,10 +118,12 @@ variants:
       - target: ordered_quantity
         sources: ["Original Ordered Qty"]
         type: decimal
+        control_total: true
       - target: shipped_quantity
         sources: ["Ship Qty"]
         type: decimal
         required: true
+        control_total: true
         description: >
           Quantity in packages, not billing units. Conversion to billing units
           uses BILLUNITSPKG from the ASP crosswalk and is reconciliation work;
@@ -123,13 +132,23 @@ variants:
         sources: ["Purchase Dollars (Exclude Taxes, Fees & Surcharges)"]
         type: currency
         required: true
+        control_total: true
         description: Ships as "$3,767.71 " with a trailing space.
 
   - name: invoice_summary
+    action: recognise_only
+    superseded_by: invoice_detail
     description: >
-      9-column invoice-level report with no NDC. Cannot support NDC-level
-      reconciliation; retained so the file is recognised rather than
-      misread as the detail report.
+      9-column invoice-level report with no NDC, no line number and no
+      quantity. Recognised but not loaded, per the instruction of 2026-09-04 to
+      use the latest Cardinal file rather than the old one.
+
+      The invoices it contains are the same invoices the detail report carries,
+      and the April 2026 detail pull covers 2024 to 2026 in full, so loading
+      both would double-count every Cardinal purchase. It stays declared
+      because an unrecognised file is either an alert somebody has to chase or,
+      if a detector were ever loosened to accommodate it, a summary silently
+      read as detail.
     detect:
       require_all: ["Invoice #", "Purchase/Return"]
       require_none: ["NDC", "Invoice Line #"]
