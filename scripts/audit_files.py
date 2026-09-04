@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import os
 import sys
 import zipfile
 from collections import Counter
@@ -36,8 +37,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sbh_data_bank.registry.headers import is_junk_header, normalize_header  # noqa: E402
 
-DEFAULT_ROOT = Path(
-    r"C:\Users\SharanLokeshwar\OneDrive - Sagebrush Healthcare\Sagebrush ETL Files\Original Files"
+#: Where the vendor extracts live. They are PHI and stay outside the
+#: repository, so the location is per-machine: set SBH_SOURCE_ROOT, or pass
+#: a path argument. The fallback is the layout this was first written against.
+DEFAULT_ROOT = (
+    Path(
+        os.environ.get(
+            "SBH_SOURCE_ROOT",
+            r"C:\Users\SharanLokeshwar\OneDrive - Sagebrush Healthcare\Sagebrush ETL Files",
+        )
+    )
+    / "Original Files"
 )
 DATA_SUFFIXES = {".csv", ".xlsx", ".xlsm", ".xls"}
 TAIL_BYTES = 256 * 1024

@@ -14,6 +14,7 @@ Reads header rows only. No cell values are read, printed or written anywhere.
 from __future__ import annotations
 
 import io
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -34,7 +35,15 @@ from sbh_data_bank.registry.headers import AmbiguousHeaderError, HeaderIndex  # 
 from sbh_data_bank.registry.loader import SpecRegistry  # noqa: E402
 from sbh_data_bank.registry.spec import SourceSpec  # noqa: E402
 
-DEFAULT_ROOT = Path(r"C:\Users\SharanLokeshwar\OneDrive - Sagebrush Healthcare\Sagebrush ETL Files")
+#: Where the vendor extracts live. They are PHI and stay outside the
+#: repository, so the location is per-machine: set SBH_SOURCE_ROOT, or pass
+#: a path argument. The fallback is the layout this was first written against.
+DEFAULT_ROOT = Path(
+    os.environ.get(
+        "SBH_SOURCE_ROOT",
+        r"C:\Users\SharanLokeshwar\OneDrive - Sagebrush Healthcare\Sagebrush ETL Files",
+    )
+)
 REPO = Path(__file__).resolve().parents[1]
 
 DATA_SUFFIXES = {".csv", ".xlsx", ".xls"}
