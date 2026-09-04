@@ -1,0 +1,157 @@
+# AmerisourceBergen purchases, invoice detail.
+#
+# The same 26 columns arrive two ways, and the preamble differs between them:
+# as a workbook (sheet "Results") with one report-title row above the header,
+# and as a CSV with a `sep=,` declaration AND a title - two lines.
+#
+# A fixed preamble_lines cannot serve both, and two variants cannot be told
+# apart because the headers are identical, so every delivery would have raised
+# AmbiguousVariantError. The header is located by header_marker instead: the
+# first row carrying a column called "Account #". Still declarative, and a
+# missing marker fails loudly rather than reading the title row as a header.
+#
+# No 2023 data exists for this source - the delivery catalogue records "no 2023
+# data" - so coverage_start stops that being reported as a freshness gap.
+
+key: wholesaler.abc.purchases
+name: AmerisourceBergen - Purchases Invoice Detail
+vendor: AmerisourceBergen
+group: "1 Wholesalers"
+catalog_names: ['Abc']
+lifecycle: active
+expected_cadence_days: 7
+coverage_start: "2024-01-01"
+
+filename_patterns:
+  - 'abc.*purchases'
+
+natural_key: [account, invoice, ndc]
+
+on_new_column: warn
+on_missing_column: fail
+notes: >
+  Account numbers carry significant leading zeros (0100461951).
+  The Master COGS List writes the same accounts without them, so account matching
+  needs an explicit normalization rule rather than an incidental one.
+  
+  ABC ships no invoice line number, so (account, invoice, ndc) is the widest key
+  available and it is not quite unique - the earlier validation pack found two
+  duplicate rows on that key. Row identity therefore falls back to the row hash,
+  and the duplicates are a real question for the vendor rather than something to
+  paper over.
+
+variants:
+  - name: invoice_detail
+    description: >
+      26-column line-level purchase detail. The same
+      column set as a CSV and as a workbook; only the preamble differs.
+    detect:
+      require_all: ['Account #', 'NDC', 'Shipped Qty']
+    read:
+      header_marker: 'Account #'
+      sheet: 'Results'
+    columns:
+      - target: account
+        sources: ['Account #']
+        type: text
+        required: true
+        description: >
+          Leading zeros are significant: 0100461951 here, where the Master
+          COGS List writes the same account as 100461951. Text, never integer.
+      - target: account_name
+        sources: ['Account Name']
+        type: text
+      - target: city
+        sources: ['City']
+        type: text
+        pii: quasi
+      - target: state
+        sources: ['State']
+        type: text
+        pii: quasi
+      - target: invoice_date
+        sources: ['Invoice Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: customer_po
+        sources: ['Customer PO #']
+        type: text
+      - target: invoice
+        sources: ['Invoice #']
+        type: text
+        required: true
+      - target: abc
+        sources: ['ABC #']
+        type: text
+      - target: product_description
+        sources: ['Product Description']
+        type: text
+      - target: ndc
+        sources: ['NDC']
+        type: ndc
+        description: >
+          Not required. 367 of 4,513 rows in the 2024-2026 extract are
+          non-merchandise lines - service charges such as "PHARM DATA SERVICES
+          PRICE MAINTENANCE" with a Non-Merchandise amount and no NDC. They are
+          real invoice lines carrying real dollars, so they belong in the
+          warehouse for invoice-level financial reconciliation; they simply
+          cannot take part in NDC-level inventory reconciliation.
+      - target: order_qty
+        sources: ['Order Qty']
+        type: decimal
+      - target: shipped_qty
+        sources: ['Shipped Qty']
+        type: decimal
+        required: true
+        control_total: true
+        description: >
+          Packages, not billing units. Conversion needs BILLUNITSPKG from
+          the ASP crosswalk and is reconciliation work; the package figure is
+          captured here so that conversion remains possible.
+      - target: invoice_ext_amt
+        sources: ['Invoice Ext Amt']
+        type: currency
+        required: true
+        control_total: true
+      - target: non_merchandise
+        sources: ['Non-Merchandise']
+        type: currency
+      - target: tax_amount
+        sources: ['Tax Amount']
+        type: currency
+      - target: contract_abbrev_name
+        sources: ['Contract Abbrev Name']
+        type: text
+      - target: current_acq_cost
+        sources: ['Current Acq Cost']
+        type: currency
+      - target: total_ext_cost
+        sources: ['Total Ext Cost']
+        type: currency
+        control_total: true
+      - target: awp
+        sources: ['AWP']
+        type: currency
+      - target: awp_date
+        sources: ['AWP Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: customer_pack_size
+        sources: ['Customer Pack Size']
+        type: decimal
+      - target: fdb_awp_wholesale_factor
+        sources: ['FDB AWP Wholesale Factor']
+        type: decimal
+      - target: fdb_package_size_qty
+        sources: ['FDB Package Size Qty']
+        type: decimal
+      - target: package_awp
+        sources: ['Package AWP']
+        type: currency
+      - target: unit_size_qty
+        sources: ['Unit Size Qty']
+        type: decimal
+      - target: unit_size_code
+        sources: ['Unit Size Code']
+        type: text

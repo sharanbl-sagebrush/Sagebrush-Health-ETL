@@ -1,0 +1,176 @@
+# McKesson custom purchasing report - listed in the delivery catalogue as
+# "R and S", which nothing else would tell you.
+#
+# Carries both the 10-digit and the 11-digit NDC on every row. That pairing is
+# the ground truth that proved the previous zfill(11) normalization wrong on 55
+# of 101 distinct NDCs, and it is committed as a regression fixture.
+#
+# Also carries Associated 340B ID (OPAID) - the covered-entity key that links an
+# account to a covered entity, shared with Pharmaforce and Wellpartner.
+#
+# NO totals footer, unlike the sibling Purchasing Detail report. Verified: the
+# last row is real data.
+#
+# Opens with an unnamed row-number column, excluded from matching as an
+# artifact.
+
+key: wholesaler.mckesson.custom
+name: McKesson - Custom Report (R and S)
+vendor: McKesson
+group: "1 Wholesalers"
+catalog_names: ['R and S']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'mckesson.*custom'
+
+natural_key: [invoice_credit_number, mckesson_item_number, po_number]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: custom_report
+    detect:
+      require_all: ['Invoice/Credit Number', 'NDC (Current)', 'Associated 340B ID']
+    columns:
+      # unnamed export artifact at this position, not data
+      - target: n10_digit_ndc_current
+        sources: ['10 Digit NDC (Current)']
+        type: text
+        description: >
+          The vendor's 10-digit rendering of the same NDC, kept as text.
+          
+          Deliberately NOT type ndc. An unhyphenated 10-digit NDC cannot be
+          resolved without a directory lookup, so typing it as an NDC quarantines
+          every row in the file - which is exactly what happened on the first run
+          of this spec, 6,102 rows of 6,165.
+          
+          It is kept because the pairing with the 11-digit column is the ground
+          truth that proved the previous zfill(11) normalization wrong on 55 of
+          101 distinct NDCs - see tests/fixtures/ndc_ground_truth_mckesson.json.
+      - target: account_number
+        sources: ['Account Number']
+        type: text
+        required: true
+      - target: account_name
+        sources: ['Account Name']
+        type: text
+      - target: awp_current
+        sources: ['AWP (Current)']
+        type: currency
+      - target: associated_340b_id
+        sources: ['Associated 340B ID']
+        type: text
+        description: >
+          The covered-entity key (OPAID). Present here, in Pharmaforce and
+          in Wellpartner, and it is what ties an account to a covered entity.
+      - target: wac_effective_date_current_date
+        sources: ['WAC Effective Date (Current) Date']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+      - target: user_pkg_size
+        sources: ['User Pkg Size']
+        type: text
+      - target: unit_dose_indicator
+        sources: ['Unit Dose Indicator']
+        type: text
+      - target: store_identifier
+        sources: ['Store Identifier']
+        type: text
+      - target: standard_suggested_retail_price
+        sources: ['Standard Suggested Retail Price']
+        type: currency
+      - target: price_per_package
+        sources: ['Price per Package ($)']
+        type: currency
+      - target: package_size_multiplier
+        sources: ['Package Size Multiplier']
+        type: decimal
+        description: >
+          Packages to units. An input to unit conversion - captured now,
+          applied when reconciliation is built.
+      - target: package_size
+        sources: ['Package Size']
+        type: decimal
+      - target: po_number
+        sources: ['PO Number']
+        type: text
+      - target: po_memo
+        sources: ['PO Memo']
+        type: text
+      - target: original_ordered_item_number
+        sources: ['Original Ordered Item Number']
+        type: text
+      - target: order_submitted_by_id
+        sources: ['Order Submitted By ID']
+        type: text
+      - target: order_uom
+        sources: ['Order UOM']
+        type: text
+      - target: ordered_quantity
+        sources: ['Ordered Quantity']
+        type: decimal
+        control_total: true
+      - target: ndc_current
+        sources: ['NDC (Current)']
+        type: ndc
+        description: >
+          The canonical 11-digit form. Not required: 63 rows carry no NDC
+          at all, the same non-drug invoice lines that ABC shows.
+      - target: item_description
+        sources: ['Item Description']
+        type: text
+      - target: received_quantity
+        sources: ['Received Quantity']
+        type: decimal
+      - target: invoice_credit_number
+        sources: ['Invoice/Credit Number']
+        type: text
+        required: true
+      - target: invoice_credit_date
+        sources: ['Invoice/Credit Date']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+        required: true
+      - target: mckesson_item_number
+        sources: ['McKesson Item Number']
+        type: text
+        required: true
+      - target: label_name
+        sources: ['Label Name']
+        type: text
+      - target: net_quantity
+        sources: ['Net Quantity']
+        type: decimal
+        control_total: true
+      - target: extended_price
+        sources: ['Extended Price ($)']
+        type: currency
+        control_total: true
+      - target: invoiced_price_per_dose
+        sources: ['Invoiced Price Per Dose']
+        type: currency
+        description: >
+          A rate, not an extended amount - deliberately not a control total.
+      - target: average_quantity_per_invoice_pkg
+        sources: ['Average Quantity per Invoice (Pkg)']
+        type: decimal
+      - target: invoice_quantity_omitted
+        sources: ['Invoice Quantity - Omitted']
+        type: decimal
+      - target: invoice_quantity_filled
+        sources: ['Invoice Quantity (Filled)']
+        type: decimal
+      - target: total_ordered_quantity
+        sources: ['Total Ordered Quantity']
+        type: decimal
+      - target: net_purchases
+        sources: ['Net Purchases ($)']
+        type: currency
+        control_total: true
+      - target: gross_purchases
+        sources: ['Gross Purchases ($)']
+        type: currency
+        control_total: true

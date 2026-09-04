@@ -13,15 +13,18 @@ Reads header rows only. No cell values are read, printed or written anywhere.
 
 from __future__ import annotations
 
-import csv
 import io
 import sys
 import zipfile
-from collections.abc import Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from sbh_data_bank.ingest.reader import (  # noqa: E402
+    HeaderNotFoundError,
+    open_source,
+    resolve_sheet,
+)
 from sbh_data_bank.registry.binding import (  # noqa: E402
     AmbiguousVariantError,
     NoVariantMatchedError,
@@ -29,7 +32,7 @@ from sbh_data_bank.registry.binding import (  # noqa: E402
 )
 from sbh_data_bank.registry.headers import AmbiguousHeaderError, HeaderIndex  # noqa: E402
 from sbh_data_bank.registry.loader import SpecRegistry  # noqa: E402
-from sbh_data_bank.registry.spec import ReadSpec, SourceSpec  # noqa: E402
+from sbh_data_bank.registry.spec import SourceSpec  # noqa: E402
 
 DEFAULT_ROOT = Path(r"C:\Users\SharanLokeshwar\OneDrive - Sagebrush Healthcare\Sagebrush ETL Files")
 REPO = Path(__file__).resolve().parents[1]
@@ -37,48 +40,43 @@ REPO = Path(__file__).resolve().parents[1]
 DATA_SUFFIXES = {".csv", ".xlsx", ".xls"}
 
 
-def _csv_headers(handle: io.TextIOBase, read: ReadSpec) -> list[str]:
-    for _ in range(read.preamble_lines):
-        handle.readline()
-    row = next(csv.reader(handle, delimiter=read.delimiter), [])
-    while row and not str(row[-1]).strip():
-        row.pop()
-    return row
+def _headers_via_reader(
+    source: Path | io.BufferedIOBase, spec: SourceSpec, sheet: str | None = None
+) -> list[str]:
+    """Read the header the way the loader does.
 
-
-def _sniff_preamble(path: Path, encoding: str) -> int:
-    """How many lines precede the header.
-
-    Only ``sep=`` declarations and obvious report titles - a line with fewer
-    than three populated fields. The ABC CSV opens with both.
+    Every variant is tried, because finding the header can depend on the
+    variant - ABC locates it by marker, Athena by a fixed preamble count. The
+    script deliberately does not implement its own header search: it existed
+    once, and it disagreed with the loader, reporting ABC workbooks as
+    unrecognised while the loader read all 4,513 rows.
     """
-    with path.open("r", encoding=encoding, errors="replace", newline="") as handle:
-        for index in range(10):
-            line = handle.readline()
-            if not line:
-                return 0
-            if line.lower().startswith("sep="):
-                continue
-            cells = next(csv.reader([line]), [])
-            if len([c for c in cells if c.strip()]) >= 3:
-                return index
-    return 0
+    last: Exception | None = None
+    for variant in spec.variants:
+        if isinstance(source, Path):
+            handle: Path | io.BufferedIOBase = source
+        else:
+            source.seek(0)
+            handle = source
+        try:
+            header, _ = open_source(handle, variant.read, sheet=sheet)
+        except (HeaderNotFoundError, StopIteration, KeyError, UnicodeDecodeError) as exc:
+            last = exc
+            continue
+        if header:
+            return header
+    if last is not None:
+        raise last
+    return []
 
 
-def _excel_sheets(path: Path) -> Iterator[tuple[str, list[str]]]:
-    import openpyxl
-
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        for name in workbook.sheetnames:
-            worksheet = workbook[name]
-            first = next(worksheet.iter_rows(values_only=True), ())
-            cells = [("" if c is None else str(c)) for c in first]
-            while cells and not cells[-1].strip():
-                cells.pop()
-            yield name, cells
-    finally:
-        workbook.close()
+def _sheets_for(path: Path, spec: SourceSpec) -> list[str]:
+    names: list[str] = []
+    for variant in spec.variants:
+        for name in resolve_sheet(path, variant.read):
+            if name not in names:
+                names.append(name)
+    return names
 
 
 def _report(label: str, spec: SourceSpec, headers: list[str]) -> str:
@@ -122,8 +120,7 @@ def main(root: Path) -> int:
                     members = [n for n in archive.namelist() if n.lower().endswith(".csv")]
                     for member in members[:2]:  # shape is identical across members
                         with archive.open(member) as raw:
-                            text = io.TextIOWrapper(raw, encoding="utf-8-sig", errors="replace")
-                            headers = _csv_headers(text, spec.variants[0].read)
+                            headers = _headers_via_reader(io.BytesIO(raw.read()), spec)
                         seen += 1
                         line = _report(Path(member).name, spec, headers)
                         problems += "BLOCKED" in line
@@ -138,22 +135,19 @@ def main(root: Path) -> int:
                 continue
 
             seen += 1
-            if path.suffix.lower() == ".csv":
-                encoding = spec.variants[0].read.encoding
-                preamble = _sniff_preamble(path, encoding)
-                read = spec.variants[0].read.model_copy(update={"preamble_lines": preamble})
-                with path.open("r", encoding=encoding, errors="replace", newline="") as handle:
-                    headers = _csv_headers(handle, read)
-                line = _report(path.name, spec, headers)
-                problems += "BLOCKED" in line
-                print(line)
-            else:
-                for sheet_name, headers in _excel_sheets(path):
-                    if not any(v.read.selects_sheet(sheet_name) for v in spec.variants):
-                        continue
-                    line = _report(f"{path.name} [{sheet_name}]", spec, headers)
+            try:
+                if path.suffix.lower() == ".csv":
+                    line = _report(path.name, spec, _headers_via_reader(path, spec))
                     problems += "BLOCKED" in line
                     print(line)
+                else:
+                    for sheet_name in _sheets_for(path, spec):
+                        headers = _headers_via_reader(path, spec, sheet_name)
+                        line = _report(f"{path.name} [{sheet_name}]", spec, headers)
+                        problems += "BLOCKED" in line
+                        print(line)
+            except HeaderNotFoundError as exc:
+                print(f"    {path.name}: header not found - {exc}")
 
         if seen == 0:
             print("    (no matching files found)")

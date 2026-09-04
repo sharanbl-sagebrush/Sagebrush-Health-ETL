@@ -1,0 +1,193 @@
+# McKesson purchasing detail, invoice level.
+#
+# THIS FILE HAS A TOTALS FOOTER. Line 6165 of the 2023-2026 extract carries 11
+# of 45 cells: Extended Price $20,394,456.72, Net Quantity 11,378, Ordered
+# Quantity 14,155, Gross Purchases $20,479,715.99, Gross Credits and Returns
+# -$85,259.27. Those are the figures the earlier validation pack reported as
+# "$20.39M extended price, 11,378 net units" - it was reading the footer rather
+# than the data.
+#
+# Landing it would add a phantom $20.4M purchase. Declared instead, so its
+# figures become an independent control total: arithmetic McKesson performed,
+# checked against arithmetic we performed.
+#
+# The sibling report, McKesson Custom, has NO footer - its last row is real
+# data. The two differ, which is exactly the kind of thing that gets assumed
+# rather than checked.
+#
+# The export opens with an unnamed row-number column, excluded from matching as
+# an artifact and verified to carry no data any spec needs.
+
+key: wholesaler.mckesson.invoice
+name: McKesson - Purchasing Detail, Invoice Level
+vendor: McKesson
+group: "1 Wholesalers"
+catalog_names: ['Mckesson']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'mckesson.*purchasing detail'
+
+natural_key: [invoice_credit_number, mckesson_item_number]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: invoice_level
+    detect:
+      require_all: ['Invoice/Credit Number', 'McKesson Item Number', 'Extended Price ($)']
+    read:
+      footer: 'totals_row'
+    columns:
+      # unnamed export artifact at this position, not data
+      - target: mckesson_item_number
+        sources: ['McKesson Item Number']
+        type: text
+        required: true
+      - target: item_description
+        sources: ['Item Description']
+        type: text
+      - target: account_number
+        sources: ['Account Number']
+        type: text
+        required: true
+      - target: account_name
+        sources: ['Account Name']
+        type: text
+      - target: primary_account_number
+        sources: ['Primary Account Number']
+        type: text
+      - target: invoice_credit_number
+        sources: ['Invoice/Credit Number']
+        type: text
+        required: true
+      - target: invoice_credit_date
+        sources: ['Invoice/Credit Date']
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
+        required: true
+      - target: original_invoice_number
+        sources: ['Original Invoice Number']
+        type: text
+      - target: contract_indicator_invoice_yes_no
+        sources: ['Contract Indicator (Invoice) (Yes / No)']
+        type: text
+      - target: contract_lead_number_invoice
+        sources: ['Contract Lead Number (Invoice)']
+        type: text
+      - target: contract_lead_name
+        sources: ['Contract Lead Name']
+        type: text
+      - target: item_unit_of_measure_uom
+        sources: ['Item Unit of Measure (UOM)']
+        type: text
+      - target: preferred_indicator_formulary_history_yes_no
+        sources: ['Preferred Indicator (Formulary) (History) (Yes / No)']
+        type: text
+      - target: crrb_indicator_yes_no
+        sources: ['CRRB Indicator (Yes / No)']
+        type: text
+      - target: facility
+        sources: ['Facility']
+        type: text
+      - target: account_classification
+        sources: ['Account Classification']
+        type: text
+      - target: fill_dc_number_invoice
+        sources: ['Fill DC Number (Invoice)']
+        type: text
+      - target: fill_dc_name
+        sources: ['Fill DC Name']
+        type: text
+      - target: supplier_name_history
+        sources: ['Supplier Name (History)']
+        type: text
+      - target: generic_description
+        sources: ['Generic Description']
+        type: text
+      - target: ndc_upc_current
+        sources: ['NDC/UPC (Current)']
+        type: text
+      - target: therapeutic_category_code_ahfs
+        sources: ['Therapeutic Category Code (AHFS)']
+        type: text
+      - target: therapeutic_category_description_ahfs
+        sources: ['Therapeutic Category Description (AHFS)']
+        type: text
+      - target: therapeutic_sub_category_code_ahfs
+        sources: ['Therapeutic Sub Category Code (AHFS)']
+        type: text
+      - target: therapeutic_sub_category_description_ahfs
+        sources: ['Therapeutic Sub Category Description (AHFS)']
+        type: text
+      - target: therapeutic_class_code_ahfs_current
+        sources: ['Therapeutic Class Code (AHFS) (Current)']
+        type: text
+      - target: therapeutic_class_description_ahfs_current
+        sources: ['Therapeutic Class Description (AHFS) (Current)']
+        type: text
+      - target: city_history
+        sources: ['City (History)']
+        type: text
+      - target: state_history
+        sources: ['State (History)']
+        type: text
+      - target: street_address_history
+        sources: ['Street Address (History)']
+        type: text
+      - target: zip_history
+        sources: ['ZIP (History)']
+        type: text
+      - target: order_submitted_by_id
+        sources: ['Order Submitted By ID']
+        type: text
+      - target: price_per_package
+        sources: ['Price per Package ($)']
+        type: text
+      - target: extended_price
+        sources: ['Extended Price ($)']
+        type: currency
+        control_total: true
+      - target: net_quantity
+        sources: ['Net Quantity']
+        type: decimal
+        control_total: true
+      - target: ordered_quantity
+        sources: ['Ordered Quantity']
+        type: decimal
+        control_total: true
+      - target: invoice_quantity_filled
+        sources: ['Invoice Quantity (Filled)']
+        type: decimal
+        control_total: true
+      - target: returned_credited_quantity
+        sources: ['Returned/Credited Quantity']
+        type: decimal
+        control_total: true
+      - target: invoiced_price_per_dose
+        sources: ['Invoiced Price Per Dose']
+        type: currency
+        description: >
+          A rate, not an extended amount - deliberately not a control total.
+      - target: invoiced_dose_quantity_extended
+        sources: ['Invoiced Dose Quantity (Extended)']
+        type: decimal
+        control_total: true
+      - target: gross_purchases
+        sources: ['Gross Purchases ($)']
+        type: currency
+        control_total: true
+      - target: gross_credits_and_returns
+        sources: ['Gross Credits and Returns ($)']
+        type: currency
+        control_total: true
+      - target: net_handling_charge_amount
+        sources: ['Net Handling Charge Amount ($)']
+        type: currency
+        control_total: true
+      - target: net_returned_credited_price
+        sources: ['Net Returned/Credited Price ($)']
+        type: currency
+        control_total: true

@@ -183,6 +183,55 @@ Two months are outliers worth confirming: `2024-01` has 118 lines and `2023-04` 
 
 ---
 
+## 8. The two McKesson reports are the same purchases, and would double-count
+
+**Status: confirmed numerically.**
+
+Loading `McKesson_Purchasing Detail - Invoice Level` and `McKesson_Custom Report`
+independently, from separate files through separate specs, produces:
+
+| Measure | Purchasing Detail | Custom Report | |
+|---|---:|---:|---|
+| Extended price | $20,394,456.72 | $20,394,456.72 | identical |
+| Gross purchases | $20,479,715.99 | $20,479,715.99 | identical |
+| Net quantity | 11,378 | 11,378 | identical |
+| Ordered quantity | 14,155 | 14,132 | **differs by 23** |
+
+The earlier validation pack observed that the two "represent the same underlying
+purchases viewed two ways" and warned that using both would double-count. That
+is now confirmed from the data rather than inferred: three of four control
+totals agree to the cent.
+
+The Purchasing Detail figures above are the vendor's own footer, so the
+agreement is three-way — McKesson's arithmetic on one report, our arithmetic on
+that report, and our arithmetic on a different report.
+
+Open: the 23-unit difference in ordered quantity. Small, but the two reports
+agree exactly everywhere else, so it is a real difference rather than rounding.
+Worth asking McKesson which report is authoritative for ordered quantity, and
+worth deciding which of the two is the purchase source before reconciliation is
+built — loading both as purchases would double every McKesson figure.
+
+## 9. Non-drug invoice lines exist and must not be discarded
+
+**Status: closed in the specs.**
+
+367 of 4,513 rows in the ABC extract carry no NDC. They are service charges —
+`PHARM DATA SERVICES PRICE MAINTENANCE` with a Non-Merchandise amount and a zero
+extended amount. 63 rows of McKesson Custom are the same shape.
+
+They are real invoice lines carrying real dollars, so they belong in the
+warehouse for invoice-level financial reconciliation even though they cannot
+take part in NDC-level inventory reconciliation. `ndc` is therefore not a
+required column on either source.
+
+This was found by running the spec against the real file: the first version
+marked `ndc` required and quarantined all 367. It is the reason the spec
+scaffolder emits everything as `required: false` — requiredness is a claim about
+the data that has to be checked against the data.
+
+---
+
 ## Open questions
 
 1. **When did `Class` → `Class_New` take effect?** 28 of 121 accounts were
