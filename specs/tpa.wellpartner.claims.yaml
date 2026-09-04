@@ -1,0 +1,432 @@
+# Wellpartner 340B claims, from the Claims tab.
+#
+# Natural key: Transaction #, unique across all 42,018 rows. The wider candidate
+# (Rx # + Dispensed Date + NDC + Fill #) is also unique, and is a useful check if
+# the transaction number is ever absent.
+#
+# Carries the covered-entity key twice: as 340B ID and again inside Entity Name.
+# Both STD891281 and STD06489 appear.
+#
+# Est Entity Net Savings is one field with one meaning. The previous financial
+# view used it as both the entity receivable and the profit figure; the columns
+# it should have used - Program Revenue, Entity Subsidy, Est 340B Cost - are all
+# present separately.
+
+key: tpa.wellpartner.claims
+name: Wellpartner - 340B Claims
+vendor: Wellpartner
+group: "4 TPA"
+catalog_names: ['Wellpartner (Claims tab)']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'wellpartner.*claim'
+
+natural_key: [transaction]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: claims_119
+    detect:
+      require_all: ['Transaction #', '340B ID', 'Entity Name']
+    columns:
+      - target: processed_date
+        sources: ['Processed Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: entity_name
+        sources: ['Entity Name']
+        type: text
+        required: true
+      - target: state_of_ce
+        sources: ['State of CE']
+        type: text
+        pii: quasi
+      - target: n340b_id
+        sources: ['340B ID']
+        type: text
+        required: true
+        description: >
+          The covered-entity key. Two exist in this data: STD891281 (Fire
+          Mesa, Nevada) and STD06489 (Southington, Connecticut). The same identifier
+          appears as OPAID here, as 340B ID in Wellpartner Claims, embedded in Entity Name
+          in Wellpartner Invoices, and as Associated 340B ID in the McKesson Custom
+          report - which makes it the one key that ties every feed to a covered entity.
+      - target: contract_pharmacy_name
+        sources: ['Contract Pharmacy Name']
+        type: text
+      - target: replenishment_model_type
+        sources: ['Replenishment Model Type']
+        type: text
+      - target: hub_or_spoke
+        sources: ['Hub or Spoke']
+        type: text
+      - target: hub_pharmacy_name
+        sources: ['Hub Pharmacy Name']
+        type: text
+      - target: pharmacy_npi
+        sources: ['Pharmacy NPI']
+        type: text
+      - target: rx
+        sources: ['Rx #']
+        type: text
+      - target: ndc
+        sources: ['NDC']
+        type: ndc
+      - target: gpi
+        sources: ['GPI']
+        type: text
+      - target: drug_name
+        sources: ['Drug Name']
+        type: text
+      - target: manufacturer
+        sources: ['Manufacturer']
+        type: text
+      - target: batch_type
+        sources: ['Batch Type']
+        type: text
+      - target: batch_submission_date
+        sources: ['Batch Submission Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: direct_feed_batch_id
+        sources: ['Direct Feed Batch ID']
+        type: text
+      - target: drug_type
+        sources: ['Drug Type']
+        type: text
+      - target: specialty_drug
+        sources: ['Specialty Drug']
+        type: text
+      - target: storage_flag
+        sources: ['Storage Flag']
+        type: text
+      - target: diabetic_supply
+        sources: ['Diabetic Supply']
+        type: text
+      - target: drug_class
+        sources: ['Drug Class']
+        type: text
+      - target: schedule
+        sources: ['Schedule']
+        type: text
+      - target: mdq
+        sources: ['MDQ']
+        type: decimal
+      - target: rx_written_date
+        sources: ['Rx Written Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: dispensed_date
+        sources: ['Dispensed Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: fill
+        sources: ['Fill #']
+        type: text
+      - target: dispensed_qty
+        sources: ['Dispensed Qty']
+        type: decimal
+        control_total: true
+      - target: days_supply
+        sources: ['Days` Supply']
+        type: decimal
+      - target: packages_dispensed
+        sources: ['Packages Dispensed']
+        type: decimal
+        control_total: true
+      - target: program_revenue
+        sources: ['Program Revenue']
+        type: currency
+        control_total: true
+      - target: patient_paid
+        sources: ['Patient Paid']
+        type: currency
+        control_total: true
+      - target: est_340b_cost
+        sources: ['Est 340B Cost']
+        type: currency
+        control_total: true
+      - target: est_wholesale_cost
+        sources: ['Est Wholesale Cost']
+        type: currency
+        control_total: true
+      - target: admin_fee
+        sources: ['Admin Fee']
+        type: currency
+        control_total: true
+      - target: dispensing_fee
+        sources: ['Dispensing Fee']
+        type: currency
+        control_total: true
+      - target: entity_subsidy
+        sources: ['Entity Subsidy']
+        type: currency
+        control_total: true
+      - target: est_entity_net_savings
+        sources: ['Est Entity Net Savings']
+        type: currency
+        control_total: true
+        description: >
+          Estimated savings, and only that. The previous financial view
+          used this single field as both the entity receivable and the profit
+          figure, which double-counts one number into two meanings. Program
+          Revenue, Entity Subsidy and Est 340B Cost are separate columns and should
+          stay separate.
+      - target: transaction_status
+        sources: ['Transaction Status']
+        type: text
+      - target: transaction_type
+        sources: ['Transaction Type']
+        type: text
+      - target: reversal_request_source
+        sources: ['Reversal Request Source']
+        type: text
+      - target: ticket
+        sources: ['Ticket #']
+        type: text
+      - target: reprocessing_reason
+        sources: ['Reprocessing Reason']
+        type: text
+      - target: reversal_method
+        sources: ['Reversal Method']
+        type: text
+      - target: rilot_reason
+        sources: ['RILOT Reason']
+        type: text
+      - target: transaction
+        sources: ['Transaction #']
+        type: text
+        required: true
+      - target: patient_group
+        sources: ['Patient Group']
+        type: text
+      - target: encounter_match_method
+        sources: ['Encounter Match Method']
+        type: text
+      - target: qualification_method
+        sources: ['Qualification Method']
+        type: text
+      - target: external_eligibility_reason
+        sources: ['External Eligibility Reason']
+        type: text
+      - target: external_claim_rejection_reason
+        sources: ['External Claim Rejection Reason']
+        type: text
+      - target: carve_in_model
+        sources: ['Carve-In Model']
+        type: text
+      - target: carve_in_method
+        sources: ['Carve-In Method']
+        type: text
+      - target: qualification_date
+        sources: ['Qualification Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: qualification_source
+        sources: ['Qualification Source']
+        type: text
+      - target: formulary_delivery_type
+        sources: ['Formulary Delivery Type']
+        type: text
+      - target: patient_name
+        sources: ['Patient Name']
+        type: text
+        pii: direct
+      - target: patient_qualification_first_name
+        sources: ['Patient Qualification First Name']
+        type: text
+        pii: direct
+      - target: patient_qualification_last_name
+        sources: ['Patient Qualification Last Name']
+        type: text
+        pii: direct
+      - target: patient_dob
+        sources: ['Patient DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: patient_qualification_dob
+        sources: ['Patient Qualification DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: patient_mrn
+        sources: ['Patient MRN']
+        type: text
+        pii: join_key
+      - target: encounter_id
+        sources: ['Encounter ID']
+        type: text
+      - target: prescriber_name
+        sources: ['Prescriber Name']
+        type: text
+      - target: prescriber_qualification_name
+        sources: ['Prescriber Qualification Name']
+        type: text
+      - target: prescriber_npi
+        sources: ['Prescriber NPI']
+        type: text
+      - target: prescriber_qualification_npi
+        sources: ['Prescriber Qualification NPI']
+        type: text
+      - target: sparcs_claim
+        sources: ['SPARCS Claim']
+        type: text
+      - target: community_benefit_claim
+        sources: ['Community Benefit Claim']
+        type: text
+      - target: maximum_fair_price_indicator
+        sources: ['Maximum Fair Price Indicator']
+        type: text
+      - target: card_holder
+        sources: ['Card Holder #']
+        type: text
+      - target: primary_bin
+        sources: ['Primary Bin']
+        type: text
+      - target: primary_pcn
+        sources: ['Primary PCN']
+        type: text
+      - target: primary_group
+        sources: ['Primary Group']
+        type: text
+      - target: primary_payer_name
+        sources: ['Primary Payer Name']
+        type: text
+      - target: primary_plan_name
+        sources: ['Primary Plan Name']
+        type: text
+      - target: primary_plan_type
+        sources: ['Primary Plan Type']
+        type: text
+      - target: primary_benefit_plan_name
+        sources: ['Primary Benefit Plan Name']
+        type: text
+      - target: secondary_bin
+        sources: ['Secondary BIN']
+        type: text
+      - target: secondary_pcn
+        sources: ['Secondary PCN']
+        type: text
+      - target: secondary_group
+        sources: ['Secondary Group']
+        type: text
+      - target: secondary_payer_name
+        sources: ['Secondary Payer Name']
+        type: text
+      - target: secondary_plan_name
+        sources: ['Secondary Plan Name']
+        type: text
+      - target: secondary_plan_type
+        sources: ['Secondary Plan Type']
+        type: text
+      - target: secondary_benefit_plan_name
+        sources: ['Secondary Benefit Plan Name']
+        type: text
+      - target: tertiary_bin
+        sources: ['Tertiary BIN']
+        type: text
+      - target: tertiary_pcn
+        sources: ['Tertiary PCN']
+        type: text
+      - target: tertiary_group
+        sources: ['Tertiary Group']
+        type: text
+      - target: tertiary_payer_name
+        sources: ['Tertiary Payer Name']
+        type: text
+      - target: tertiary_plan_name
+        sources: ['Tertiary Plan Name']
+        type: text
+      - target: tertiary_plan_type
+        sources: ['Tertiary Plan Type']
+        type: text
+      - target: tertiary_benefit_plan_name
+        sources: ['Tertiary Benefit Plan Name']
+        type: text
+      - target: voucher
+        sources: ['Voucher #']
+        type: text
+      - target: voucher_pharmacy_id
+        sources: ['Voucher Pharmacy ID']
+        type: text
+      - target: voucher_export_model
+        sources: ['Voucher Export Model']
+        type: text
+      - target: invoice
+        sources: ['Invoice #']
+        type: text
+      - target: invoice_export_model
+        sources: ['Invoice Export Model']
+        type: text
+      - target: qty_allocated
+        sources: ['Qty Allocated']
+        type: text
+      - target: last_allocation_type
+        sources: ['Last Allocation Type']
+        type: text
+      - target: last_allocation_date
+        sources: ['Last Allocation Date']
+        type: text
+      - target: unreplenished_qty
+        sources: ['Unreplenished Qty']
+        type: text
+      - target: clinic_code
+        sources: ['Clinic Code']
+        type: text
+      - target: clinic_name
+        sources: ['Clinic Name']
+        type: text
+      - target: pharmacy_vendor_name
+        sources: ['Pharmacy Vendor Name']
+        type: text
+      - target: rx_file_provider_name
+        sources: ['Rx File Provider Name']
+        type: text
+      - target: e_prescription_id
+        sources: ['E-Prescription ID']
+        type: text
+      - target: entity_association_name
+        sources: ['Entity Association Name']
+        type: text
+      - target: audit_status
+        sources: ['Audit Status']
+        type: text
+      - target: audit_notes
+        sources: ['Audit Notes']
+        type: text
+      - target: submission_clarification_code
+        sources: ['Submission Clarification Code']
+        type: text
+      - target: sales_tax
+        sources: ['Sales Tax']
+        type: text
+      - target: orderable_date
+        sources: ['Orderable Date']
+        type: text
+      - target: reconciliation_date
+        sources: ['Reconciliation Date']
+        type: text
+      - target: order_delay
+        sources: ['Order Delay']
+        type: text
+      - target: order_attempts
+        sources: ['Order Attempts']
+        type: text
+      - target: true_up_inventory_key
+        sources: ['True Up Inventory Key']
+        type: text
+      - target: non_replenishment_reason
+        sources: ['Non Replenishment Reason']
+        type: text
+      - target: wholesaler_omit_code
+        sources: ['Wholesaler Omit Code']
+        type: text
+      - target: last_modified_date_time
+        sources: ['Last Modified Date/Time']
+        type: text

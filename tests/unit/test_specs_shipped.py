@@ -129,11 +129,36 @@ class TestAllSpecsAreSound:
         for spec in registry:
             assert any(v.loads for v in spec.variants), spec.key
 
-    def test_no_spec_has_an_empty_natural_key(self, registry):
-        """An empty key means append-only with no dedup. Legitimate for some
-        sources, but none of these three, so assert it deliberately."""
+    def test_a_keyless_spec_is_rejected_without_notes(self):
+        """The rule itself: an empty natural key must be justified."""
+        from sbh_data_bank.registry.spec import SourceSpec
+
+        with pytest.raises(ValueError, match="notes must record"):
+            SourceSpec.model_validate(
+                {
+                    "key": "a.b",
+                    "name": "n",
+                    "vendor": "v",
+                    "variants": [
+                        {
+                            "name": "v1",
+                            "detect": {"require_all": ["A"]},
+                            "columns": [{"target": "a", "sources": ["A"]}],
+                        }
+                    ],
+                }
+            )
+
+    def test_a_keyless_spec_documents_why(self, registry):
+        """An empty natural key is legitimate - several of these feeds are
+        denormalised report extracts where no subset of columns identifies a
+        row - but it changes row identity to the row hash, so it has to be a
+        recorded finding rather than an omission."""
         for spec in registry:
-            assert spec.natural_key, spec.key
+            if not spec.natural_key:
+                assert spec.notes.strip(), (
+                    f"{spec.key} has no natural key and no notes explaining it"
+                )
 
 
 class TestMasterCogsList:
@@ -293,6 +318,7 @@ class TestInjectedColumns:
                     "key": "a.b",
                     "name": "n",
                     "vendor": "v",
+                    "natural_key": ["a"],
                     "variants": [
                         {
                             "name": "v1",

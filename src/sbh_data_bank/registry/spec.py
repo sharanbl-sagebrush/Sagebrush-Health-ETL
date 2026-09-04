@@ -474,9 +474,18 @@ class SourceSpec(BaseModel):
     variants: list[SchemaVariant] = Field(min_length=1)
 
     natural_key: list[Identifier] = Field(default_factory=list)
-    """Target columns that identify a business row. Empty means the source has
-    no known key and rows are append-only - honest, and better than the
-    previous pipeline's habit of MERGE-ing on a key that was not unique."""
+    """Target columns that identify a business row.
+
+    Empty is allowed and sometimes correct. Several of these feeds are
+    denormalised report extracts rather than transaction logs - Athena
+    Prescriptions repeats one order once per ICD-10 diagnosis, so no subset of
+    its columns identifies a row - and claiming a key that is not unique is how
+    the previous pipeline came to MERGE four tables on keys that collided.
+
+    An empty key is not a shrug, though: it changes row identity to the row hash
+    and it has to be justified, so ``notes`` becomes mandatory and must record
+    what was tested and what the residual duplicate count was.
+    """
 
     constants: dict[Identifier, str] = Field(default_factory=dict)
     """Values injected into every row. One Pharmaforce spec serves Fire Mesa and
@@ -523,6 +532,13 @@ class SourceSpec(BaseModel):
                 raise ValueError(
                     f"{self.key}: period_from_filename needs named groups 'year' and 'month'"
                 )
+
+        if not self.natural_key and not self.notes.strip():
+            raise ValueError(
+                f"{self.key}: declares no natural key, so notes must record which "
+                "candidates were tested and why none is unique. A keyless source "
+                "is a finding about the data, not an omission."
+            )
 
         # A natural key must exist in every variant, or a file of the wrong
         # shape would land keyless and silently duplicate on re-delivery.

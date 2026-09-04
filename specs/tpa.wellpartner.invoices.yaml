@@ -1,0 +1,84 @@
+# Wellpartner wholesaler invoices, from the Inventory Activity tab.
+#
+# The earlier validation pack reported 10 duplicate rows here and could not find
+# a key that separated them. They are not distinct records: all ten pairs are the
+# same invoice written twice, differing only in the entity name -
+# "Sagebrush Health Services (STD06489 )" against "(STD06489)", a trailing space
+# inside the parenthesis. Ten of 7,700 rows.
+#
+# So the natural key is the real business key - invoice number, wholesaler,
+# account and date - and the ten pairs are genuine duplicates for the ledger to
+# collapse, not a signal that the key is too narrow. Extracting the 340B ID with
+# a pattern rather than matching the entity name as a string avoids the whole
+# class of problem.
+#
+# This is a second, independent view of wholesaler purchases: Wellpartner
+# reporting what it was invoiced. It is not the same as the wholesaler extracts
+# and must not be unioned with them.
+
+key: tpa.wellpartner.invoices
+name: Wellpartner - Wholesaler Invoices
+vendor: Wellpartner
+group: "4 TPA"
+catalog_names: ['Wellpartner Wholesaler Invoices (under Inventory activity)']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'wellpartner.*wholesalerinvoice'
+
+natural_key: [wholesaler_invoice, wholesaler_name, wholesaler_account, wholesaler_invoice_date]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: invoices_10
+    detect:
+      require_all: ['Wholesaler Invoice #', 'Invoice Net Amount', 'Hub-Spoke']
+    columns:
+      - target: entity_name
+        sources: ['Entity Name']
+        type: text
+        required: true
+        description: >
+          Embeds the covered-entity key, as "Sagebrush Health Services
+          (STD891281)". Ten rows carry it as "(STD06489 )" with a trailing space
+          inside the parenthesis, which is what makes them look like duplicate
+          invoices - see the note on this source.
+      - target: wholesaler_invoice_date
+        sources: ['Wholesaler Invoice Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: wholesaler_name
+        sources: ['Wholesaler Name']
+        type: text
+        required: true
+      - target: wholesaler_account
+        sources: ['Wholesaler Account #']
+        type: text
+        required: true
+      - target: wholesaler_invoice
+        sources: ['Wholesaler Invoice #']
+        type: text
+        required: true
+      - target: invoice_net_amount
+        sources: ['Invoice Net Amount']
+        type: currency
+        required: true
+        control_total: true
+      - target: purchase_order
+        sources: ['Purchase Order #']
+        type: text
+      - target: contract_pharmacy_name
+        sources: ['Contract Pharmacy Name']
+        type: text
+      - target: hub_spoke
+        sources: ['Hub-Spoke']
+        type: text
+      - target: invoice_type
+        sources: ['Invoice Type']
+        type: text
+        description: >
+          Debit or Credit.

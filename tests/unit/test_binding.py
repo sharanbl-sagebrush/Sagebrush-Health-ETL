@@ -81,6 +81,7 @@ class TestSpecValidation:
             "key": "a.b",
             "name": "n",
             "vendor": "v",
+            "natural_key": ["a"],
             "variants": [
                 {
                     "name": "only",
@@ -164,6 +165,7 @@ class TestVariantSelection:
                 "key": "a.b",
                 "name": "n",
                 "vendor": "v",
+                "natural_key": ["a"],
                 "variants": [
                     {
                         "name": "one",
@@ -244,6 +246,7 @@ class TestDrift:
                 "key": "a.b",
                 "name": "n",
                 "vendor": "v",
+                "natural_key": ["loc"],
                 "variants": [
                     {
                         "name": "v1",
@@ -273,6 +276,7 @@ class TestProhibitedColumns:
                 "key": "a.b",
                 "name": "n",
                 "vendor": "v",
+                "natural_key": ["pat_num"],
                 "variants": [
                     {
                         "name": "v1",

@@ -1,0 +1,322 @@
+# PRXP rx transaction details.
+#
+# Natural key: Rx Transaction ID, unique across all 5,133 rows - the one source
+# the earlier validation pack already had right.
+#
+# 90 columns in the 2023-2026 extract and 94 in the later drops. The extra four
+# have not been reconciled against a spec yet, so on_new_column is set to warn
+# rather than fail: a newer delivery loads and the additions are reported, rather
+# than the whole file being refused. Tighten this to fail once the added columns
+# are known and mapped.
+
+key: tpa.prxp.transactions
+name: PRXP - Rx Transaction Details
+vendor: PRXP
+group: "4 TPA"
+catalog_names: ['Prxp']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'prxp.*transaction'
+
+natural_key: [rx_transaction_id]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: transactions_90
+    description: >
+      90 columns, the 2023-2026 shape.
+    detect:
+      require_all: ['Rx Transaction ID']
+    columns:
+      - target: rx_transaction_id
+        sources: ['Rx Transaction ID']
+        type: text
+        required: true
+      - target: rx_number
+        sources: ['Rx Number']
+        type: text
+      - target: date_written
+        sources: ['Date Written']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: rx_fill_date
+        sources: ['Rx Fill Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: patient_last_name
+        sources: ['Patient Last Name']
+        type: text
+        pii: direct
+      - target: patient_first_name
+        sources: ['Patient First Name']
+        type: text
+        pii: direct
+      - target: patient_date_of_birth
+        sources: ['Patient Date Of Birth']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: ndc
+        sources: ['NDC']
+        type: ndc
+      - target: days_supply
+        sources: ['Days Supply']
+        type: decimal
+      - target: qty_dispensed
+        sources: ['Qty Dispensed']
+        type: decimal
+        control_total: true
+      - target: covered_entity_name
+        sources: ['Covered Entity Name']
+        type: text
+      - target: pharmacy_name
+        sources: ['Pharmacy Name']
+        type: text
+      - target: transmitted_ncpdp
+        sources: ['Transmitted NCPDP']
+        type: text
+      - target: transmitted_npi
+        sources: ['Transmitted NPI']
+        type: text
+      - target: proprietary_name
+        sources: ['Proprietary Name']
+        type: text
+      - target: provider_first_name
+        sources: ['Provider First Name']
+        type: text
+        pii: direct
+      - target: provider_last_name
+        sources: ['Provider Last Name']
+        type: text
+        pii: direct
+      - target: provider_id
+        sources: ['Provider ID']
+        type: text
+      - target: patient_id
+        sources: ['Patient ID']
+        type: text
+      - target: patient_external_id
+        sources: ['Patient External ID']
+        type: text
+      - target: patient_delivery_address
+        sources: ['Patient Delivery Address']
+        type: text
+        pii: direct
+      - target: patient_delivery_city
+        sources: ['Patient Delivery City']
+        type: text
+      - target: patient_delivery_state
+        sources: ['Patient Delivery State']
+        type: text
+      - target: patient_delivery_zip
+        sources: ['Patient Delivery Zip']
+        type: text
+      - target: primary_claim_status
+        sources: ['Primary Claim Status']
+        type: text
+      - target: shipper_name_tracking_number
+        sources: ['(Shipper Name) Tracking Number']
+        type: text
+      - target: primary_payer_name
+        sources: ['Primary Payer Name']
+        type: text
+      - target: primary_payer_bin
+        sources: ['Primary Payer BIN']
+        type: text
+      - target: secondary_payer_name
+        sources: ['Secondary Payer Name']
+        type: text
+      - target: secondary_payer_bin
+        sources: ['Secondary Payer BIN']
+        type: text
+      - target: tertiary_payer_name
+        sources: ['Tertiary Payer Name']
+        type: text
+      - target: tertiary_payer_bin
+        sources: ['Tertiary Payer BIN']
+        type: text
+      - target: ooc_flag
+        sources: ['OOC Flag']
+        type: text
+      - target: transaction_status
+        sources: ['Transaction Status']
+        type: text
+      - target: date_modified
+        sources: ['Date Modified']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: rx_status_type
+        sources: ['Rx Status Type']
+        type: text
+      - target: priority_type
+        sources: ['Priority Type']
+        type: text
+      - target: refill_allowed
+        sources: ['Refill Allowed']
+        type: text
+      - target: refill_number
+        sources: ['Refill Number']
+        type: text
+      - target: days_supply_ends_on
+        sources: ['Days Supply Ends On']
+        type: text
+      - target: quantity
+        sources: ['Quantity']
+        type: text
+      - target: waiting_for_check_date
+        sources: ['Waiting for Check Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: waiting_for_check_datetime
+        sources: ['Waiting for Check DateTime']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: completed_date
+        sources: ['Completed Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: completed_datetime
+        sources: ['Completed DateTime']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: dispensed_inventory_group
+        sources: ['Dispensed Inventory Group']
+        type: text
+      - target: dispensation_category
+        sources: ['Dispensation Category']
+        type: text
+      - target: facility_name
+        sources: ['Facility Name']
+        type: text
+      - target: non_proprietary_name
+        sources: ['Non-Proprietary Name']
+        type: text
+      - target: therapeutic_class
+        sources: ['Therapeutic Class']
+        type: text
+      - target: labeler_name
+        sources: ['Labeler Name']
+        type: text
+      - target: prescribed_item
+        sources: ['Prescribed Item']
+        type: text
+      - target: label_type
+        sources: ['Label Type']
+        type: text
+      - target: dea_schedule
+        sources: ['Dea Schedule']
+        type: text
+      - target: dosage_form_name
+        sources: ['Dosage Form Name']
+        type: text
+      - target: spi_number
+        sources: ['SPI Number']
+        type: text
+      - target: provider_practice_location_address
+        sources: ['Provider Practice Location Address']
+        type: text
+        pii: direct
+      - target: provider_practice_location_city
+        sources: ['Provider Practice Location City']
+        type: text
+      - target: provider_practice_location_state
+        sources: ['Provider Practice Location State']
+        type: text
+      - target: provider_practice_location_zip
+        sources: ['Provider Practice Location ZIP']
+        type: text
+      - target: patient_gender
+        sources: ['Patient Gender']
+        type: text
+      - target: patient_address
+        sources: ['Patient Address']
+        type: text
+        pii: direct
+      - target: patient_city
+        sources: ['Patient City']
+        type: text
+      - target: patient_state
+        sources: ['Patient State']
+        type: text
+      - target: patient_zip
+        sources: ['Patient Zip']
+        type: text
+      - target: patient_source_list
+        sources: ['Patient Source List']
+        type: text
+      - target: referral_type
+        sources: ['Referral Type']
+        type: text
+      - target: patient_category
+        sources: ['Patient Category']
+        type: text
+      - target: patient_class
+        sources: ['Patient Class']
+        type: text
+      - target: secondary_claim_status
+        sources: ['Secondary Claim Status']
+        type: text
+      - target: tertiary_claim_status
+        sources: ['Tertiary Claim Status']
+        type: text
+      - target: primary_plan_type
+        sources: ['Primary Plan Type']
+        type: text
+      - target: primary_payer_pcn
+        sources: ['Primary Payer PCN']
+        type: text
+      - target: primary_payer_plan_group_code
+        sources: ['Primary Payer Plan Group Code']
+        type: text
+      - target: secondary_plan_type
+        sources: ['Secondary Plan Type']
+        type: text
+      - target: secondary_payer_pcn
+        sources: ['Secondary Payer PCN']
+        type: text
+      - target: secondary_payer_plan_group_code
+        sources: ['Secondary Payer Plan Group Code']
+        type: text
+      - target: tertiary_plan_type
+        sources: ['Tertiary Plan Type']
+        type: text
+      - target: tertiary_payer_pcn
+        sources: ['Tertiary Payer PCN']
+        type: text
+      - target: tertiary_payer_plan_group_code
+        sources: ['Tertiary Payer Plan Group Code']
+        type: text
+      - target: patient_paid_amount
+        sources: ['Patient Paid Amount']
+        type: text
+      - target: primary_paid_amount
+        sources: ['Primary Paid Amount']
+        type: text
+      - target: secondary_paid_amount
+        sources: ['Secondary Paid Amount']
+        type: text
+      - target: tertiary_paid_amount
+        sources: ['Tertiary Paid Amount']
+        type: text
+      - target: ce_responsibility
+        sources: ['CE Responsibility']
+        type: text
+      - target: total_amount_collected
+        sources: ['Total Amount Collected']
+        type: currency
+        control_total: true
+      - target: acquisition_cost
+        sources: ['Acquisition Cost']
+        type: text
+      - target: wac
+        sources: ['WAC']
+        type: text
+      - target: awp
+        sources: ['AWP']
+        type: text
+      - target: total_rx_count
+        sources: ['Total Rx Count']
+        type: text

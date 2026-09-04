@@ -511,6 +511,7 @@ class TestHeaderMarker:
         "key": "wholesaler.abc.purchases",
         "name": "ABC",
         "vendor": "AmerisourceBergen",
+        "natural_key": ["account_number", "ndc"],
         "variants": [
             {
                 "name": "invoice_detail",

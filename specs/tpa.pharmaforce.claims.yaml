@@ -1,0 +1,286 @@
+# Pharmaforce 340B claims.
+#
+# ONE spec for both delivery files. Fire Mesa and Southington arrive as separate
+# extracts with the same 65 columns, and Claim ID is unique across both - 196,187
+# rows, 196,187 distinct ids, zero collisions - so they are one source, not two.
+#
+# The previous implementation ran one parser class twice with a location string
+# injected from configuration. That is unnecessary: every row already carries
+# OPAID and Covered Entity, so the entity comes from the data rather than from a
+# setting that can drift out of step with the file it describes.
+#
+# Two covered entities exist in this data: STD891281 (Fire Mesa, Nevada) and
+# STD06489 (Southington, Connecticut). Southington contributes 1,280 rows to Fire
+# Mesa's 194,907, consistent with its 340B participation ending on 2025-07-17.
+#
+# Qty Dispensed is negative on about 8.7% of rows. Those are reversals, written
+# as negative quantities on the same claim shape rather than as separate reversal
+# claims - see the column note.
+
+key: tpa.pharmaforce.claims
+name: Pharmaforce - 340B Claims
+vendor: Pharmaforce
+group: "4 TPA"
+catalog_names: ['Pharmaforce - Firemesa', 'Pharmaforce - Southington']
+lifecycle: active
+expected_cadence_days: 7
+
+filename_patterns:
+  - 'pharmaforce.*claim'
+
+natural_key: [claim_id]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  - name: claims_65
+    description: >
+      65 columns, identical for both site deliveries.
+    detect:
+      require_all: ['Claim ID', 'OPAID', 'Covered Entity']
+    columns:
+      - target: covered_entity
+        sources: ['Covered Entity']
+        type: text
+        required: true
+      - target: opaid
+        sources: ['OPAID']
+        type: text
+        required: true
+        description: >
+          The covered-entity key. Two exist in this data: STD891281 (Fire
+          Mesa, Nevada) and STD06489 (Southington, Connecticut). The same identifier
+          appears as OPAID here, as 340B ID in Wellpartner Claims, embedded in Entity Name
+          in Wellpartner Invoices, and as Associated 340B ID in the McKesson Custom
+          report - which makes it the one key that ties every feed to a covered entity.
+      - target: chain_pharmacy
+        sources: ['Chain Pharmacy']
+        type: text
+      - target: pharmacy
+        sources: ['Pharmacy']
+        type: text
+      - target: pharmacy_nabp_or_npi
+        sources: ['Pharmacy NABP or NPI']
+        type: text
+      - target: transaction_code
+        sources: ['Transaction Code']
+        type: text
+      - target: prescription
+        sources: ['Prescription #']
+        type: text
+      - target: date_rx_written
+        sources: ['Date Rx Written']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: bin
+        sources: ['BIN']
+        type: text
+      - target: pcn
+        sources: ['PCN']
+        type: text
+      - target: group
+        sources: ['Group']
+        type: text
+      - target: secondary_bin
+        sources: ['Secondary BIN']
+        type: text
+      - target: secondary_pcn
+        sources: ['Secondary PCN']
+        type: text
+      - target: secondary_group
+        sources: ['Secondary Group']
+        type: text
+      - target: other_coverage_code
+        sources: ['Other Coverage Code']
+        type: text
+      - target: submission_clarification_code
+        sources: ['Submission Clarification Code']
+        type: text
+      - target: refill
+        sources: ['Refill #']
+        type: text
+      - target: fill_date
+        sources: ['Fill Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        required: true
+      - target: claim_date
+        sources: ['Claim Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: claim_id
+        sources: ['Claim ID']
+        type: text
+        required: true
+      - target: patient_id
+        sources: ['Patient ID']
+        type: text
+        pii: join_key
+      - target: gender
+        sources: ['Gender']
+        type: text
+        pii: quasi
+      - target: first_name
+        sources: ['First Name']
+        type: text
+        pii: direct
+      - target: last_name
+        sources: ['Last Name']
+        type: text
+        pii: direct
+      - target: dob
+        sources: ['DOB']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      - target: prescriber_name
+        sources: ['Prescriber Name']
+        type: text
+      - target: prescriber_npi_dea
+        sources: ['Prescriber NPI/DEA']
+        type: text
+      - target: ndc
+        sources: ['NDC']
+        type: ndc
+      - target: drug_name
+        sources: ['Drug Name']
+        type: text
+      - target: package_size
+        sources: ['Package Size']
+        type: decimal
+      - target: mfg_name
+        sources: ['Mfg. Name']
+        type: text
+      - target: drug_indicator
+        sources: ['Drug Indicator']
+        type: text
+      - target: qty_dispensed
+        sources: ['Qty Dispensed']
+        type: decimal
+        control_total: true
+        description: >
+          Negative on roughly 8.7% of rows - 17,052 of 194,907 in the
+          2023-2026 extract. The earlier validation pack flagged this as a possible
+          integrity problem because it assumed reversals arrive as separate claims.
+          They do not: Pharmaforce writes a reversal as a negative quantity on the
+          same claim shape, so the negatives are the reversal mechanism and must be
+          summed, not filtered. Confirm with the Pharmaforce account team before
+          any roll-up relies on it.
+      - target: days_supply
+        sources: ['Days supply']
+        type: decimal
+      - target: claim_type
+        sources: ['Claim Type']
+        type: text
+      - target: claim_sub_type
+        sources: ['Claim Sub Type']
+        type: text
+      - target: reason
+        sources: ['Reason']
+        type: text
+      - target: sub_reason
+        sources: ['Sub Reason']
+        type: text
+      - target: patient_pay
+        sources: ['Patient Pay']
+        type: currency
+        control_total: true
+      - target: third_party_payment
+        sources: ['Third Party Payment']
+        type: currency
+        control_total: true
+      - target: total_payment
+        sources: ['Total Payment']
+        type: currency
+        control_total: true
+      - target: disp_fee
+        sources: ['Disp. Fee']
+        type: currency
+        control_total: true
+      - target: ce_receivable
+        sources: ['CE Receivable']
+        type: currency
+        control_total: true
+        description: >
+          What the covered entity is owed. Distinct from Profit OR Loss -
+          the previous financial view used one Wellpartner field for both
+          receivable and profit, which is a defect this separation avoids.
+      - target: n340b_drug_cost
+        sources: ['340B Drug Cost']
+        type: currency
+        control_total: true
+      - target: total_claim_cost
+        sources: ['Total Claim Cost']
+        type: currency
+        control_total: true
+      - target: profit_or_loss
+        sources: ['Profit OR Loss']
+        type: currency
+        control_total: true
+      - target: retail_drug_cost
+        sources: ['Retail Drug Cost']
+        type: currency
+        control_total: true
+      - target: comments
+        sources: ['Comments']
+        type: text
+      - target: medical_record
+        sources: ['Medical Record #']
+        type: text
+        pii: join_key
+      - target: encounter_visit_id
+        sources: ['Encounter Visit ID']
+        type: text
+      - target: encounter_visit_date
+        sources: ['Encounter Visit Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: encounter_discharge_date
+        sources: ['Encounter Discharge Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: encounter_service_location
+        sources: ['Encounter Service Location']
+        type: text
+      - target: encounter_service_location_code
+        sources: ['Encounter Service Location Code']
+        type: text
+      - target: e_prescribe_mrn
+        sources: ['E-Prescribe MRN']
+        type: text
+      - target: e_prescribe_visit_number
+        sources: ['E-Prescribe  Visit Number']
+        type: text
+      - target: e_prescribe_order_date
+        sources: ['E-Prescribe  Order Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: e_prescribe_service_location
+        sources: ['E-Prescribe Service Location']
+        type: text
+      - target: e_prescribe_service_location_code
+        sources: ['E-Prescribe Service Location Code']
+        type: text
+      - target: replenishment_status
+        sources: ['Replenishment Status']
+        type: text
+      - target: billing_model
+        sources: ['Billing Model']
+        type: text
+      - target: claim_captured_date
+        sources: ['Claim Captured Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      - target: trued_up_units
+        sources: ['Trued Up Units']
+        type: decimal
+        control_total: true
+      - target: trued_up_cost
+        sources: ['Trued Up Cost']
+        type: currency
+        control_total: true
+      - target: trued_up_date
+        sources: ['Trued Up Date']
+        type: date
+        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
