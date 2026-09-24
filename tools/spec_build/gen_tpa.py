@@ -5,7 +5,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_specs import (  # noqa: E402
     DATE,
     DROP,
-    ISO_DATE,
     MONEY,
     NDC,
     NUM,

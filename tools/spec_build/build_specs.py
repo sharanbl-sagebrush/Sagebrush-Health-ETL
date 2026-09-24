@@ -176,7 +176,7 @@ def spec_yaml(
     out.append(f"on_new_column: {on_new_column}")
     out.append(f"on_missing_column: {on_missing_column}")
     if notes:
-        out.append(f"notes: >")
+        out.append("notes: >")
         for line in notes.strip().splitlines():
             out.append(f"  {line.strip()}")
     out.append("")
