@@ -25,6 +25,26 @@ counts and does the conversion:
 Gaps are legal.  A program that is suspended and later resumed is two
 versions with a hole between them, and :meth:`TemporalSet.at` correctly
 returns ``None`` inside the hole rather than extending the earlier version.
+
+The vocabulary, in one place:
+
+``DateRange``
+    One interval.  ``start`` is the first day in force; ``end`` is the first
+    day *no longer* in force, or ``None`` for "still in force".
+``Versioned``
+    Any object that carries a ``DateRange`` called ``effective``.  An
+    enrollment row, an account-to-site mapping, a tolerance.
+``TemporalSet``
+    All versions of one rule.  ``at(day)`` answers "which version applied on
+    that day", which is the as-of lookup reconciliation will make for every
+    event it examines.
+
+How this fits
+-------------
+A foundation primitive with no callers in ``src`` yet: the master-data module
+that will hold program enrollment and account mappings as effective-dated rows
+is not built.  Exercised by ``tests/unit/test_temporal.py``.  Depends on
+nothing else in the package.
 """
 
 from __future__ import annotations
@@ -52,12 +72,21 @@ class DateRange:
     """A half-open date interval ``[start, end)``.
 
     ``end`` of ``None`` means open-ended - still in force.
+
+    Frozen so a range can be used as a dict key and cannot be mutated after a
+    ``TemporalSet`` has validated it.
     """
 
     start: date
     end: date | None = None
 
     def __post_init__(self) -> None:
+        """Reject an empty or reversed interval at construction time.
+
+        Raises ``ValueError``.  ``end == start`` is empty under half-open
+        semantics (no day is both >= start and < start), which is the trap the
+        error message points at: a single day is ``inclusive(d, d)``.
+        """
         if self.end is not None and self.end <= self.start:
             raise ValueError(
                 f"empty or reversed interval: [{self.start}, {self.end}). "
@@ -74,6 +103,8 @@ class DateRange:
         >>> DateRange.inclusive(date(2024, 1, 1), date(2025, 7, 17))
         DateRange(start=datetime.date(2024, 1, 1), end=datetime.date(2025, 7, 18))
         """
+        # The only conversion in the module: "last day that counts" becomes
+        # "first day that does not", by adding one day.  None stays None.
         return cls(first_day, None if last_day is None else last_day + _ONE_DAY)
 
     @property
@@ -87,6 +118,7 @@ class DateRange:
 
     @property
     def is_open_ended(self) -> bool:
+        """True when the range has no end date, meaning it is still in force."""
         return self.end is None
 
     def covers(self, day: date) -> bool:
@@ -96,25 +128,39 @@ class DateRange:
         >>> r.covers(date(2025, 7, 17)), r.covers(date(2025, 7, 18))
         (True, False)
         """
+        # Half-open test: start is inclusive (<=), end is exclusive (<).
+        # An open-ended range covers every day from start onwards.
         return self.start <= day and (self.end is None or day < self.end)
 
     def overlaps(self, other: DateRange) -> bool:
         """Whether two intervals share at least one day."""
+        # Two half-open intervals overlap exactly when each starts before the
+        # other ends.  An open end (None) counts as "ends never", so the
+        # corresponding condition is always true.  Because ends are exclusive,
+        # [Jan 1, Feb 1) and [Feb 1, Mar 1) do NOT overlap - Feb 1 belongs to
+        # the second only - which is what lets adjacent versions sit together.
         starts_before_other_ends = other.end is None or self.start < other.end
         other_starts_before_self_ends = self.end is None or other.start < self.end
         return starts_before_other_ends and other_starts_before_self_ends
 
     def __str__(self) -> str:
+        """Human form, inclusive on both ends: ``[2024-01-01 .. 2025-07-17]``."""
         return f"[{self.start} .. {self.last_day or 'open'}]"
 
 
 class Versioned(Protocol):
-    """Anything carrying the interval over which it is in force."""
+    """Anything carrying the interval over which it is in force.
+
+    A structural protocol: any class with an ``effective`` property returning
+    a ``DateRange`` satisfies it without inheriting from anything.  That keeps
+    the rule types (enrollments, mappings, tolerances) as plain dataclasses.
+    """
 
     @property
     def effective(self) -> DateRange: ...
 
 
+# The element type of a TemporalSet: any Versioned thing.
 V = TypeVar("V", bound=Versioned)
 
 
@@ -142,12 +188,22 @@ class TemporalSet(Generic[V]):
     __slots__ = ("_versions",)
 
     def __init__(self, versions: Iterable[V]) -> None:
+        """Sort the versions by start date and prove none overlap.
+
+        Raises :class:`OverlappingVersionsError` on the first pair that shares
+        a day.  Accepts any iterable, including an empty one.
+        """
         ordered = sorted(versions, key=lambda v: v.effective.start)
+        # Once sorted by start, only neighbours can overlap: if A < B < C by
+        # start and A overlaps C, then A must also overlap B.  So one pass over
+        # adjacent pairs is a complete check.  strict=False because the second
+        # sequence is deliberately one shorter.
         for earlier, later in zip(ordered, ordered[1:], strict=False):
             if earlier.effective.overlaps(later.effective):
                 raise OverlappingVersionsError(
                     f"versions overlap: {earlier.effective} and {later.effective}"
                 )
+        # A tuple so the validated set cannot be appended to behind our back.
         self._versions = tuple(ordered)
 
     def at(self, day: date) -> V | None:
@@ -157,6 +213,9 @@ class TemporalSet(Generic[V]):
         apply that day.  Callers must decide what that means for them rather
         than falling back to the nearest version.
         """
+        # Linear scan.  Rule histories are a handful of versions, so this is
+        # cheaper than anything cleverer, and non-overlap guarantees at most
+        # one match.
         for version in self._versions:
             if version.effective.covers(day):
                 return version
@@ -166,7 +225,8 @@ class TemporalSet(Generic[V]):
         """:meth:`at`, but raises when nothing is in force.
 
         For rules where a gap is a configuration error rather than a
-        meaningful state.
+        meaningful state.  Raises ``LookupError`` listing every known
+        interval, so the message says what *was* configured.
         """
         found = self.at(day)
         if found is None:
@@ -187,9 +247,13 @@ class TemporalSet(Generic[V]):
         """
         if not self._versions:
             return None
+        # Earliest start is the first element, since the tuple is sorted by
+        # start.  Latest end needs a scan because a short version can start
+        # later and still end earlier than a long one.
         latest_end: date | None = self._versions[0].effective.end
         for version in self._versions:
             if version.effective.end is None:
+                # Any open-ended version makes the whole bound open-ended.
                 latest_end = None
                 break
             if latest_end is not None and version.effective.end > latest_end:
@@ -203,6 +267,8 @@ class TemporalSet(Generic[V]):
         return len(self._versions)
 
     def __bool__(self) -> bool:
+        # Defined explicitly so an empty set is falsy; without it, __len__
+        # would give the same answer but only by implication.
         return bool(self._versions)
 
     def __repr__(self) -> str:

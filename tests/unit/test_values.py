@@ -1,7 +1,27 @@
-"""Tests for value parsing.
+"""Tests for value parsing - ``sbh_data_bank.transforms.values``.
+
+Every cell in a vendor file passes through one of these parsers on its way to
+a typed column. Each parser returns a ``ParseResult`` carrying either a value,
+an "empty" marker, or a reason code that becomes the quarantine reason.
 
 Values are taken from the real extracts wherever possible, so the suite fails
 if a parser stops handling a file that is actually delivered.
+
+The defect this file guards above all: Monthly Payments writes credits as
+``($40.00)``. The old parser nulled every one - 227,284 rows across the 40
+monthly files - and overstated the total by $39,967,197.61
+(docs/data-findings.md finding 1).
+
+How to read this file:
+
+- TestAccountingNegatives    parenthesised and trailing-minus negatives
+- TestCurrencyFormatting     real vendor spellings of money; Decimal, never float
+- TestNullish                every spelling of "nothing" lands as null, not 0 or "nan"
+- TestText                   trimming, length limits, embedded newlines
+- TestIntegers               whole numbers; fractions are errors, not truncated
+- TestBooleans               vendor spellings of true and false
+- TestDates                  explicit formats only; the Cardinal two-format case
+- TestReaderTypeVariation    CSV strings and Excel numbers must land identically
 """
 
 from __future__ import annotations
@@ -51,6 +71,8 @@ class TestAccountingNegatives:
         ],
     )
     def test_parenthesised_amounts_are_negative(self, raw, expected):
+        """Accounting notation: parentheses mean minus, with or without the
+        dollar sign and thousands separator."""
         assert parse_currency(raw).value == expected
 
     def test_the_old_implementation_nulled_every_one_of_these(self):
@@ -63,25 +85,34 @@ class TestAccountingNegatives:
     def test_a_realistic_month_totals_correctly(self):
         """Mirrors the shape of one Monthly Payments file: mostly positive
         charges, a minority of parenthesised credits."""
+        # Eight $100 charges and two $40 credits: 800 - 80 = 720.
         amounts = ["$100.00"] * 8 + ["($40.00)"] * 2
         total = sum(parse_currency(a).value for a in amounts)
         assert total == Decimal("720.00")
 
+        # The old parser returned None for both credits, so they fell out of
+        # the sum entirely rather than reducing it.
         old_total = sum(v for v in (_old_clean_currency(a) for a in amounts) if v is not None)
         assert old_total == 800.0  # the credits vanished, overstating by 80
 
     def test_unbalanced_parenthesis_is_malformed_not_negative(self):
+        """Half a parenthesis is a broken cell, not a sign."""
         assert parse_currency("(40.00").reason == "NOT_NUMERIC"
         assert parse_currency("40.00)").reason == "NOT_NUMERIC"
 
     def test_trailing_minus_is_negative(self):
+        """Some accounting exports write the sign after the number."""
         assert parse_decimal("40.00-").value == Decimal("-40.00")
 
     def test_parenthesised_negative_is_not_double_negated(self):
+        """Parentheses around an already-negative number: two minuses make a
+        plus, which is the arithmetic rule rather than a special case."""
         assert parse_decimal("(-40.00)").value == Decimal("40.00")
 
 
 class TestCurrencyFormatting:
+    """Real money spellings from the extracts, and why money is Decimal."""
+
     @pytest.mark.parametrize(
         ("raw", "expected"),
         [
@@ -94,6 +125,8 @@ class TestCurrencyFormatting:
         ],
     )
     def test_real_vendor_amounts(self, raw, expected):
+        """Dollar sign, thousands separator and trailing space are all
+        optional and all stripped; the digits are what lands."""
         assert parse_currency(raw).value == expected
 
     def test_money_never_passes_through_float(self):
@@ -104,6 +137,7 @@ class TestCurrencyFormatting:
         assert sum(float(p) for p in parts) != 0.6
 
     def test_precision_is_preserved_on_large_amounts(self):
+        """Seven-figure amounts keep their cents exactly."""
         assert parse_currency("$1,234,567.89").value == Decimal("1234567.89")
 
     def test_thousands_separator_only_strips_true_groupings(self):
@@ -114,8 +148,12 @@ class TestCurrencyFormatting:
 
 
 class TestNullish:
+    """Every spelling of "nothing" the readers produce. The definition of done
+    says no literal "nan", "none", "null" or "N/A" string may land anywhere."""
+
     @pytest.mark.parametrize("raw", ["", "  ", "-", "N/A", "n/a", "nan", "NaN", "null", "NULL"])
     def test_nullish_values_become_null_not_zero(self, raw):
+        """Empty is empty: not zero, not a parse failure, and not a string."""
         result = parse_currency(raw)
         assert result.is_empty
         assert result.value is None
@@ -127,13 +165,19 @@ class TestNullish:
         assert parse_text(float("nan")).value is None
 
     def test_empty_is_distinct_from_a_parse_failure(self):
+        """A blank cell is fine (ok, empty). Garbage is a failure with a
+        reason. The loader treats these very differently: one lands null, the
+        other quarantines."""
         empty, failed = parse_currency(""), parse_currency("abc")
         assert empty.ok and empty.is_empty
         assert not failed.ok and failed.reason == "NOT_NUMERIC"
 
 
 class TestText:
+    """``parse_text``: the parser for columns typed ``text``."""
+
     def test_trims_whitespace(self):
+        """Leading and trailing whitespace is never part of a value."""
         assert parse_text("  CARDINAL HEALTH  ").value == "CARDINAL HEALTH"
 
     def test_trailing_whitespace_in_codes_is_removed(self):
@@ -154,7 +198,11 @@ class TestText:
 
 
 class TestIntegers:
+    """``parse_int``: for unit counts and sequence numbers."""
+
     def test_whole_numbers(self):
+        """A string, a string with a zero fraction, and a real int all land as
+        the same integer - "3.00" is how Excel exports an integer column."""
         assert parse_int("3").value == 3
         assert parse_int("3.00").value == 3
         assert parse_int(3).value == 3
@@ -165,27 +213,38 @@ class TestIntegers:
         assert parse_int("3.5").reason == "NOT_INTEGER"
 
     def test_negative_and_parenthesised(self):
+        """Accounting notation applies to counts too: a returned quantity."""
         assert parse_int("(3)").value == -3
 
 
 class TestBooleans:
+    """``parse_bool``: the handful of spellings vendors use."""
+
     @pytest.mark.parametrize(
         ("raw", "expected"),
         [("True", True), ("False", False), ("Y", True), ("N", False), ("1", True), ("0", False)],
     )
     def test_vendor_boolean_spellings(self, raw, expected):
+        """Word, letter and digit forms all parse."""
         assert parse_bool(raw).value is expected
 
     def test_is_voided_from_monthly_payments(self):
+        """Monthly Payments writes IsVoided as the strings True and False."""
         assert parse_bool("False").value is False
         assert parse_bool("True").value is True
 
     def test_unknown_spelling_fails(self):
+        """Anything outside the known spellings is an error, not False."""
         assert parse_bool("maybe").reason == "NOT_BOOLEAN"
 
 
 class TestDates:
+    """``parse_date``: explicit formats only. "Never infer a date format" is
+    the first rule in CLAUDE.md."""
+
     def test_formats_are_required(self):
+        """An empty format list is a programming error, not a request to
+        guess. The previous ``safe_date`` declared a format and never used it."""
         with pytest.raises(ValueError, match="explicit format"):
             parse_date("2024-09-16", [])
 
@@ -207,22 +266,30 @@ class TestDates:
         assert parse_date("01/01/2025", ["%Y-%m-%d"]).reason == "BAD_DATE"
 
     def test_monthly_payments_formats(self):
+        """Monthly Payments carries a day-level TransDate and month-level
+        TransMonth / PostMonth; a month-only value lands as its first day."""
         assert parse_date("6/17/2025", ["%m/%d/%Y"]).value == date(2025, 6, 17)
         assert parse_date("Jun 2025", ["%b %Y"]).value == date(2025, 6, 1)
 
     def test_format_list_is_tried_in_order(self):
+        """A spec may declare several formats for one column (Cardinal does);
+        the first that parses wins. ISO and US cannot be confused."""
         formats = ["%Y-%m-%d", "%m/%d/%Y"]
         assert parse_date("2024-09-16", formats).value == date(2024, 9, 16)
         assert parse_date("01/01/2025", formats).value == date(2025, 1, 1)
 
     def test_impossible_dates_are_rejected(self):
+        """Month 13 and 30 February match the pattern but are not dates."""
         assert parse_date("2025-13-01", ["%Y-%m-%d"]).reason == "BAD_DATE"
         assert parse_date("2025-02-30", ["%Y-%m-%d"]).reason == "BAD_DATE"
 
     def test_datetime_from_an_excel_read_passes_through(self):
+        """openpyxl hands back a datetime for a date cell; the date part is
+        taken and the format list is irrelevant."""
         assert parse_date(datetime(2025, 6, 17, 9, 30), ["%Y-%m-%d"]).value == date(2025, 6, 17)
 
     def test_empty_date(self):
+        """A blank date cell is empty, not BAD_DATE."""
         assert parse_date("", ["%Y-%m-%d"]).is_empty
 
 
@@ -231,9 +298,11 @@ class TestReaderTypeVariation:
     must land the same, or a vendor switching format supersedes all history."""
 
     def test_excel_int_and_csv_string_agree(self):
+        """An int from openpyxl and the string "3" from csv are the same 3."""
         assert parse_decimal(3).value == parse_decimal("3").value
 
     def test_excel_float_and_csv_string_agree(self):
+        """A float from openpyxl and its string form are the same Decimal."""
         assert parse_decimal(3767.71).value == parse_decimal("3767.71").value
 
     def test_float_conversion_does_not_leak_binary_expansion(self):
@@ -241,7 +310,10 @@ class TestReaderTypeVariation:
         assert parse_decimal(0.1).value == Decimal("0.1")
 
     def test_nan_float_is_empty_not_a_failure(self):
+        """pandas and openpyxl represent a blank numeric cell as NaN; that is
+        an empty cell, not a bad one."""
         assert parse_decimal(float("nan")).is_empty
 
     def test_a_boolean_in_a_numeric_column_is_an_error(self):
+        """bool is a subclass of int in Python; True must not become 1."""
         assert parse_decimal(True).reason == "NOT_NUMERIC"

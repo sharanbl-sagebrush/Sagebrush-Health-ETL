@@ -37,43 +37,114 @@
 # was recorded. Until one is supplied, entity resolution reports UNRESOLVED for
 # those 28 accounts rather than guessing which classification was in force.
 
+# --- Identity: how this source is named and routed ------------------------
+# key: the stable identifier, <group>.<vendor>.<report>. Never changes; the
+# raw table, every batch and all history are keyed on it.
 key: reference.wholesaler_accounts
+# name / vendor: human-readable labels for logs, alerts and reports.
 name: Master COGS List - wholesaler account register
 vendor: Sagebrush Finance
+# group: the delivery folder the file arrives in.
 group: Reference
+# catalog_names: what the finance team calls this feed in their source
+# catalogue, so a catalogue entry can be tied back to a spec.
 catalog_names: ["Master COGS List"]
+# lifecycle: active sources are expected to keep delivering, so silence
+# raises a freshness alert. discontinued / no_access / planned do not.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no new
+# file has been seen in N days"), NOT a schedule. Files are uploaded by hand
+# every Sunday with ad hoc midweek re-uploads; an early upload just resets the
+# clock. See CLAUDE.md, "How files arrive". Nothing consumes this field yet.
+# null here: the register is maintained by finance and re-delivered when it
+# changes, so there is no interval after which silence means a problem.
 expected_cadence_days: null
 
+# filename_patterns: case-insensitive regexes, a routing HINT only. The
+# variant detectors below decide what a file is from its header row.
 filename_patterns:
   - "master.*cogs"
   - "wholesaler.*account"
 
+# natural_key: the target columns that identify one business row. Under the
+# single dedup rule (CLAUDE.md, "Duplicates") a row's identity is this key
+# plus an occurrence number in file order; same identity and same row hash on
+# a newer delivery = unchanged, different hash = correction that supersedes
+# the earlier row, and an older delivery never replaces a newer one.
+#
+# Evidence: docs/data-findings.md sections 6 and 13 - (payee, account_number,
+# location) is unique across all 121 Master Sheet rows, and account_number
+# alone is not. source_sheet is prepended so the same account can be carried
+# once from the Master Sheet and once from its vendor tab without colliding,
+# which is what lets the two be compared. The uniqueness probe itself is not
+# in this repository; the claim rests on the findings document.
+#
 # The account register is a dimension, not a transaction feed: a full
 # re-delivery replaces the previous picture. Identity is the finance-side
 # composite that is actually unique.
 natural_key: [source_sheet, payee, account_number, location]
 
+# Drift policies: what happens when the workbook's column set changes. Both
+# fail here, stricter than the wholesaler feeds, because this is a
+# hand-maintained seven-column register and any change to it is a change
+# somebody made on purpose and should explain.
 on_new_column: fail
 on_missing_column: fail
 
+# variants: the shapes this source's file can take. A variant is one layout,
+# with its own detector, read settings and column map. Every variant lands on
+# the same target names, so nothing downstream knows which shape wrote a row.
+# Detection is by header presence alone (detect.require_all / require_none):
+# exactly one variant must match a file, and zero or several stops the load
+# rather than guessing, because the guess decides how every column is read.
+# Here the two variants are two kinds of worksheet in the same workbook, not
+# two deliveries. Both load; source_sheet records which one a row came from.
 variants:
+  # Variant 1: the consolidated Master Sheet, the authoritative register.
   - name: master_sheet
     description: >
       The consolidated, authoritative register. Carries both the current and
       proposed classification.
+    # detect: Class_New exists only on the Master Sheet, so requiring it
+    # keeps a vendor tab from matching here. Detection runs per worksheet.
     detect:
       require_all: ["Payee", "Class", "Class_New", "Account No"]
+    # read: which worksheet, and what to inject.
     read:
+      # sheet: the one worksheet to read, matched case-insensitively.
       sheet: "Master Sheet"
+      # sheet_name_column: the target column that receives the worksheet
+      # name on every row. A constant for this variant, but it keeps the
+      # natural key the same shape as the vendor_tab variant's.
       sheet_name_column: source_sheet
+    # columns: one entry per target column. The fields, explained once:
+    #   target         canonical destination name; stable even when the vendor renames
+    #   sources        accepted vendor headers in preference order, matched on a
+    #                  normalised form (case, punctuation and whitespace folded)
+    #   type           text | integer | decimal | currency | date | boolean | ndc
+    #   required       the column must exist in the file AND every row must carry a
+    #                  value. Column absent = drift (on_missing_column); value absent
+    #                  = that one row quarantines
+    #   date_formats   strptime formats tried in order; mandatory for dates and never
+    #                  inferred, because 01/02/2025 is ambiguous
+    #   control_total  summed on load, recorded on the batch and checked against the
+    #                  file's own totals when it has a footer
+    #   pii            none | join_key | quasi | direct | prohibited. direct lands
+    #                  encrypted; prohibited is matched for drift checks and then
+    #                  discarded before any value is written anywhere
+    #   on_error       quarantine (default) | null | fail, for a cell that will not parse
+    #   max_length     text only; an over-length value fails rather than truncates
+    #   description    why the column matters, kept next to the mapping
     columns:
+      # Natural-key column 1 of 4. The only column with no sources: the
+      # reader injects it (see sheet_name_column above).
       - target: source_sheet
         type: text
         description: >
           Injected by the reader. Constant for this variant, but present so the
           natural key has the same shape across both variants and the two can be
           compared row for row.
+      # Natural-key column 2 of 4.
       - target: payee
         sources: ["Payee"]
         type: text
@@ -82,6 +153,9 @@ variants:
           Wholesaler as finance names them. Contains vendor spellings that must
           be preserved here and normalized in the dimension - "Speciality" for
           Specialty, for instance.
+      # class_current and class_proposed: both landed uninterpreted, because
+      # the Class -> Class_New cutover has no recorded date (open question 1
+      # in docs/data-findings.md).
       - target: class_current
         sources: ["Class"]
         type: text
@@ -106,6 +180,8 @@ variants:
         description: >
           GL category. Encodes the buy-and-bill versus retail-340B channel
           split that reconciliation depends on.
+      # Natural-key column 3 of 4. Two accepted spellings of the header;
+      # normalisation folds case anyway, so the second is belt and braces.
       - target: account_number
         sources: ["Account No", "Account no"]
         type: text
@@ -114,6 +190,8 @@ variants:
           Text, never numeric. ABC accounts appear here without a leading zero
           (100583154) where the wholesaler extracts use 0100583154, so leading
           zeros are significant and an integer conversion would destroy them.
+      # Natural-key column 4 of 4, and the column that makes the key unique
+      # when an account number is reused.
       - target: location
         sources: ["Location"]
         type: text
@@ -123,16 +201,26 @@ variants:
           number. Contains embedded newlines - multi-line postal addresses - and
           leading spaces, both preserved.
 
+  # Variant 2: the per-wholesaler working tabs. Loaded so disagreements with
+  # the Master Sheet are reported, never as the authoritative view.
   - name: vendor_tab
     description: >
       One working tab per wholesaler, five columns, no Class_New. Ingested only
       so disagreements with the Master Sheet can be reported.
+    # detect: require_none on Class_New is what keeps the Master Sheet from
+    # matching this variant as well, which would be AmbiguousVariantError.
     detect:
       require_all: ["Payee", "Class", "Category", "Location"]
       require_none: ["Class_New"]
     read:
+      # sheet_pattern: a regex selecting several worksheets, all read and
+      # concatenated. Anchored, so a tab such as "Master Sheet" cannot match.
       sheet_pattern: "^(Cardinal|R&S|Mckesson|Cura|ABC)$"
+      # sheet_name_column is mandatory with sheet_pattern: once five tabs
+      # are concatenated, the tab a row came from is otherwise lost.
       sheet_name_column: source_sheet
+    # columns: field meanings are explained above the first variant's
+    # columns. Five columns, no Class_New, no Changed? flag.
     columns:
       - target: source_sheet
         type: text

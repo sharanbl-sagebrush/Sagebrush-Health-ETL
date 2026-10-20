@@ -12,16 +12,35 @@ against the definition of done in `docs/architecture-and-plan.md`.
 | `docs/architecture-and-plan.md` | The design, the phases, and the definition of done |
 | `docs/data-findings.md` | 15 findings from the real data, each tied to the test that closes it or the question still open |
 | `docs/file-audit.md` | Per-source structural facts from 67 file audits |
+| `docs/decision-record.md` | Every decision the engine depends on since 2026-10-16, one page, with who took it |
+| `docs/layer-walk/README.md` | The 19-source replay of the dedup rule: scorecard, decisions D1-D10, load order |
 
 Commit messages explain *why*, not just what. `git log` is part of the record.
 
 ## The state of things
 
 - 19 source specs in `specs/`, every one verified by loading the real extract
-- Ledger schema live in `sbh_data_bank` on Azure (24 tables)
-- 313 tests, no database required to run them
-- **Not yet built**: the commit engine that writes a load into the ledger, and
-  the historical backfill
+- `store/schema.py` generates the layered DDL from the specs: `landed`,
+  `typed` and `curated` tables per source plus `meta` and `stg`
+  (`python scripts/migrate.py --dry-run` prints it, 153 statements). A first
+  schema is live in `sbh_data_bank` on Azure (24 tables); its `raw.*` tables
+  predate the layered decision, were never written to, and are left alone
+  until dropped explicitly. The layered migration has not been applied yet
+- 436 tests, no database required to run them
+- Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
+  D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
+  at a time in the layer-walk load order, McKesson Purchasing Detail first
+- Done 2026-10-20: D1-D6 and D11 are implemented (spec fields, `curate/`,
+  audit columns); both McKesson specs declare their event date, coverage and
+  vanish scope and their walks are regenerated with the `vanished` outcome
+  running. D7 (`datetime` type) waits for the first source that needs it
+- Done 2026-10-20: the commit engine (`commit/`) writes a load through the
+  layers in one transaction and persists what `curate.rule` decides; replayed
+  in memory over the real McKesson files it reproduces the walk exactly
+  (7,124 and 6,415 current rows, 11 corrections each). It has not yet run
+  against Azure: the layered migration must be applied first
+- **Not yet built**: the historical backfill (every file, in as-of order),
+  the acquire step, the quarantine-rate threshold, alerting
 
 ## Rules that came from real defects
 
@@ -56,19 +75,81 @@ have been strings.
 
 **Prohibited columns are matched and then discarded.** SSN appears in Monthly
 Payments and Curve Monthly Services. The column is located so drift checks see
-it, and no value reaches the raw layer, quarantine, or a log — including when
+it, and no value reaches any layer, quarantine, or a log — including when
 another column on the same row fails.
+
+## Storage layers
+
+Decided 2026-10-07; reasoning in `docs/architecture-and-plan.md`, "Storage
+layers". Medallion pattern, four layers:
+
+| Layer | Holds | Rebuilt from |
+|---|---|---|
+| `landed` | every cell as delivered text, one row per file line | files, once, never changed |
+| `typed` | parsed values, quarantine, row hash | landed |
+| `curated` | dedup, supersession, site resolution, canonical events, rule-versioned | typed |
+| `pres` | views and marts for users | curated |
+
+Nothing is dropped before landed except prohibited columns (SSN), which are
+matched for drift and discarded at the boundary. Every step between layers is
+a versioned rule re-runnable from the layer below, so a wrong key or format is
+a re-run in the database, never a re-read of files. One spec still drives all
+three steps.
 
 ## Duplicates
 
-Three policies, in `store/schema.py::DedupMode`, because nineteen sources need
-three different answers:
+Decided 2026-10-15: **one rule for all nineteen sources**, applied
+typed-to-curated, versioned as `store/schema.py::DEDUP_RULE`. Reasoning and
+evidence in `docs/architecture-and-plan.md`, "Duplicates and delivery order".
 
-- `natural_key` (14 sources) — same key, same hash → skip; same key, different
-  hash → correction, insert new and supersede old
-- `row_hash` (4) — no key exists; verified none contains byte-identical rows
-- `file_position` (1) — Allscripts eRx only, where 8,100 of 132,974 rows are
-  identical across all 21 columns
+**Identity** of a row = its identity columns + an occurrence number.
+
+- Identity columns are the spec's `natural_key`; a keyless spec uses every
+  landed column (`identity_columns_for(spec)`).
+- Occurrence number: rows in one delivery that share identity columns are
+  numbered 1, 2, 3 in file order. So the two McKesson split-shipment lines
+  are (key, 1) and (key, 2) and both survive; the 8,100 byte-identical
+  Allscripts rows are 8,100 identities. This replaces the old three modes.
+
+**As-of** of a delivery = when the vendor extracted it, in this order
+(D5, `curate/delivery.py`): the dated upload folder the file sits in → the
+spec's `as_of_source` override, for backlog files → xlsx internal creation
+stamp (`docProps/core.xml`, written by the vendor portal and verified
+against real files) → the end date in the filename → a date the operator
+supplies. None of those: the file is refused. The as-of may not be earlier
+than the latest event date in the file, with one day's tolerance (D4).
+Upload time is recorded separately and never used for ordering.
+
+**Coverage and vanish** (D1-D3): a spec declares its `event_date`, where
+its coverage window comes from and the `vanish_scope` columns a delivery
+speaks for. A current row is superseded as `vanished` only when a newer
+delivery covers its date and its scope values and no longer carries its
+identity. Fields are in `specs/README.md`; the rule is `curate/rule.py`.
+Vanish stays on for McKesson and is applied, not merely reported (decided
+2026-10-20). D12: for a `coverage: filename` source the engine holds a
+file whose rows contradict the window its name claims.
+
+**What the commit engine refuses or holds** (`commit/engine.py`): a
+duplicate content hash, a load that is not ok, no as-of, an as-of floor
+violation, an unknowable coverage window on a source that vanishes, a
+filename window the data contradicts, and a conflict. Every one leaves a
+`meta.source_file` and a `meta.batch` row and nothing else. A late file is
+not held: it lands in full and enters `curated` already superseded.
+
+**Outcome** per incoming row, against the current row with the same identity:
+
+| Incoming vs current | Outcome |
+|---|---|
+| no current row | insert |
+| newer as-of, same hash | unchanged |
+| newer as-of, different hash | correction: insert, supersede current |
+| older as-of | late: stored as history only, never current |
+| same as-of, different hash | conflict: batch held for a person |
+| current row absent from a newer delivery that covers its date | vanished: supersede |
+
+Dedup never decides which *business* line is right. A McKesson return is a
+separate line with its own credit number (31 of 31 in the history file) and
+is inserted beside the original; reconciliation sums the two.
 
 The natural-key index is **deliberately not unique**: superseded rows keep
 their key, so versions coexist. Making it unique would break corrections.
@@ -84,25 +165,51 @@ src/sbh_data_bank/
   transforms/ ndc, values — the parsing vocabulary
   registry/   spec model, header matching, variant binding
   ingest/     streaming reader, row accounting, footer control totals
+  curate/     delivery facts (as-of, coverage, as-of floor) and the dedup
+              rule with vanish, in memory
+  commit/     the commit engine: one file per transaction through meta,
+              landed, typed, curated and quarantine; a SQL store and an
+              in-memory store behind one interface
   store/      config, connection, ledger schema
 specs/        19 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
-scripts/      migrate, audit_files, bind_real_files, scaffold_spec
+scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
+              trace_file, commit_file
 ```
 
 ## Running things
 
 ```bash
-python -m pytest                    # 313 tests, no database
+python -m pytest                    # 436 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts
 python scripts/audit_files.py       # structural audit of every file
 python scripts/migrate.py --env-file <path>   # apply schema (idempotent)
+python scripts/commit_file.py <spec key> "<file>" --dry-run   # the engine, in memory
+python scripts/commit_file.py <spec key> "<file>" --env-file <path>   # commit to Azure
 ```
 
 The vendor extracts are PHI and live outside this repository. Point at them
 with `SBH_SOURCE_ROOT`.
+
+## How files arrive
+
+Decided 2026-10-07. Files are downloaded by hand from each vendor portal and
+uploaded to Azure Storage every Sunday, with ad hoc midweek re-uploads when
+data needs correcting. The ETL must pick up a midweek file without waiting for
+Sunday. So:
+
+- The acquire step (not yet built) polls the blob container or reacts to
+  blob-created events. It is never a Sunday cron.
+- `expected_cadence_days` is a staleness threshold ("alert if nothing seen in
+  N days"), not a schedule. Specs keep 7 for weekly sources; the alerting
+  engine adds grace so a Sunday-morning check does not fire before the upload.
+- Overlapping deliveries are normal. Which delivery wins is decided by each
+  delivery's **as-of date** (when the vendor extracted it), never by when it
+  was uploaded. See "Duplicates" below for the rule and where as-of comes
+  from. Full reasoning in `docs/architecture-and-plan.md`, "Duplicates and
+  delivery order".
 
 ## Credentials
 

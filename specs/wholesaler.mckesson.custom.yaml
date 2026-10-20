@@ -14,28 +14,138 @@
 # Opens with an unnamed row-number column, excluded from matching as an
 # artifact.
 
+# --- Identity: how this source is named and routed ------------------------
+# key: the stable identifier, <group>.<vendor>.<report>. Never changes; the
+# raw table, every batch and all history are keyed on it.
 key: wholesaler.mckesson.custom
+# name / vendor: human-readable labels for logs, alerts and reports.
 name: McKesson - Custom Report (R and S)
 vendor: McKesson
+# group: the delivery folder the file arrives in.
 group: "1 Wholesalers"
+# catalog_names: what the finance team calls this feed in their source
+# catalogue, so a catalogue entry can be tied back to a spec.
 catalog_names: ['R and S']
+# lifecycle: active sources are expected to keep delivering, so silence
+# raises a freshness alert. discontinued / no_access / planned do not.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no new
+# file has been seen in N days"), NOT a schedule. Files are uploaded by hand
+# every Sunday with ad hoc midweek re-uploads; an early upload just resets the
+# clock. See CLAUDE.md, "How files arrive". Nothing consumes this field yet.
 expected_cadence_days: 7
 
+# filename_patterns: case-insensitive regexes, a routing HINT only. The
+# variant detector below decides what a file is from its header row.
 filename_patterns:
   - 'mckesson.*custom'
 
+# natural_key: the target columns that identify one business row. Under the
+# single dedup rule (CLAUDE.md, "Duplicates") a row's identity is this key
+# plus an occurrence number in file order; same identity and same row hash on
+# a newer delivery = unchanged, different hash = correction that supersedes
+# the earlier row, and an older delivery never replaces a newer one.
+#
+# Evidence: invoice/credit number plus item number is the Purchasing Detail
+# key, but this report is at a finer grain - the same item on the same
+# invoice can appear once per purchase order - so po_number is needed too.
+# Probed 2026-10-07 (finding 16 in docs/data-findings.md): the triple is NOT
+# unique either. Without po_number 13 of 6,165 history rows collide; with it
+# 4 still do, all split-shipment lines that differ only in quantities and
+# prices. No column in the file separates them. The key is a curated-layer
+# rule under the layered design; identity = key + occurrence number in file
+# order (decided 2026-10-15, CLAUDE.md "Duplicates"), the same rule as the
+# Purchasing Detail spec, so the two reports stay interchangeable.
+#
+# Both McKesson reports describe the same purchases (extended price, gross
+# purchases and net quantity agree to the cent). Which one is the purchase
+# source for reconciliation is an open business question; loading both as
+# purchases would double every McKesson figure.
 natural_key: [invoice_credit_number, mckesson_item_number, po_number]
 
+# --- Delivery semantics: how deliveries relate to each other in time ------
+# Decisions D1 to D6 in docs/decision-record.md, reviewed for this source on
+# 2026-10-20 against docs/layer-walk/wholesaler.mckesson.custom.analysis.md.
+# Mirrors the Purchasing Detail spec (D9: both reports load, side by side,
+# in their own tables), with one addition, row_hash_exclude.
+#
+# event_date: required and populated on every row, never later than the
+# as-of or earlier than the filename start in any delivery. The other date,
+# wac_effective_date_current_date, is an item-master attribute captured at
+# extract time: it postdates the invoice on thousands of rows and is null
+# on 71, so it is not an event date.
+event_date: invoice_credit_date
+# coverage: the filename window held exactly on all four deliveries.
+coverage: filename
+# vanish_scope: as for Purchasing Detail. Here the account drift inverts -
+# the June custom extract LACKS the two accounts the invoice report gained -
+# which is exactly why a custom delivery must not be read as retiring rows
+# this report never carried.
+vanish_scope: [account_number]
+# row_hash_exclude: the two columns the vendor refreshes from the item
+# master at extraction time (D6). Of the 30 cross-delivery corrections, 21
+# were the WAC date moving to a later date beyond the row's own invoice date
+# and 2 were AWP; neither is a change to the purchase. They are stored and
+# visible, but a change in them no longer supersedes the row.
+# order_submitted_by_id (the other 11) stays in the hash: it is an edit the
+# vendor made to the row after the fact, the same as in Purchasing Detail.
+row_hash_exclude: [wac_effective_date_current_date, awp_current]
+
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      an extra column is recorded and the load continues
+#   on_missing_column: fail  an expected column has vanished; stop until a
+#                            human has looked, since every binding may be wrong
 on_new_column: warn
 on_missing_column: fail
 
+# variants: the shapes this source's file can take. A variant is one layout,
+# with its own detector, read settings and column map. Every variant lands on
+# the same target names, so nothing downstream knows which shape wrote a row.
+# Detection is by header presence alone (detect.require_all / require_none):
+# exactly one variant must match a file, and zero or several stops the load
+# rather than guessing, because the guess decides how every column is read.
 variants:
+  # One shape observed. No read block: header on row 0, no preamble, no
+  # footer (verified - the last row is real data), so every read default
+  # applies.
   - name: custom_report
+    # detect: 'NDC (Current)', 'Associated 340B ID' and 'PO Number' exist only
+    # in this report, and 'NDC/UPC (Current)' and 'Original Invoice Number'
+    # exist only in Purchasing Detail. Requiring the first set and forbidding
+    # the second makes the two McKesson detectors mutually exclusive on header
+    # content alone, so neither report can bind as the other whatever the file
+    # is called. The two share 15 of their headers, which is why a detector of
+    # shared columns is not enough.
     detect:
-      require_all: ['Invoice/Credit Number', 'NDC (Current)', 'Associated 340B ID']
+      require_all:
+        - 'Invoice/Credit Number'
+        - 'McKesson Item Number'
+        - 'NDC (Current)'
+        - 'Associated 340B ID'
+        - 'PO Number'
+      require_none: ['NDC/UPC (Current)', 'Original Invoice Number']
+    # columns: one entry per target column. The fields, explained once:
+    #   target         canonical destination name; stable even when the vendor renames
+    #   sources        accepted vendor headers in preference order, matched on a
+    #                  normalised form (case, punctuation and whitespace folded)
+    #   type           text | integer | decimal | currency | date | boolean | ndc
+    #   required       the column must exist in the file AND every row must carry a
+    #                  value. Column absent = drift (on_missing_column); value absent
+    #                  = that one row quarantines
+    #   date_formats   strptime formats tried in order; mandatory for dates and never
+    #                  inferred, because 01/02/2025 is ambiguous
+    #   control_total  summed on load, recorded on the batch and checked against the
+    #                  file's own totals when it has a footer
+    #   pii            none | join_key | quasi | direct | prohibited. direct lands
+    #                  encrypted; prohibited is matched for drift checks and then
+    #                  discarded before any value is written anywhere
+    #   on_error       quarantine (default) | null | fail, for a cell that will not parse
+    #   max_length     text only; an over-length value fails rather than truncates
+    #   description    why the column matters, kept next to the mapping
     columns:
-      # unnamed export artifact at this position, not data
+      # The file opens with an unnamed row-number column at position 0. It is
+      # an export artifact, excluded from matching by the header index, and
+      # has no entry here.
       - target: n10_digit_ndc_current
         sources: ['10 Digit NDC (Current)']
         type: text
@@ -50,6 +160,8 @@ variants:
           It is kept because the pairing with the 11-digit column is the ground
           truth that proved the previous zfill(11) normalization wrong on 55 of
           101 distinct NDCs - see tests/fixtures/ndc_ground_truth_mckesson.json.
+      # Resolves to a site via the Master COGS List on (payee, account,
+      # location), never on account number alone.
       - target: account_number
         sources: ['Account Number']
         type: text
@@ -66,6 +178,7 @@ variants:
         description: >
           The covered-entity key (OPAID). Present here, in Pharmaforce and
           in Wellpartner, and it is what ties an account to a covered entity.
+      # Two formats declared, ISO first, tried in order. Never inferred.
       - target: wac_effective_date_current_date
         sources: ['WAC Effective Date (Current) Date']
         type: date
@@ -94,6 +207,7 @@ variants:
       - target: package_size
         sources: ['Package Size']
         type: decimal
+      # Natural-key column 3 of 3. Not required: a null PO still forms a key.
       - target: po_number
         sources: ['PO Number']
         type: text
@@ -109,10 +223,14 @@ variants:
       - target: order_uom
         sources: ['Order UOM']
         type: text
+      # Control total. Differs from the Purchasing Detail figure by 23 units
+      # (14,132 here against 14,155 there) - an open question for McKesson.
       - target: ordered_quantity
         sources: ['Ordered Quantity']
         type: decimal
         control_total: true
+      # The one column typed ndc in this file: normalised to 11 digits, and
+      # an unresolvable value quarantines the row rather than being guessed.
       - target: ndc_current
         sources: ['NDC (Current)']
         type: ndc
@@ -125,15 +243,18 @@ variants:
       - target: received_quantity
         sources: ['Received Quantity']
         type: decimal
+      # Natural-key column 1 of 3.
       - target: invoice_credit_number
         sources: ['Invoice/Credit Number']
         type: text
         required: true
+      # Two formats declared, ISO first, tried in order. Never inferred.
       - target: invoice_credit_date
         sources: ['Invoice/Credit Date']
         type: date
         date_formats: ['%Y-%m-%d', '%m/%d/%Y']
         required: true
+      # Natural-key column 2 of 3.
       - target: mckesson_item_number
         sources: ['McKesson Item Number']
         type: text
@@ -141,6 +262,10 @@ variants:
       - target: label_name
         sources: ['Label Name']
         type: text
+      # Control totals: net quantity, extended price, net and gross purchases.
+      # No footer here, so these are our own sums recorded on the batch; they
+      # are what proved this report and Purchasing Detail carry the same
+      # purchases.
       - target: net_quantity
         sources: ['Net Quantity']
         type: decimal

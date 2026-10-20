@@ -13,22 +13,60 @@
 # No 2023 data exists for this source - the delivery catalogue records "no 2023
 # data" - so coverage_start stops that being reported as a freshness gap.
 
+# --- Identity: how this source is named and routed ------------------------
+# key: the stable identifier, <group>.<vendor>.<report>. Never changes; the
+# raw table, every batch and all history are keyed on it.
 key: wholesaler.abc.purchases
+# name / vendor: human-readable labels for logs, alerts and reports.
 name: AmerisourceBergen - Purchases Invoice Detail
 vendor: AmerisourceBergen
+# group: the delivery folder the file arrives in.
 group: "1 Wholesalers"
+# catalog_names: what the finance team calls this feed in their source
+# catalogue, so a catalogue entry can be tied back to a spec.
 catalog_names: ['Abc']
+# lifecycle: active sources are expected to keep delivering, so silence
+# raises a freshness alert. discontinued / no_access / planned do not.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no new
+# file has been seen in N days"), NOT a schedule. Files are uploaded by hand
+# every Sunday with ad hoc midweek re-uploads; an early upload just resets the
+# clock. See CLAUDE.md, "How files arrive". Nothing consumes this field yet.
 expected_cadence_days: 7
+# coverage_start: no data exists before this date, so absence before it is
+# not a gap. The delivery catalogue records "no 2023 data" for ABC.
 coverage_start: "2024-01-01"
 
+# filename_patterns: case-insensitive regexes, a routing HINT only. What a
+# file actually is gets decided by the variant detector below, from its
+# header row. Filenames here overstate their date coverage and the same
+# source changes extension between drops, so they are never the last word.
 filename_patterns:
   - 'abc.*purchases'
 
+# natural_key: the target columns that identify one business row. Under the
+# single dedup rule (CLAUDE.md, "Duplicates") a row's identity is this key
+# plus an occurrence number in file order; same identity and same row hash on
+# a newer delivery = unchanged, different hash = correction that supersedes
+# the earlier row, and an older delivery never replaces a newer one.
+#
+# Evidence: ABC ships no invoice line number, so (account, invoice, ndc) is
+# the widest key the file offers. It is NOT fully unique - the earlier
+# validation pack found two duplicate rows on it (see notes below), and
+# docs/data-findings.md section 13 does not list ABC among the sources with
+# a verified key. Note too that ndc is part of the key but is not required:
+# 367 service-charge lines carry no NDC. The uniqueness probe itself is not
+# in this repository; the claim rests on the findings document.
 natural_key: [account, invoice, ndc]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      an extra column is recorded and the load continues
+#   on_missing_column: fail  an expected column has vanished; stop until a
+#                            human has looked, since every binding may be wrong
 on_new_column: warn
 on_missing_column: fail
+# notes: free text that travels with the spec. Mandatory when natural_key is
+# empty; here it records the two facts a reader has to know about this feed.
 notes: >
   Account numbers carry significant leading zeros (0100461951).
   The Master COGS List writes the same accounts without them, so account matching
@@ -40,17 +78,57 @@ notes: >
   and the duplicates are a real question for the vendor rather than something to
   paper over.
 
+# variants: the shapes this source's file can take. A variant is one layout,
+# with its own detector, read settings and column map. Every variant lands on
+# the same target names, so nothing downstream knows which shape wrote a row.
+# Detection is by header presence alone (detect.require_all / require_none):
+# exactly one variant must match a file, and zero or several stops the load
+# rather than guessing, because the guess decides how every column is read.
 variants:
+  # ABC has one shape. The CSV and workbook forms carry identical headers and
+  # differ only in their preamble, which header_marker absorbs, so one
+  # variant serves both deliveries.
   - name: invoice_detail
     description: >
       26-column line-level purchase detail. The same
       column set as a CSV and as a workbook; only the preamble differs.
+    # detect: the file must carry all three headers (compared after
+    # normalisation) to be read as this variant. These three are the
+    # account, the drug and the quantity - the columns a purchase line
+    # cannot do without.
     detect:
       require_all: ['Account #', 'NDC', 'Shipped Qty']
+    # read: how to find the header row and the data rows.
     read:
+      # header_marker: scan from the top for the first row that contains a
+      # column with this name and treat it as the header. This absorbs the
+      # one-line (xlsx) versus two-line (csv) preamble. If the marker is not
+      # found within max_preamble_scan rows (default 30) the read fails
+      # loudly rather than reading the title row as a header.
       header_marker: 'Account #'
+      # sheet: the worksheet to read when the file is a workbook, matched
+      # case-insensitively. Ignored for a CSV.
       sheet: 'Results'
+    # columns: one entry per target column. The fields, explained once:
+    #   target         canonical destination name; stable even when the vendor renames
+    #   sources        accepted vendor headers in preference order, matched on a
+    #                  normalised form (case, punctuation and whitespace folded)
+    #   type           text | integer | decimal | currency | date | boolean | ndc
+    #   required       the column must exist in the file AND every row must carry a
+    #                  value. Column absent = drift (on_missing_column); value absent
+    #                  = that one row quarantines
+    #   date_formats   strptime formats tried in order; mandatory for dates and never
+    #                  inferred, because 01/02/2025 is ambiguous
+    #   control_total  summed on load, recorded on the batch and checked against the
+    #                  file's own totals when it has a footer
+    #   pii            none | join_key | quasi | direct | prohibited. direct lands
+    #                  encrypted; prohibited is matched for drift checks and then
+    #                  discarded before any value is written anywhere
+    #   on_error       quarantine (default) | null | fail, for a cell that will not parse
+    #   max_length     text only; an over-length value fails rather than truncates
+    #   description    why the column matters, kept next to the mapping
     columns:
+      # Natural-key column 1 of 3. Text, because leading zeros are significant.
       - target: account
         sources: ['Account #']
         type: text
@@ -61,6 +139,7 @@ variants:
       - target: account_name
         sources: ['Account Name']
         type: text
+      # quasi: an indirect identifier, stored in clear, risky only in combination.
       - target: city
         sources: ['City']
         type: text
@@ -69,6 +148,9 @@ variants:
         sources: ['State']
         type: text
         pii: quasi
+      # Two formats declared and tried in order. An ISO string never matches
+      # %m/%d/%Y and vice versa, so the two cannot be confused; the order only
+      # decides which is tried first.
       - target: invoice_date
         sources: ['Invoice Date']
         type: date
@@ -77,6 +159,7 @@ variants:
       - target: customer_po
         sources: ['Customer PO #']
         type: text
+      # Natural-key column 2 of 3.
       - target: invoice
         sources: ['Invoice #']
         type: text
@@ -87,6 +170,9 @@ variants:
       - target: product_description
         sources: ['Product Description']
         type: text
+      # Natural-key column 3 of 3, yet deliberately not required - see description.
+      # type ndc normalises to 11 digits; an unresolvable value quarantines the
+      # row rather than being guessed.
       - target: ndc
         sources: ['NDC']
         type: ndc
@@ -100,6 +186,9 @@ variants:
       - target: order_qty
         sources: ['Order Qty']
         type: decimal
+      # control_total: summed on load and recorded on the batch, so a reload can
+      # be compared with the original. ABC has no footer, so there is no vendor
+      # figure to check against; the sum is our own control figure.
       - target: shipped_qty
         sources: ['Shipped Qty']
         type: decimal
@@ -109,6 +198,7 @@ variants:
           Packages, not billing units. Conversion needs BILLUNITSPKG from
           the ASP crosswalk and is reconciliation work; the package figure is
           captured here so that conversion remains possible.
+      # The invoice line's extended amount. Control total and required.
       - target: invoice_ext_amt
         sources: ['Invoice Ext Amt']
         type: currency
@@ -126,6 +216,8 @@ variants:
       - target: current_acq_cost
         sources: ['Current Acq Cost']
         type: currency
+      # Also additive, so also a control total. AWP, acquisition cost and package
+      # AWP below are rates and are deliberately not.
       - target: total_ext_cost
         sources: ['Total Ext Cost']
         type: currency

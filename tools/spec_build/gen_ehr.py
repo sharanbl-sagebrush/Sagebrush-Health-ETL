@@ -1,3 +1,18 @@
+"""Generator for the six EHR specs: Allscripts eRx, Curve Monthly Services, Curve
+Appointments, and the three Athena reports (Encounters, Prescriptions,
+Eligibility).
+
+DO NOT RE-RUN. The specs this file produced have been hand-edited since they
+were generated (CLAUDE.md, "Layout": "generated once, hand-edited since").
+Running it would overwrite those edits with the state of the curation below.
+It is kept because it is the record of how each spec was derived from the
+real headers, and because the override tables are the most compact summary
+of the per-column decisions. See ``build_specs.py`` for the mechanics.
+
+Importing ``build_specs`` has side effects only through the ``write`` calls
+below; the ``headers_of`` calls read real extracts and need SBH_SOURCE_ROOT.
+"""
+
 import sys
 from pathlib import Path
 
@@ -22,6 +37,7 @@ ATH = DROP / "5 Athena"
 allscripts = headers_of(EHR / "AllScripts_Prescibe Medication_v2 01012023-03062026.csv")
 curve_svc = headers_of(EHR / "Curve_Monthly Services 01012023-03062026.csv")
 curve_appt = headers_of(EHR / "Curve_Appointment Details by Date 01012023-03062026.csv")
+# Athena exports open with a "REPORT NAME :" title line, so preamble=1.
 ath_enc = headers_of(ATH / "Athena_Encounter Report 01012024-03062026.csv", preamble=1)
 ath_rx = headers_of(ATH / "Athena_Prescription 01012024-03062026.csv", preamble=1)
 ath_elig = headers_of(ATH / "Athena_Patient Eligibility Report as of 03062026.csv", preamble=1)
@@ -36,9 +52,14 @@ def apply_detected_dates(overrides, path, headers, preamble=0):
     """
     samples = sample_values(path, preamble=preamble)
     for header in headers:
+        # Local approximation of target_of(). It agrees for the Curve headers
+        # it was run on, but it is not the same function.
         key = "".join(ch if ch.isalnum() else "_" for ch in header.strip().lower()).strip("_")
+        # A hand-typed column wins over detection, so the Check_In_Time text
+        # decision and the empty DateTime_Bumped column are not overridden.
         if key in overrides and overrides[key].get("type"):
             continue
+        # 98% of sampled values must parse (build_specs.detect_date_formats).
         formats = detect_date_formats(samples.get(header, []))
         if formats:
             existing = overrides.setdefault(key, {})
@@ -50,6 +71,11 @@ def apply_detected_dates(overrides, path, headers, preamble=0):
 def auto_pii(headers, extra=None):
     """Classify by column name. Every one is checked against the real header
     list below, so nothing is classified that does not exist."""
+    # PII classification is the one thing that IS safe to do by name: a
+    # column called SSN or LName is what it says, and the cost of a false
+    # positive is only that a value lands encrypted. "ssn" is checked first
+    # so it becomes prohibited (never landed) before any other rule can
+    # claim it. The hand-written ``extra`` entries win over the name rules.
     out = dict(extra or {})
     for h in headers:
         t = h.strip().lower()
@@ -72,6 +98,19 @@ def auto_pii(headers, extra=None):
 
 
 # ----------------------------------------------------------- Allscripts eRx
+# Produces specs/ehr.allscripts.erx.yaml.
+#
+# Decisions encoded here:
+#   - natural_key is EMPTY and justified in ALS_NOTES, which the spec model
+#     requires. Every candidate was tested against 132,974 rows; the best
+#     leaves 14,325 duplicates, and 8,100 rows are identical across all 21
+#     columns. Under the single dedup rule (CLAUDE.md, "Duplicates") the
+#     identity is all 21 columns plus an occurrence number, so the 8,100
+#     identical rows are 8,100 identities, and a later delivery with a newer
+#     as-of retires the rows it no longer carries for the dates it covers.
+#   - LOCATION_NAME1 and LOCATION_NAME are two distinct columns, mapped
+#     separately, not an either/or fallback.
+#   - File ships with a UTF-8 BOM; the reader's utf-8-sig default handles it.
 ALS_OVER = auto_pii(
     allscripts,
     {
@@ -134,6 +173,17 @@ write(
 )
 
 # ------------------------------------------------------- Curve monthly services
+# Produces specs/ehr.curve.monthly_services.yaml.
+#
+# Decisions encoded here:
+#   - natural_key EMPTY: (Voucher_Number, Service_ID) leaves 5,803 duplicates
+#     of 230,192; no exact-duplicate rows, so row_hash is the identity.
+#   - SSN is present and classified prohibited by auto_pii: matched for
+#     drift, never landed (data-findings.md section 14).
+#   - Dates typed BY VALUE via apply_detected_dates. The name rule missed
+#     seven real date columns here, including PIF_4 and PIF_5 (section 15).
+#   - fee and units are control totals.
+#   - Five leading Textbox* SSRS artifact columns are excluded from matching.
 SVC_OVER = auto_pii(
     curve_svc,
     {
@@ -198,6 +248,19 @@ write(
 )
 
 # ---------------------------------------------------------- Curve appointments
+# Produces specs/ehr.curve.appointments.yaml.
+#
+# Decisions encoded here:
+#   - natural_key EMPTY: no appointment id in the export; (Patient_Number,
+#     Appointment_DateTime) leaves 11,385 duplicates of 199,591.
+#   - Check_In_Time / Check_Out_Time are bare HHMM integers, kept as TEXT.
+#     Typing them as dates quarantined every row on the first run.
+#   - DateTime_Bumped and CM_Date_Of_Injury are empty in every delivery, so
+#     no format can be detected; they are typed by hand to match siblings.
+#   - Everything else dated by value via apply_detected_dates.
+#   - Patient AND guarantor identifiers are classified direct PII ("guar_"
+#     is in the auto_pii name list for this reason).
+#
 # Curve writes three different temporal shapes and they are not interchangeable.
 US_DATETIME = ["%m/%d/%Y %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y"]
 APPT_OVER = auto_pii(
@@ -289,6 +352,26 @@ write(
 )
 
 # ---------------------------------------------------------------- Athena x3
+# Produces specs/ehr.athena.encounters.yaml, ehr.athena.prescriptions.yaml
+# and ehr.athena.eligibility.yaml.
+#
+# Decisions shared by all three:
+#   - preamble_lines: 1 for the "REPORT NAME :" title row (file-audit.md).
+#   - Column names are Athena's truncated abbreviations (cln enc date,
+#     prvdrlstnme); they are the vendor's convention and are kept as sources.
+#   - Encounters and Prescriptions have coverage_start 2024-01-01: no 2023
+#     data exists.
+#
+# Per report:
+#   Encounters    no key; (patientid, cln enc date, dprtmnt, provdr) still
+#                 leaves 1,092 of 18,574. Athena has an encounter id but this
+#                 report omits it - a vendor ask (data-findings.md section 13).
+#   Prescriptions no key, structurally: one row per order PER ICD-10
+#                 diagnosis, so (cln enc id, order id, icd10) leaves 74 of
+#                 28,018. The grain is order-by-diagnosis.
+#   Eligibility   natural_key patientid, unique across 23,188 rows. A
+#                 point-in-time snapshot ("as of" in the filename), hence
+#                 cadence None.
 ATH_READ = {"preamble_lines": 1}
 
 ATH_ENC_OVER = auto_pii(

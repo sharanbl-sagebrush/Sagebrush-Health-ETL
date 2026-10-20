@@ -1,8 +1,24 @@
-"""Tests for stable identity.
+"""Tests for stable identity - ``sbh_data_bank.core.identity``.
+
+Identity is what idempotency rests on. The row hash decides whether a
+re-delivered row is the same record (skip), a changed record (supersede) or a
+new one (insert). The file hash decides whether a file has already been
+processed. If either digest drifted between runs, a replay would supersede the
+whole history instead of changing nothing.
 
 These are the guarantees idempotency rests on, so they are asserted as
 properties (two encodings must differ / must agree) rather than against
 hardcoded digests, which would only prove the implementation matches itself.
+
+How to read this file:
+
+- TestCanonicalEncoding     the byte encoding under every hash cannot be fooled
+- TestNumericEncoding       numbers hash by value, not by how a reader spelt them
+- TestTemporalEncoding      dates and datetimes stay distinct
+- TestRowHash               the per-row digest and its field-list contract
+- TestCrossProcessStability the digest does not depend on the interpreter
+- TestFileHash              content-based file identity
+- TestGeneratedIds          run and batch ids: unique, sortable, replayable
 """
 
 from __future__ import annotations
@@ -27,6 +43,12 @@ from sbh_data_bank.core.identity import (
 
 
 class TestCanonicalEncoding:
+    """The length-prefixed byte encoding every hash is built on.
+
+    Each test is one way two different inputs could produce the same bytes,
+    and shows that they do not.
+    """
+
     def test_field_boundaries_cannot_be_confused(self):
         """Without length prefixes these two collide, and one row silently
         supersedes a genuinely different one."""
@@ -38,6 +60,7 @@ class TestCanonicalEncoding:
         assert canonical_encode([("n", None)]) != canonical_encode([("n", "")])
 
     def test_null_is_distinct_from_the_literal_string_none(self):
+        """A cell containing the text "None" is data; a missing cell is not."""
         assert canonical_encode([("n", None)]) != canonical_encode([("n", "None")])
 
     def test_bool_does_not_collide_with_int(self):
@@ -46,14 +69,25 @@ class TestCanonicalEncoding:
         assert canonical_encode([("x", False)]) != canonical_encode([("x", 0)])
 
     def test_separator_in_the_data_cannot_forge_a_boundary(self):
+        """A value that contains the internal separator and a fake length
+        prefix must not be able to impersonate a different field list."""
         hostile = "1:a\x1f1:1"
         assert canonical_encode([("x", hostile)]) != canonical_encode([("a", 1)])
 
     def test_field_order_is_significant(self):
+        """(a, b) and (b, a) are different rows; the field list is part of the
+        contract, not a set."""
         assert stable_hash([("a", 1), ("b", 2)]) != stable_hash([("b", 2), ("a", 1)])
 
 
 class TestNumericEncoding:
+    """Numbers hash by value.
+
+    A CSV reader yields strings and an Excel reader yields ints and floats.
+    WeInfuse switched from CSV to XLSX mid-2026, so the same number must hash
+    the same from both readers or that switch alone would supersede history.
+    """
+
     @pytest.mark.parametrize(
         ("left", "right"),
         [
@@ -75,6 +109,8 @@ class TestNumericEncoding:
         )
 
     def test_large_decimal_keeps_full_precision(self):
+        """No float conversion inside the encoder: a 22-digit amount still
+        differs from itself plus one cent."""
         big = Decimal("12345678901234567890.12")
         assert stable_hash([("amt", big)]) != stable_hash([("amt", big + Decimal("0.01"))])
 
@@ -97,16 +133,26 @@ class TestNumericEncoding:
 
 
 class TestTemporalEncoding:
+    """Dates and datetimes encode as ISO text and never collide with each other."""
+
     def test_date_and_datetime_do_not_collide(self):
+        """A date and a midnight datetime on the same day are different values."""
         d = date(2025, 7, 17)
         assert stable_hash([("d", d)]) != stable_hash([("d", datetime(2025, 7, 17))])
 
     def test_dates_encode_iso(self):
+        """ISO text is locale-independent and readable if a digest is ever
+        reconstructed by hand."""
         assert b"2025-07-17" in canonical_encode([("d", date(2025, 7, 17))])
 
 
 class TestRowHash:
+    """``stable_row_hash``: the digest stored on every landed row, computed
+    over the field list the spec declares."""
+
     def test_absent_field_encodes_as_null(self):
+        """A field missing from the row dict hashes the same as the field
+        present with None, so a sparse reader and a dense reader agree."""
         assert stable_row_hash({"a": 1}, ["a", "b"]) == stable_row_hash(
             {"a": 1, "b": None}, ["a", "b"]
         )
@@ -119,14 +165,20 @@ class TestRowHash:
         assert base == widened
 
     def test_changing_a_hashed_value_changes_the_hash(self):
+        """Sanity check: the digest really does depend on the values."""
         assert stable_row_hash({"a": 1}, ["a"]) != stable_row_hash({"a": 2}, ["a"])
 
     def test_field_list_order_is_part_of_the_contract(self):
+        """Same row, different field order, different hash. A spec must not
+        reorder its hashed fields casually, or every row looks changed."""
         row = {"a": 1, "b": 2}
         assert stable_row_hash(row, ["a", "b"]) != stable_row_hash(row, ["b", "a"])
 
 
 class TestCrossProcessStability:
+    """The digest must be identical in every Python process, or a replay on
+    another machine could never reproduce history."""
+
     def test_hash_is_identical_in_a_fresh_interpreter_with_a_different_seed(self):
         """PYTHONHASHSEED randomisation must not reach these digests.
 
@@ -139,6 +191,8 @@ class TestCrossProcessStability:
             "print(stable_row_hash({'a': 1, 'b': None, 'c': 'x'}, ['a', 'b', 'c']))"
         )
         seen = set()
+        # Three interpreters, three different hash seeds, an empty PATH so the
+        # child can only run the interpreter it was handed. One digest expected.
         for seed in ("0", "1", "12345"):
             out = subprocess.run(
                 [sys.executable, "-c", script],
@@ -149,10 +203,17 @@ class TestCrossProcessStability:
             )
             seen.add(out.stdout.strip())
         assert len(seen) == 1
+        # And it is the same digest this process computes.
         assert seen == {stable_row_hash({"a": 1, "b": None, "c": "x"}, ["a", "b", "c"])}
 
 
 class TestFileHash:
+    """``file_sha256``: a file is identified by its bytes, not its name.
+
+    This is what the ``uq_source_file`` constraint in the ledger relies on - a
+    re-upload of the same file is a no-op, a corrected file is a new delivery.
+    """
+
     def test_same_content_under_different_names_hashes_the_same(self, tmp_path):
         """File identity is content-based: a renamed re-delivery is a duplicate."""
         a, b = tmp_path / "drop1.csv", tmp_path / "drop2.csv"
@@ -169,18 +230,29 @@ class TestFileHash:
         assert file_sha256(f) != first
 
     def test_handles_a_file_larger_than_the_read_chunk(self, tmp_path):
+        """Hashing streams the file in chunks. A file bigger than one chunk,
+        with an odd-sized tail, still yields a 64-hex SHA-256."""
         f = tmp_path / "big.csv"
         f.write_bytes(b"x" * (3 * 1024 * 1024 + 17))
         assert len(file_sha256(f)) == 64
 
     def test_empty_file_hashes_without_error(self, tmp_path):
+        """An empty delivery is still a delivery and gets an identity."""
         f = tmp_path / "empty.csv"
         f.write_bytes(b"")
         assert len(file_sha256(f)) == 64
 
 
 class TestGeneratedIds:
+    """Run and batch ids.
+
+    Live runs get time-ordered random ids so a batch table sorts by creation.
+    Replay gets deterministic ids derived from content, so re-running history
+    produces the same batch ids and therefore the same ledger.
+    """
+
     def test_ids_are_unique(self):
+        """500 of each in a tight loop, no collisions."""
         assert len({new_run_id() for _ in range(500)}) == 500
         assert len({new_batch_id() for _ in range(500)}) == 500
 
@@ -192,12 +264,14 @@ class TestGeneratedIds:
         assert len(set(ids)) == len(ids)
 
     def test_ids_remain_ordered_across_a_millisecond_boundary(self):
+        """Ordering also holds when the clock ticks between two bursts."""
         first = [new_batch_id() for _ in range(5)]
         time.sleep(0.005)
         second = [new_batch_id() for _ in range(5)]
         assert first + second == sorted(first + second)
 
     def test_prefixes_distinguish_runs_from_batches(self):
+        """The prefix makes an id self-describing in a log line."""
         assert new_run_id().startswith("run_")
         assert new_batch_id().startswith("bat_")
 
@@ -208,5 +282,6 @@ class TestGeneratedIds:
         assert a == b
 
     def test_replay_batch_id_differs_by_file_and_by_source(self):
+        """Deterministic still has to mean unique per (file, source) pair."""
         assert deterministic_batch_id("abc", "src.a") != deterministic_batch_id("abc", "src.b")
         assert deterministic_batch_id("abc", "src.a") != deterministic_batch_id("xyz", "src.a")

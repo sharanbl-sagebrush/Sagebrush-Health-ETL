@@ -11,39 +11,133 @@
 # one system, and which is authoritative for revenue is an open question in
 # docs/data-findings.md.
 #
-# NO NATURAL KEY. See notes.
+# NATURAL KEY: (service_id, voidsign). Decided 2026-10-16 from the layer walk
+# (docs/layer-walk/ehr.curve.monthly_services.analysis.md). See the key block.
 
+# ---- Identity and routing -------------------------------------------------
+# key: stable identifier for this source. Ledger history is keyed on it, so
+# it never changes. name and vendor are for display only.
 key: ehr.curve.monthly_services
 name: Curve - Monthly Services
 vendor: Curve / Allscripts
+# group: the delivery folder the finance team drops this file into.
 group: "3 AllscriptsCurve"
+# catalog_names: what the finance team calls this report in their source
+# catalogue, so the two can be matched up.
 catalog_names: ['Monthly services']
+# lifecycle: active means silence from this source raises a freshness
+# alert. discontinued, no_access and planned sources are never alerted on.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no
+# new file in N days"), not a schedule. Files are uploaded every Sunday with
+# ad hoc midweek re-uploads; see CLAUDE.md "How files arrive". null means
+# irregular.
 expected_cadence_days: 7
 
+# filename_patterns: case-insensitive regexes, a routing hint only. What a
+# file actually is gets decided by the variant detector below from its header
+# row, so a renamed file still loads and a misnamed one does not load wrongly.
+# Not anchored on extension: the same source can arrive as CSV or XLSX.
 filename_patterns:
   - 'curve.*monthly service'
 
-natural_key: []
+# natural_key: (service_id, voidsign). Decided 2026-10-16.
+#
+# Earlier finding (docs/data-findings.md section 13): (Voucher_Number,
+# Service_ID) leaves 5,803 duplicates across 230,192 rows, so the spec shipped
+# keyless. The layer walk showed what those 5,803 are: every one is a voided
+# charge, present twice with VoidSign +1 and -1 and fees that cancel. Adding
+# VoidSign separates each pair, and (Service_ID, VoidSign) has 0 duplicates in
+# all four deliveries. The voucher adds nothing and is mutable, so it is left
+# out of the key.
+#
+# Why this matters: keyless, every re-delivery of an overlapping month was a
+# new identity, so the walk's current set held 350,908 rows for 250,643 charge
+# lines and overstated fees by $85.3M. Keyed, a re-delivered line is unchanged
+# or a correction, and the original of a voided charge stays beside its
+# reversal instead of being replaced by it.
+#
+# Dedup (CLAUDE.md, "Duplicates"): identity is this key plus an occurrence
+# number in file order; the key is unique within every file, so every
+# occurrence number is 1.
+natural_key: [service_id, voidsign]
 
+# on_new_column / on_missing_column: drift policy when the vendor changes the
+# column set. An unexpected new column warns and the load continues; a missing
+# column fails the file. Nothing is ever silently dropped, which is what the
+# previous pipeline did.
 on_new_column: warn
 on_missing_column: fail
+# notes: free text. Mandatory when natural_key is empty - the spec model
+# rejects a keyless spec that does not record what was tested and why.
 notes: >
-  No natural key. (Voucher_Number, Service_ID) leaves 5,803
-  duplicate rows across 230,192, and Service_ID alone leaves the same, so the
-  voucher adds nothing. There are no exact-duplicate rows, so the row hash is a
-  sound identity; the missing piece is a line-sequence number the export does not
-  carry. Monthly Payments, from the same practice-management system, does carry
-  SeqNum - worth asking whether this report can include it too.
+  Key (service_id, voidsign), adopted 2026-10-16. (Voucher_Number, Service_ID)
+  leaves 5,803 duplicate rows across 230,192 and Service_ID alone leaves the
+  same 5,803: each is a voided charge carried twice, VoidSign +1 and -1. With
+  VoidSign in the key there are 0 duplicates in every delivery, so the
+  line-sequence number this export lacks (Monthly Payments carries SeqNum) is
+  no longer needed for identity.
   
   Five SSRS artifact columns (Textbox108, Textbox101, Textbox78, Textbox53,
   Textbox38) lead the file and are excluded from matching.
 
+# variants: the shapes this source's file can take. A variant is one shape,
+# detected from the header row alone - require_all lists columns that must be
+# present, require_none columns that must be absent. Exactly one variant must
+# match a file or the load stops; zero and two are both errors, never resolved
+# by guessing. Each variant has its own read settings and column map, but all
+# land on the same target names, so nothing downstream knows which shape wrote
+# a row.
 variants:
+  # One shape so far: 122 columns. The detector uses the voucher, service and
+  # procedure-code columns that identify this charges report.
   - name: services_122
+    # detect: Voucher_Number, Service_ID and ProcCode identify a charges
+    # report, but Monthly Payments, from the same practice-management system,
+    # carries all three too - the two files share 67 headers. So the detector
+    # also requires columns only this report has (the encounter and claim
+    # identifiers and the original bill date) and forbids the three that only
+    # the payments ledger has (TransCode, Amount, SeqNum). The two detectors are
+    # then mutually exclusive on header content, whatever a file is called;
+    # tests/unit/test_specs_shipped.py checks this for every pair of specs.
     detect:
-      require_all: ['Voucher_Number', 'Service_ID', 'ProcCode']
+      require_all:
+        - 'Voucher_Number'
+        - 'Service_ID'
+        - 'ProcCode'
+        - 'Encounter'
+        - 'ClaimNum'
+        - 'BillDateOrig'
+      require_none: ['TransCode', 'Amount', 'SeqNum']
+    # No read block: header on row 0, no footer, default encoding. At 260 MB
+    # the file is read by the streaming reader rather than loaded whole. The
+    # SSRS Textbox* columns are export artifacts, dropped as junk headers
+    # before matching (registry/headers.py).
     columns:
+      # Column fields, explained once:
+      #   target        canonical column name in the warehouse. Stable; vendors
+      #                 rename, we do not.
+      #   sources       accepted vendor headers, matched after normalising case,
+      #                 punctuation and whitespace. List several when a vendor
+      #                 has renamed a column.
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #   required      the column must exist in the file AND every row must
+      #                 have a value. Column absent is drift (see policy above);
+      #                 value absent quarantines that one row.
+      #   date_formats  strptime formats tried in order. Mandatory for dates and
+      #                 never inferred: 01/02/2025 is ambiguous without one.
+      #   pii           none | join_key | quasi | direct | prohibited. direct lands
+      #                 encrypted; join_key stays in clear because reconciliation
+      #                 joins on it; prohibited is matched for drift checks and
+      #                 then discarded before any value is written anywhere.
+      #   on_error      quarantine (default) | null | fail, per cell parse failure.
+      #   control_total the column is additive and summed as a load control figure.
+      #   max_length    over-length text fails rather than truncates.
+      #   description   free text for the reader.
+      #
+      # 122 columns follow. The five "unnamed export artifact" markers below
+      # are the Textbox* positions. Comments mark the columns with something
+      # to know; the rest are self-explanatory.
       # unnamed export artifact at this position, not data
       # unnamed export artifact at this position, not data
       # unnamed export artifact at this position, not data
@@ -53,10 +147,14 @@ variants:
         sources: ['ClientID']
         type: text
         pii: join_key
+      # voucher_number is not part of the key: it is mutable state on the
+      # charge and adds nothing to uniqueness. Kept required for the join to
+      # Monthly Payments.
       - target: voucher_number
         sources: ['Voucher_Number']
         type: text
         required: true
+      # Key column 1 of 2.
       - target: service_id
         sources: ['Service_ID']
         type: text
@@ -64,9 +162,13 @@ variants:
       - target: isvoided
         sources: ['IsVoided']
         type: text
+      # Key column 2 of 2. Exactly 1 or -1 in every row of every delivery; a
+      # voided charge appears once with each sign. Integer, not decimal, so
+      # the key value is the same text in every delivery writer.
       - target: voidsign
         sources: ['VoidSign']
-        type: decimal
+        type: integer
+        required: true
       - target: patient_number
         sources: ['Patient_Number']
         type: text
@@ -82,6 +184,9 @@ variants:
       - target: mi
         sources: ['MI']
         type: text
+      # One of seven date columns a name rule missed (findings section 15):
+      # DOB, SvcDateFrom, SvcDateTo, BillDateOrig, BillDateInit, PIF_4, PIF_5.
+      # Each was typed by sampling its values, not its name.
       - target: dob
         sources: ['DOB']
         type: date
@@ -95,6 +200,9 @@ variants:
         sources: ['MaritalStatus']
         type: text
         pii: quasi
+      # PROHIBITED. Matched so column-count and drift checks still see it, then
+      # discarded. No value reaches the raw layer, quarantine or a log - even
+      # when another column on the same row fails.
       - target: ssn
         sources: ['SSN']
         type: text
@@ -202,6 +310,7 @@ variants:
         sources: ['SvcDate']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      # SvcDateFrom / SvcDateTo: dates a name rule ending in "date" would miss.
       - target: svcdatefrom
         sources: ['SvcDateFrom']
         type: date
@@ -217,6 +326,7 @@ variants:
       - target: billmedia
         sources: ['BillMedia']
         type: text
+      # BillDateOrig / BillDateInit: same - real dates, typed from values.
       - target: billdateorig
         sources: ['BillDateOrig']
         type: date
@@ -300,6 +410,8 @@ variants:
       - target: modifiers
         sources: ['Modifiers']
         type: text
+      # Control totals: fee and units are additive, so their file sums are
+      # checked against what landed.
       - target: fee
         sources: ['Fee']
         type: currency
@@ -419,6 +531,8 @@ variants:
       - target: pif_3
         sources: ['PIF_3']
         type: text
+      # PIF_4 and PIF_5 hold dates although the names say nothing; PIF_1 to
+      # PIF_3 do not. The clearest case for typing by value rather than name.
       - target: pif_4
         sources: ['PIF_4']
         type: date

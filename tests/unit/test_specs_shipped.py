@@ -8,6 +8,14 @@ files when they are available.
 If a vendor changes a header, the copy here goes stale and the corresponding
 integration run fails - which is the point. This file is the contract; the
 integration run is the evidence it still holds.
+
+How to read this file:
+
+- TestAllSpecsAreSound  rules every one of the 19 specs must satisfy, found by
+                        iterating the registry rather than naming specs
+- TestMasterCogsList    the account register: two variants in one workbook
+- TestMonthlyPayments   the 116-column PM ledger: PII classes, SSN, period
+- TestInjectedColumns   ``source_sheet``, a column the loader supplies
 """
 
 from __future__ import annotations
@@ -27,15 +35,20 @@ SPEC_DIR = Path(__file__).resolve().parents[2] / "specs"
 
 @pytest.fixture(scope="module")
 def registry() -> SpecRegistry:
+    """Every YAML file under specs/, loaded and validated once."""
     return SpecRegistry.from_dir(SPEC_DIR)
 
 
 # --- real header rows, verbatim -------------------------------------------
 
+# Master COGS List, "Master Sheet" tab: the consolidated register with the
+# Class_New and Changed? columns that record the undated reclassification.
 MASTER_COGS_MASTER_SHEET = [
     "Payee", "Class", "Class_New", "Changed?", "Category", "Account No", "Location",
 ]  # fmt: skip
 
+# Master COGS List, one of the per-vendor tabs (Cardinal, ABC, ...): five
+# columns, no Class_New.
 MASTER_COGS_VENDOR_TAB = [
     "Payee", "Class", "Category", "Account No", "Location",
 ]  # fmt: skip
@@ -45,6 +58,9 @@ MASTER_COGS_RS_TAB = [
     "Payee", "Class", "Category", "Account no", "Location",
 ]  # fmt: skip
 
+# Monthly Payments: the full 116-column header, stable across all 40 monthly
+# files. Includes SSN (never landed) and the direct identifiers that land
+# encrypted.
 MONTHLY_PAYMENTS = [
     "ClientID", "Voucher_Number", "Service_ID", "SeqNum", "IsVoided", "VoidSign",
     "VoidFlag", "TransCatID", "TransCat", "TransCatDesc", "TransType", "TransCodeID",
@@ -70,6 +86,9 @@ MONTHLY_PAYMENTS = [
 
 
 class TestAllSpecsAreSound:
+    """Cross-cutting rules, applied to every spec in the registry. Adding a
+    spec adds it to every one of these tests automatically."""
+
     def test_every_spec_loads_and_keys_are_unique(self, registry):
         """Deliberately not a fixed list. Asserting the exact set of shipped
         specs means every new source breaks an unrelated test, which trains
@@ -80,6 +99,8 @@ class TestAllSpecsAreSound:
         assert keys == sorted(keys)
 
     def test_the_sources_this_module_asserts_on_are_present(self, registry):
+        """The three specs the later classes test by name must exist, so a
+        rename fails here with a clear message rather than in a KeyError."""
         for key in (
             "finance.monthly_payments",
             "reference.wholesaler_accounts",
@@ -88,6 +109,8 @@ class TestAllSpecsAreSound:
             assert registry.get(key) is not None, key
 
     def test_no_spec_leaves_a_date_column_to_inference(self, registry):
+        """Every date column in every variant declares at least one format.
+        The model enforces this too; this is the belt to that brace."""
         for spec in registry:
             for variant in spec.variants:
                 for column in variant.columns:
@@ -95,6 +118,8 @@ class TestAllSpecsAreSound:
                         assert column.date_formats, f"{spec.key}.{column.target}"
 
     def test_every_natural_key_column_is_declared(self, registry):
+        """A natural-key column must be a target in every variant, or a file
+        of that variant would land without a key."""
         for spec in registry:
             for variant in spec.variants:
                 targets = {c.target for c in variant.columns}
@@ -119,6 +144,8 @@ class TestAllSpecsAreSound:
                         assert column.target not in spec.natural_key, spec.key
 
     def test_a_prohibited_column_is_never_required(self, registry):
+        """Required means the value is checked; a prohibited value must not
+        be examined at all beyond locating the column."""
         for spec in registry:
             for variant in spec.variants:
                 for column in variant.columns:
@@ -126,6 +153,8 @@ class TestAllSpecsAreSound:
                         assert not column.required, f"{spec.key}.{column.target}"
 
     def test_every_spec_has_at_least_one_loading_variant(self, registry):
+        """A spec whose variants are all recognise_only would never land
+        anything; that is a mistake, not a source."""
         for spec in registry:
             assert any(v.loads for v in spec.variants), spec.key
 
@@ -149,6 +178,34 @@ class TestAllSpecsAreSound:
                 }
             )
 
+    def test_no_detector_accepts_another_specs_file(self, registry):
+        """Across specs, detectors must be mutually exclusive on header content.
+
+        Each loading variant's declared source headers stand in for a real file
+        of that shape. Routing by filename is only a hint, so if another spec's
+        detector is satisfied by those headers, a renamed or misdropped file
+        would bind as the wrong source. The two McKesson reports share 15 of
+        their headers and are the case that motivated this check.
+        """
+        shapes = []
+        for spec in registry:
+            for variant in spec.variants:
+                headers = HeaderIndex([c.sources[0] for c in variant.columns if c.sources])
+                shapes.append((spec.key, variant.name, headers))
+        accepted = []
+        for owner_key, variant_name, headers in shapes:
+            for other in registry:
+                if other.key == owner_key:
+                    continue
+                for candidate in other.variants:
+                    missing = [h for h in candidate.detect.require_all if h not in headers]
+                    forbidden = [h for h in candidate.detect.require_none if h in headers]
+                    if not missing and not forbidden:
+                        accepted.append(
+                            f"{other.key}/{candidate.name} accepts {owner_key}/{variant_name}"
+                        )
+        assert not accepted, chr(10).join(accepted)
+
     def test_a_keyless_spec_documents_why(self, registry):
         """An empty natural key is legitimate - several of these feeds are
         denormalised report extracts where no subset of columns identifies a
@@ -162,7 +219,13 @@ class TestAllSpecsAreSound:
 
 
 class TestMasterCogsList:
+    """``reference.wholesaler_accounts``: the finance workbook that maps each
+    wholesaler account to a site. It is the source for entity resolution,
+    which is why its key and typing rules matter more than its 121 rows
+    suggest (docs/data-findings.md finding 6)."""
+
     def test_the_master_sheet_binds(self, registry):
+        """The seven-column Master Sheet header binds cleanly to its variant."""
         spec = registry.require("reference.wholesaler_accounts")
         binding = bind(spec, HeaderIndex(MASTER_COGS_MASTER_SHEET))
         assert binding.variant.name == "master_sheet"
@@ -210,7 +273,12 @@ class TestMasterCogsList:
 
 
 class TestMonthlyPayments:
+    """``finance.monthly_payments``: the practice-management transaction
+    ledger. 1,287,742 rows across 40 monthly files, the highest-PHI file in
+    the estate, and the one that carried the $39.97M defect (findings 1 and 7)."""
+
     def test_the_full_116_column_header_binds_with_no_drift(self, registry):
+        """All 116 real columns bind: nothing missing, nothing extra."""
         spec = registry.require("finance.monthly_payments")
         binding = bind(spec, HeaderIndex(MONTHLY_PAYMENTS))
         assert binding.missing_required == ()
@@ -235,21 +303,30 @@ class TestMonthlyPayments:
         assert variant.column("fee").type is FieldType.CURRENCY
 
     def test_amount_is_required(self, registry):
+        """A payment line with no amount is not a payment line; quarantine it."""
         variant = registry.require("finance.monthly_payments").variants[0]
         assert variant.column("amount").required
 
     def test_the_three_date_formats_are_declared(self, registry):
+        """One file, three date shapes: TransDate 6/17/2025, TransMonth
+        "Jun 2025", PostMonth "Oct 2025" (finding 7). Each column declares
+        its own."""
         variant = registry.require("finance.monthly_payments").variants[0]
         assert "%m/%d/%Y" in variant.column("transdate").date_formats
         assert "%b %Y" in variant.column("transmonth").date_formats
         assert "%b %Y" in variant.column("postmonth").date_formats
 
     def test_direct_identifiers_are_classified(self, registry):
+        """``pii: direct`` is what will drive encryption at rest and
+        column-level access control for name, DOB, contact and address."""
         variant = registry.require("finance.monthly_payments").variants[0]
         for target in ("lname", "fname", "dob", "email", "cellphone", "patstreet1"):
             assert variant.column(target).pii is PiiClass.DIRECT, target
 
     def test_join_keys_stay_in_clear(self, registry):
+        """PatNum, MRN and ClientID are needed to join to other sources, so
+        they are classified join_key and stored in clear (decision in
+        finding 7)."""
         variant = registry.require("finance.monthly_payments").variants[0]
         for target in ("patnum", "mrn", "clientid"):
             assert variant.column(target).pii is PiiClass.JOIN_KEY, target
@@ -271,6 +348,7 @@ class TestMonthlyPayments:
         assert match.groupdict() == expected
 
     def test_a_non_payments_filename_yields_no_period(self, registry):
+        """The pattern is specific enough not to match another source's name."""
         spec = registry.require("finance.monthly_payments")
         assert re.search(spec.period_from_filename, "Cardinal_Invoice.csv", re.I) is None
 
@@ -284,6 +362,10 @@ class TestMonthlyPayments:
 
 
 class TestInjectedColumns:
+    """A column with no ``sources``, filled in by the loader rather than read
+    from the file. The one case today is ``source_sheet`` on the Master COGS
+    List, which records which worksheet a row came from."""
+
     def test_an_injected_column_is_never_reported_as_absent(self, registry):
         """source_sheet has no vendor header - the loader supplies it - so it
         is neither matched nor missing, and must not appear as drift."""
@@ -294,6 +376,8 @@ class TestInjectedColumns:
         assert binding.drift_report() == "no drift"
 
     def test_an_injected_column_counts_as_present_and_landed(self, registry):
+        """It has no header match (``match is None``) yet it is present and
+        will be written, because the loader fills it."""
         spec = registry.require("reference.wholesaler_accounts")
         binding = bind(spec, HeaderIndex(MASTER_COGS_MASTER_SHEET))
         injected = next(b for b in binding.columns if b.column.target == "source_sheet")
@@ -303,6 +387,7 @@ class TestInjectedColumns:
         assert injected in binding.landed
 
     def test_an_injected_column_is_never_flagged_as_renamed(self, registry):
+        """No aliases means no "bound via a later alias" warning either."""
         spec = registry.require("reference.wholesaler_accounts")
         binding = bind(spec, HeaderIndex(MASTER_COGS_VENDOR_TAB))
         assert binding.renamed == ()

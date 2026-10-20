@@ -12,27 +12,84 @@
 # it should have used - Program Revenue, Entity Subsidy, Est 340B Cost - are all
 # present separately.
 
+# ---- Source identity -------------------------------------------------------
+# Everything above `variants:` describes the source as a whole. Each variant
+# below describes one file shape the source can arrive in. Field meanings come
+# from src/sbh_data_bank/registry/spec.py (SourceSpec).
+#
+# Stable identifier. Ledger tables and history are keyed on it; never renamed.
 key: tpa.wellpartner.claims
+# Display name for logs, reports and alerts.
 name: Wellpartner - 340B Claims
+# Who produces the extract.
 vendor: Wellpartner
+# The delivery folder the file arrives under.
 group: "4 TPA"
+# What the finance team calls this source in the delivery catalogue.
 catalog_names: ['Wellpartner (Claims tab)']
+# active: the source is expected to keep delivering, so silence raises an alert.
 lifecycle: active
+# Staleness threshold for freshness alerting, NOT a run schedule: alert when no
+# new file has been seen for this many days. Files are uploaded every Sunday
+# with ad hoc midweek re-uploads (CLAUDE.md, "How files arrive"); a midweek
+# upload just resets the clock. Alerting is not built yet, so nothing reads
+# this today. 7 is the generator default, not a measured delivery interval.
 expected_cadence_days: 7
 
+# Routing hint only: case-insensitive regexes tried against the filename. What
+# a file IS is decided by the header fingerprint in the variant detectors
+# below, so a renamed file still loads and a misnamed one does not load wrongly.
 filename_patterns:
   - 'wellpartner.*claim'
 
+# Natural key: the column that identifies one business row. Evidence:
+# Transaction # was probed unique across all 42,018 rows
+# (docs/data-findings.md, section 13). The probe itself is not in the repo.
 natural_key: [transaction]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      load anyway and record the extra column for review
+#   on_missing_column: fail  stop; a declared column that vanished means the
+#                            file is not what this spec says it is
 on_new_column: warn
 on_missing_column: fail
 
+# ---- Variants --------------------------------------------------------------
+# A variant is one shape this source's file can take. Detection is by header
+# presence only: every `require_all` header must exist and no `require_none`
+# header may. Exactly one variant must match or the load stops - zero matches
+# is an unknown file, two is a spec bug (overlapping detectors) - and there is
+# never a fallback default. Each variant carries its own `read` settings and
+# column map, but all variants land on the same `target` names, so nothing
+# downstream knows which shape wrote a row.
 variants:
+  # Single variant, 119 columns. Detected by `Transaction #` (the key) plus the
+  # two covered-entity columns, so a file without entity attribution is refused.
   - name: claims_119
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Transaction #', '340B ID', 'Entity Name']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
+      # Column fields, explained once; they mean the same in every spec:
+      #   target        canonical column name the value lands under; stable
+      #   sources       accepted vendor headers, tried in order, matched after
+      #                 normalising case, punctuation and whitespace (no fuzzy match)
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #                 currency is Decimal, never float, and reads "($40.00)" as -40
+      #                 ndc normalises to 11 digits or quarantines when ambiguous
+      #   required      the column must exist in the file AND every row must have a
+      #                 value; a blank value quarantines that one row
+      #   date_formats  explicit strptime formats tried in order; never inferred
+      #   control_total summed per file and checked against the file's own totals
+      #                 where it has them; only for additive amounts, never rates
+      #   pii           none | join_key | quasi | direct | prohibited
+      #                 direct is to land encrypted; prohibited is matched so drift
+      #                 checks see it, then discarded before any value is written
+      #   on_error      quarantine (default) | null | fail, per cell parse failure
+      #   max_length    over-length text fails rather than truncates
+      #   description   free text for the reader; the pipeline does not use it
       - target: processed_date
         sources: ['Processed Date']
         type: date
@@ -45,6 +102,9 @@ variants:
         sources: ['State of CE']
         type: text
         pii: quasi
+      # Target name starts with `n` because identifiers must begin with a letter.
+      # In THIS file the vendor header is `340B ID`; the description below was
+      # carried over from the Pharmaforce spec, where the same key is called OPAID.
       - target: n340b_id
         sources: ['340B ID']
         type: text
@@ -73,6 +133,7 @@ variants:
       - target: rx
         sources: ['Rx #']
         type: text
+      # type ndc: normalised to the 11-digit form; see transforms/ndc.py.
       - target: ndc
         sources: ['NDC']
         type: ndc
@@ -120,6 +181,7 @@ variants:
         sources: ['Rx Written Date']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      # The dispense date; required so every claim can be placed in a period.
       - target: dispensed_date
         sources: ['Dispensed Date']
         type: date
@@ -128,10 +190,16 @@ variants:
       - target: fill
         sources: ['Fill #']
         type: text
+      # Quantities and the money block that follows are control totals: summed per
+      # file for the batch record. Wellpartner ships no totals footer.
       - target: dispensed_qty
         sources: ['Dispensed Qty']
         type: decimal
         control_total: true
+      # The vendor header really is "Days` Supply" with a backtick. Header matching
+      # normalises punctuation away, so this also matches "Days Supply" if the
+      # vendor ever fixes it - the previous parser matched the typo byte-for-byte
+      # and would have gone null the day they did.
       - target: days_supply
         sources: ['Days` Supply']
         type: decimal
@@ -198,6 +266,7 @@ variants:
       - target: rilot_reason
         sources: ['RILOT Reason']
         type: text
+      # The natural key.
       - target: transaction
         sources: ['Transaction #']
         type: text
@@ -364,6 +433,10 @@ variants:
       - target: invoice_export_model
         sources: ['Invoice Export Model']
         type: text
+      # From here to the end of the variant several numeric- and date-looking
+      # columns (Qty Allocated, Last Allocation Date, Sales Tax, Orderable Date,
+      # Reconciliation Date, Last Modified Date/Time ...) are landed as TEXT. They
+      # are not used by anything yet; retype only after sampling the values.
       - target: qty_allocated
         sources: ['Qty Allocated']
         type: text

@@ -28,37 +28,101 @@
 # spec - which is the intended behaviour, since a format that no longer matches
 # must stop the load rather than be silently reinterpreted.
 
+# ---- Source identity -------------------------------------------------------
+# Everything above `variants:` describes the source as a whole. Each variant
+# below describes one file shape the source can arrive in. Field meanings come
+# from src/sbh_data_bank/registry/spec.py (SourceSpec).
+#
+# Stable identifier. Ledger tables and history are keyed on it; never renamed.
 key: dispense.weinfuse.patients
+# Display name for logs, reports and alerts.
 name: WeInfuse - Patients
+# Who produces the extract.
 vendor: WeInfuse
+# The delivery folder the file arrives under.
 group: "2 Dispenses"
+# What the finance team calls this source in the delivery catalogue.
 catalog_names: ['Weinfuse - Patients']
+# active: the source is expected to keep delivering, so silence raises an alert.
 lifecycle: active
+# Staleness threshold for freshness alerting, NOT a run schedule: alert when no
+# new file has been seen for this many days. Files are uploaded every Sunday
+# with ad hoc midweek re-uploads (CLAUDE.md, "How files arrive"); a midweek
+# upload just resets the clock. Alerting is not built yet, so nothing reads
+# this today. 7 is the generator default, not a measured delivery interval.
 expected_cadence_days: 7
 
+# Routing hint only: case-insensitive regexes tried against the filename. What
+# a file IS is decided by the header fingerprint in the variant detectors
+# below, so a renamed file still loads and a misnamed one does not load wrongly.
 filename_patterns:
   - 'weinfuse.*patients'
 
+# Natural key: the column that identifies one business row (a patient, since
+# this is a dimension). Evidence: Patient Identifier was probed unique across
+# all 1,918 rows (docs/data-findings.md, sections 10 and 13). Weinfuse UID is
+# equally unique but the new module dropped it, so it cannot serve as the key
+# across both variants. The probe itself is not in the repo.
 natural_key: [patient_identifier]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      load anyway and record the extra column for review
+#   on_missing_column: fail  stop; a declared column that vanished means the
+#                            file is not what this spec says it is
 on_new_column: warn
 on_missing_column: fail
 
+# ---- Variants --------------------------------------------------------------
+# A variant is one shape this source's file can take. Detection is by header
+# presence only: every `require_all` header must exist and no `require_none`
+# header may. Exactly one variant must match or the load stops - zero matches
+# is an unknown file, two is a spec bug (overlapping detectors) - and there is
+# never a fallback default. Each variant carries its own `read` settings and
+# column map, but all variants land on the same `target` names, so nothing
+# downstream knows which shape wrote a row.
 variants:
+  # Variant 1: the new reporting module, 23 columns. Detected by `Patient ID`
+  # (the new name for Patient Identifier) plus `Status` and `Substatus`, which
+  # the legacy export does not carry.
   - name: reporting_module_2026
     description: >
       23-column workbook from the new reporting module.
       Substantially reduced; notably carries no Location ID.
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Patient ID', 'Status', 'Substatus']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
       # unnamed export artifact at this position, not data
+      # Column fields, explained once; they mean the same in every spec:
+      #   target        canonical column name the value lands under; stable
+      #   sources       accepted vendor headers, tried in order, matched after
+      #                 normalising case, punctuation and whitespace (no fuzzy match)
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #                 currency is Decimal, never float, and reads "($40.00)" as -40
+      #                 ndc normalises to 11 digits or quarantines when ambiguous
+      #   required      the column must exist in the file AND every row must have a
+      #                 value; a blank value quarantines that one row
+      #   date_formats  explicit strptime formats tried in order; never inferred
+      #   control_total summed per file and checked against the file's own totals
+      #                 where it has them; only for additive amounts, never rates
+      #   pii           none | join_key | quasi | direct | prohibited
+      #                 direct is to land encrypted; prohibited is matched so drift
+      #                 checks see it, then discarded before any value is written
+      #   on_error      quarantine (default) | null | fail, per cell parse failure
+      #   max_length    over-length text fails rather than truncates
+      #   description   free text for the reader; the pipeline does not use it
       - target: group_name
         sources: ['Group', 'Group Name']
         type: text
       - target: location_name
         sources: ['Location', 'Location Name']
         type: text
+      # System-stamped: a UTC timestamp ("2025-02-14 17:13:35 UTC"), so the formats
+      # carry a time part. Contrast `date_of_birth` below, which is a plain date.
+      # Declaring the wrong shape quarantined all 1,918 rows on the spec's first run
+      # (docs/data-findings.md, section 11).
       - target: last_updated
         sources: ['Created Date', 'Last Updated']
         type: date
@@ -72,6 +136,7 @@ variants:
         type: text
         required: true
         pii: join_key
+      # Human-entered: a plain date, never a timestamp. See `last_updated`.
       - target: date_of_birth
         sources: ['DOB', 'Date of Birth']
         type: date
@@ -135,13 +200,19 @@ variants:
       - target: emergency_contact_relationship
         sources: ['Emergency Contact Relationship']
         type: text
+  # Variant 2: the 48-column CSV from before the module change. Detected by
+  # `Patient Identifier` and `Primary Insurance Member ID` (insurance detail
+  # only the legacy export has) and by the ABSENCE of `Substatus`.
   - name: legacy_export
     description: >
       48-column CSV with full demographics and three
       tiers of insurance detail.
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Patient Identifier', 'Primary Insurance Member ID']
       require_none: ['Substatus']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
       - target: group_id
         sources: ['Group ID']
@@ -149,6 +220,9 @@ variants:
       - target: group_name
         sources: ['Group Name', 'Group']
         type: text
+      # The site key, present only in this legacy variant. The new module carries
+      # only a location NAME (see the header note), so rows from the new module land
+      # with location_id null.
       - target: location_id
         sources: ['Location ID']
         type: text
@@ -176,6 +250,7 @@ variants:
         sources: ['Last Name']
         type: text
         pii: direct
+      # Human-entered: a plain date, never a timestamp. See `last_updated`.
       - target: date_of_birth
         sources: ['Date of Birth', 'DOB']
         type: date
@@ -244,6 +319,10 @@ variants:
       - target: emergency_contact_relationship
         sources: ['Emergency Contact Relationship']
         type: text
+      # System-stamped: a UTC timestamp ("2025-02-14 17:13:35 UTC"), so the formats
+      # carry a time part. Contrast `date_of_birth` below, which is a plain date.
+      # Declaring the wrong shape quarantined all 1,918 rows on the spec's first run
+      # (docs/data-findings.md, section 11).
       - target: last_updated
         sources: ['Last Updated', 'Created Date']
         type: date
@@ -264,6 +343,8 @@ variants:
       - target: primary_insurance_group_id
         sources: ['Primary Insurance Group ID']
         type: text
+      # The insurance block repeats the two temporal shapes: `*_entered_at` is a
+      # system UTC timestamp, `*_effective_date` is a human-entered plain date.
       - target: primary_insurance_entered_at
         sources: ['Primary Insurance Entered At']
         type: date

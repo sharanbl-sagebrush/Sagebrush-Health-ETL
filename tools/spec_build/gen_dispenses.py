@@ -1,3 +1,17 @@
+"""Generator for the three WeInfuse dispense specs: Administered Drugs, BuyBill,
+Patients. The only generator that reads the June 2026 drop (NEW_DROP).
+
+DO NOT RE-RUN. The specs this file produced have been hand-edited since they
+were generated (CLAUDE.md, "Layout": "generated once, hand-edited since").
+Running it would overwrite those edits with the state of the curation below.
+It is kept because it is the record of how each spec was derived from the
+real headers, and because the override tables are the most compact summary
+of the per-column decisions. See ``build_specs.py`` for the mechanics.
+
+Importing ``build_specs`` has side effects only through the ``write`` calls
+below; the ``headers_of`` calls read real extracts and need SBH_SOURCE_ROOT.
+"""
+
 import sys
 from pathlib import Path
 
@@ -20,12 +34,32 @@ from build_specs import (  # noqa: E402
 DIS = DROP / "2 Dispenses"
 NDIS = NEW_DROP / "2 Dispenses"
 
+# Five real header rows: the legacy CSV and the new-module XLSX for
+# Administered and Patients, and the single (now discontinued) BuyBill CSV.
+# Having both generations side by side is what let the rename and alias
+# tables below be built from fact rather than memory.
 adm_old = headers_of(DIS / "WeInfuse_AdministeredDrugsReport 01012023-03062026.csv")
 adm_new = headers_of(NDIS / "WeInfuse_AdministeredDrugsReport 03012026-06102026.xlsx")
 buybill = headers_of(DIS / "WeInfuse_BuyBill-AdministeredDrugsReport 01012023-03062026.csv")
 pat_old = headers_of(DIS / "WeInfuse PatientsReport 01012023-03062026.csv")
 pat_new = headers_of(NDIS / "WeInfuse PatientsReport 03012026-06102026.xlsx")
 
+# ---------------------------------------------------------- Administered
+# Produces specs/dispense.weinfuse.administered.yaml (two variants).
+#
+# Decisions encoded here:
+#   - Two variants, detected by column presence: the new module has
+#     "Inventory Type"; the legacy export has "Type" and lacks "Vendor"
+#     (which is how it is told apart from BuyBill, whose header is otherwise
+#     nearly identical).
+#   - natural_key (order_id, inventory_item_id): unique across 51,178 rows.
+#     The validation pack's candidate (UID + Appointment ID) left 25,738
+#     duplicates because one appointment administers several items
+#     (data-findings.md section 10).
+#   - billing_units is a control total and is HCPCS units, not packages; the
+#     conversion factor lives in the ASP crosswalk and is reconciliation work.
+#   - location_id is the site key the 340B plan depends on.
+#
 # The new reporting module renamed 14 columns. Both land on one canonical name
 # so downstream code never learns which module produced a row.
 ADM_RENAME = {
@@ -50,6 +84,8 @@ ADM_RENAME_OLD = {
     "Type": "inventory_type",
 }
 
+# Every accepted spelling per target, so one column binds whichever
+# generation of the export arrives. Order is legacy first, new module second.
 ADM_ALIASES = {
     "inner_ndc": ["Inner NDC", "Inner NDC Code"],
     "outer_ndc": ["Outer NDC", "Outer NDC Code"],
@@ -180,6 +216,16 @@ write(
 )
 
 # ------------------------------------------------------------------ BuyBill
+# Produces specs/dispense.weinfuse.buybill.yaml.
+#
+# Decisions encoded here:
+#   - lifecycle "discontinued" and cadence None: the June 2026 catalogue says
+#     "not in the new reporting module" and no file arrived. Marking it stops
+#     a weekly freshness alert while keeping the 45,013 rows reconcilable.
+#   - Same key and overrides as Administered (the two exports share 31 of 33
+#     columns); BB_OVER adds only "vendor", the column that distinguishes it.
+#   - Detector requires "Vendor" and forbids "Type" / "Inventory Type", the
+#     mirror image of the legacy Administered detector.
 BB_OVER = dict(ADM_OVER)
 BB_OVER["vendor"] = dict(
     type=TEXT,
@@ -236,6 +282,20 @@ write(
 )
 
 # ----------------------------------------------------------------- Patients
+# Produces specs/dispense.weinfuse.patients.yaml (two variants).
+#
+# Decisions encoded here:
+#   - natural_key patient_identifier: unique across 1,918 rows, and the only
+#     identifier that survives into the new module (Weinfuse UID was dropped).
+#   - New-module variant detected by "Substatus"; legacy by "Primary
+#     Insurance Member ID" and the absence of "Substatus".
+#   - Two date shapes in one file: ISO dates for human-entered fields and
+#     "YYYY-MM-DD HH:MM:SS UTC" for system stamps. UTC_STAMP vs ISO_DATE per
+#     column below. Getting one wrong quarantined all 1,918 rows on the
+#     first run, which is the intended failure (data-findings.md section 11).
+#   - The new module dropped Location ID (section 12); the spec still
+#     declares it, from the legacy variant, so the column exists in the
+#     table and new-module rows land it as null.
 PAT_RENAME_NEW = {
     "Patient ID": "patient_identifier",
     "DOB": "date_of_birth",

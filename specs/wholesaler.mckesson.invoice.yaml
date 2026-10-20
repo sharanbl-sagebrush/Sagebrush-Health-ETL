@@ -18,30 +18,156 @@
 # The export opens with an unnamed row-number column, excluded from matching as
 # an artifact and verified to carry no data any spec needs.
 
+# --- Identity: how this source is named and routed ------------------------
+# key: the stable identifier, <group>.<vendor>.<report>. Never changes; the
+# raw table, every batch and all history are keyed on it.
 key: wholesaler.mckesson.invoice
+# name / vendor: human-readable labels for logs, alerts and reports.
 name: McKesson - Purchasing Detail, Invoice Level
 vendor: McKesson
+# group: the delivery folder the file arrives in.
 group: "1 Wholesalers"
+# catalog_names: what the finance team calls this feed in their source
+# catalogue, so a catalogue entry can be tied back to a spec.
 catalog_names: ['Mckesson']
+# lifecycle: active sources are expected to keep delivering, so silence
+# raises a freshness alert. discontinued / no_access / planned do not.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no new
+# file has been seen in N days"), NOT a schedule. Files are uploaded by hand
+# every Sunday with ad hoc midweek re-uploads; an early upload just resets the
+# clock. See CLAUDE.md, "How files arrive". Nothing consumes this field yet.
 expected_cadence_days: 7
 
+# filename_patterns: case-insensitive regexes, a routing HINT only. The
+# variant detector below decides what a file is from its header row, so a
+# renamed file still loads and a misnamed one does not load wrongly.
 filename_patterns:
   - 'mckesson.*purchasing detail'
 
+# natural_key: the target columns that identify one business row. Under the
+# single dedup rule (CLAUDE.md, "Duplicates") a row's identity is this key
+# plus an occurrence number in file order; same identity and same row hash on
+# a newer delivery = unchanged, different hash = correction that supersedes
+# the earlier row, and an older delivery never replaces a newer one.
+#
+# Evidence (probed 2026-10-07 against all three deliveries; finding 16 in
+# docs/data-findings.md): this pair is NOT unique. 11 of 6,163 history rows
+# collide - mostly the same item on the same invoice with different
+# original-invoice references, and two split-shipment lines that differ only
+# in quantities. Adding ndc or account_number does not help: the item number
+# determines the NDC and the invoice determines the account in every row.
+# Adding original_invoice_number leaves 2 collisions that no identifier in
+# the file separates. A new column from McKesson is not an option.
+#
+# Under the layered design (CLAUDE.md, "Storage layers") this key is a
+# curated-layer rule, applied typed-to-curated and re-runnable, so the row
+# survives in landed and typed whatever the key does. Decided 2026-10-15
+# (CLAUDE.md, "Duplicates"): identity = this key + an occurrence number
+# assigned in file order within a key group, so the colliding lines become
+# (key, 1) and (key, 2) and both survive. Credits and returns carry their own
+# credit number and never collide with the purchase line they reverse, so a
+# return is inserted beside the original, never in its place.
 natural_key: [invoice_credit_number, mckesson_item_number]
 
+# --- Delivery semantics: how deliveries relate to each other in time ------
+# Decisions D1 to D6 in docs/decision-record.md, reviewed for this source on
+# 2026-10-20 against docs/layer-walk/wholesaler.mckesson.invoice.analysis.md.
+# All of it is applied typed-to-curated (curate.rule), so a wrong value here
+# is a re-run in the database, never a re-read of files.
+#
+# event_date: the only date column, required and populated on every row,
+# never later than the delivery as-of and never earlier than the filename
+# start in any of the four real deliveries. For a credit it is the credit
+# date, which is right: a credit is its own line under its own number.
+event_date: invoice_credit_date
+# coverage: the filename window held exactly on all four deliveries (0 rows
+# before the start, 0 after the end), with no offset. Not `data`: a window
+# taken from the rows could never show that a date was covered and empty.
+coverage: filename
+# vanish_scope: a delivery covers a date range TIMES an account set. The
+# June 2026 extract carries two accounts, 711 of its 983 rows, that are
+# absent from the March and April extracts for the same dates. Scoped by
+# account, a later extract run without those accounts retires nothing of
+# theirs; unscoped, it would retire every one of their rows as vanished.
+# Vanish itself is on (the default once an event date is declared); in the
+# four real deliveries no identity inside a shared window exists only in the
+# older file, so the rule retires nothing today.
+vanish_scope: [account_number]
+# row_hash_exclude: none. The eleven cross-delivery corrections all touch
+# order_submitted_by_id, which McKesson fills in or changes after the fact.
+# That is a vendor edit to the row, not a value recomputed at extraction
+# time, so it stays in the hash and a change to it is a correction.
+#
+# as_of_source: not set. Every file is CSV, so the standard chain lands on
+# the filename end date, which the review verified against the data.
+
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      an extra column is recorded and the load continues
+#   on_missing_column: fail  an expected column has vanished; stop until a
+#                            human has looked, since every binding may be wrong
 on_new_column: warn
 on_missing_column: fail
 
+# variants: the shapes this source's file can take. A variant is one layout,
+# with its own detector, read settings and column map. Every variant lands on
+# the same target names, so nothing downstream knows which shape wrote a row.
+# Detection is by header presence alone (detect.require_all / require_none):
+# exactly one variant must match a file, and zero or several stops the load
+# rather than guessing, because the guess decides how every column is read.
 variants:
+  # One shape has been observed for this report across all three drops.
   - name: invoice_level
+    # detect: the two McKesson reports share 15 of their headers, including
+    # the invoice and item identifiers and the extended price, so a detector
+    # built only from shared headers would accept the Custom report too. Today
+    # the filename pattern keeps them apart, but a pattern is a hint, not a
+    # guarantee. So this detector requires headers that exist only in
+    # Purchasing Detail (the NDC/UPC column, the original-invoice reference and
+    # the credits-and-returns amount) and forbids the three that exist only in
+    # the Custom report. A Custom file, however it is named, fails this
+    # detector; a Purchasing Detail file that loses one of these columns fails
+    # it too, loudly, instead of binding as something it is not.
     detect:
-      require_all: ['Invoice/Credit Number', 'McKesson Item Number', 'Extended Price ($)']
+      require_all:
+        - 'Invoice/Credit Number'
+        - 'McKesson Item Number'
+        - 'Extended Price ($)'
+        - 'NDC/UPC (Current)'
+        - 'Original Invoice Number'
+        - 'Gross Credits and Returns ($)'
+      require_none: ['NDC (Current)', 'Associated 340B ID', 'PO Number']
+    # read: how to find the header row and the data rows. No preamble, no
+    # sheet name, header on row 0 - only the footer needs declaring.
     read:
+      # footer: totals_row means the last row is a totals line (key columns
+      # blank, numeric columns populated). It is recognised, not landed, and
+      # each figure it declares is compared with our own sum of the matching
+      # control_total column. A mismatch is a load failure.
       footer: 'totals_row'
+    # columns: one entry per target column. The fields, explained once:
+    #   target         canonical destination name; stable even when the vendor renames
+    #   sources        accepted vendor headers in preference order, matched on a
+    #                  normalised form (case, punctuation and whitespace folded)
+    #   type           text | integer | decimal | currency | date | boolean | ndc
+    #   required       the column must exist in the file AND every row must carry a
+    #                  value. Column absent = drift (on_missing_column); value absent
+    #                  = that one row quarantines
+    #   date_formats   strptime formats tried in order; mandatory for dates and never
+    #                  inferred, because 01/02/2025 is ambiguous
+    #   control_total  summed on load, recorded on the batch and checked against the
+    #                  file's own totals when it has a footer
+    #   pii            none | join_key | quasi | direct | prohibited. direct lands
+    #                  encrypted; prohibited is matched for drift checks and then
+    #                  discarded before any value is written anywhere
+    #   on_error       quarantine (default) | null | fail, for a cell that will not parse
+    #   max_length     text only; an over-length value fails rather than truncates
+    #   description    why the column matters, kept next to the mapping
     columns:
-      # unnamed export artifact at this position, not data
+      # The file opens with an unnamed row-number column at position 0. It is
+      # an export artifact, excluded from matching by the header index, and
+      # has no entry here.
+      # Natural-key column 2 of 2.
       - target: mckesson_item_number
         sources: ['McKesson Item Number']
         type: text
@@ -49,6 +175,9 @@ variants:
       - target: item_description
         sources: ['Item Description']
         type: text
+      # Resolves to a site via the Master COGS List on (payee, account,
+      # location). Account number alone is not unique there: McKesson 62766
+      # maps to three classes across five rows.
       - target: account_number
         sources: ['Account Number']
         type: text
@@ -59,10 +188,12 @@ variants:
       - target: primary_account_number
         sources: ['Primary Account Number']
         type: text
+      # Natural-key column 1 of 2. Credits share the numbering with invoices.
       - target: invoice_credit_number
         sources: ['Invoice/Credit Number']
         type: text
         required: true
+      # Two formats declared, ISO first, tried in order. Never inferred.
       - target: invoice_credit_date
         sources: ['Invoice/Credit Date']
         type: date
@@ -107,6 +238,8 @@ variants:
       - target: generic_description
         sources: ['Generic Description']
         type: text
+      # Kept as text, not type ndc: the header says NDC/UPC, so the column
+      # can hold either, and the Custom report carries the clean 11-digit NDC.
       - target: ndc_upc_current
         sources: ['NDC/UPC (Current)']
         type: text
@@ -143,9 +276,20 @@ variants:
       - target: order_submitted_by_id
         sources: ['Order Submitted By ID']
         type: text
+      # A rate, not an additive amount, so it is money but not a control total.
+      # Typed currency so this report stands alone: the same header is currency
+      # in the Custom report, and a user switching between the two must not get
+      # a string from one and a Decimal from the other. Values ship as "$1,234.56"
+      # and are empty on service-charge lines (435 of 6,163 in the history file),
+      # which land null because the column is not required.
       - target: price_per_package
         sources: ['Price per Package ($)']
-        type: text
+        type: currency
+      # Control totals start here. Each of these is additive and is checked
+      # against the figure the footer declares for it: extended price
+      # $20,394,456.72, net quantity 11,378, ordered quantity 14,155, gross
+      # purchases $20,479,715.99, gross credits and returns -$85,259.27 in the
+      # 2023-2026 extract.
       - target: extended_price
         sources: ['Extended Price ($)']
         type: currency

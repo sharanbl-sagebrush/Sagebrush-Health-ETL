@@ -10,29 +10,92 @@
 # The qualifying-event dates are the evidence that a dispense is 340B-eligible,
 # which makes this the most compliance-relevant of the three Athena reports.
 
+# ---- Identity and routing -------------------------------------------------
+# key: stable identifier for this source. Ledger history is keyed on it, so
+# it never changes. name and vendor are for display only.
 key: ehr.athena.eligibility
 name: Athena - Patient Eligibility (QE Validation)
 vendor: Athena
+# group: the delivery folder the finance team drops this file into.
 group: "5 Athena"
+# catalog_names: what the finance team calls this report in their source
+# catalogue, so the two can be matched up.
 catalog_names: ['Patient Eligibility report - QE Validation']
+# lifecycle: active means silence from this source raises a freshness
+# alert. discontinued, no_access and planned sources are never alerted on.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no
+# new file in N days"), not a schedule. Files are uploaded every Sunday with
+# ad hoc midweek re-uploads; see CLAUDE.md "How files arrive". null means
+# irregular. This report is an "as of" snapshot with no
+# fixed cadence, so it is not alerted on for lateness.
 expected_cadence_days: null
 
+# filename_patterns: case-insensitive regexes, a routing hint only. What a
+# file actually is gets decided by the variant detector below from its header
+# row, so a renamed file still loads and a misnamed one does not load wrongly.
+# Not anchored on extension: the same source can arrive as CSV or XLSX.
 filename_patterns:
   - 'athena.*eligibility'
 
+# natural_key: patientid. Unique across all 23,188 rows of the full extract -
+# the only Athena report with a real key. The uniqueness probe is not in this
+# repo; the claim comes from docs/data-findings.md section 13.
+#
+# Dedup (CLAUDE.md, "Duplicates"): identity is this key plus an occurrence
+# number. Same hash on a newer delivery is unchanged; a different hash is a
+# correction - the new row is inserted and the old one superseded, so both
+# survive. Because each delivery restates every patient's current qualifying
+# event, that is exactly the behaviour wanted.
 natural_key: [patientid]
 
+# on_new_column / on_missing_column: drift policy when the vendor changes the
+# column set. An unexpected new column warns and the load continues; a missing
+# column fails the file. Nothing is ever silently dropped, which is what the
+# previous pipeline did.
 on_new_column: warn
 on_missing_column: fail
 
+# variants: the shapes this source's file can take. A variant is one shape,
+# detected from the header row alone - require_all lists columns that must be
+# present, require_none columns that must be absent. Exactly one variant must
+# match a file or the load stops; zero and two are both errors, never resolved
+# by guessing. Each variant has its own read settings and column map, but all
+# land on the same target names, so nothing downstream knows which shape wrote
+# a row.
 variants:
+  # One shape so far: 10 columns. The detector pairs patientid with the two
+  # department columns, which neither other Athena report carries.
   - name: eligibility_10
     detect:
       require_all: ['patientid', 'reg dprtmnt', 'curr dprtmnt']
     read:
+      # Every Athena export opens with a "REPORT NAME :" title line, so the
+      # header is on row 1. A fixed count is honest here because the count is
+      # stable in every delivery.
       preamble_lines: 1
     columns:
+      # Column fields, explained once:
+      #   target        canonical column name in the warehouse. Stable; vendors
+      #                 rename, we do not.
+      #   sources       accepted vendor headers, matched after normalising case,
+      #                 punctuation and whitespace. List several when a vendor
+      #                 has renamed a column.
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #   required      the column must exist in the file AND every row must
+      #                 have a value. Column absent is drift (see policy above);
+      #                 value absent quarantines that one row.
+      #   date_formats  strptime formats tried in order. Mandatory for dates and
+      #                 never inferred: 01/02/2025 is ambiguous without one.
+      #   pii           none | join_key | quasi | direct | prohibited. direct lands
+      #                 encrypted; join_key stays in clear because reconciliation
+      #                 joins on it; prohibited is matched for drift checks and
+      #                 then discarded before any value is written anywhere.
+      #   on_error      quarantine (default) | null | fail, per cell parse failure.
+      #   control_total the column is additive and summed as a load control figure.
+      #   max_length    over-length text fails rather than truncates.
+      #   description   free text for the reader.
+      # The natural key. required: a row without it cannot be identified.
       - target: patientid
         sources: ['patientid']
         type: text
@@ -57,6 +120,9 @@ variants:
       - target: curr_dprtmnt
         sources: ['curr dprtmnt']
         type: text
+      # Athena's abbreviated names kept verbatim: "ptnt vldtn nwst qlfyng vnt" is
+      # patient validation newest qualifying event, "ldst" is oldest. The two
+      # date columns below are the evidence that a dispense is 340B-eligible.
       - target: ptnt_vldtn_nwst_qlfyng_vnt
         sources: ['ptnt vldtn nwst qlfyng vnt']
         type: text

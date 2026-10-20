@@ -10,22 +10,54 @@
 #
 # No 2023 data exists for this source.
 
+# ---- Identity and routing -------------------------------------------------
+# key: stable identifier for this source. Ledger history is keyed on it, so
+# it never changes. name and vendor are for display only.
 key: ehr.athena.encounters
 name: Athena - Encounter Report
 vendor: Athena
+# group: the delivery folder the finance team drops this file into.
 group: "5 Athena"
+# catalog_names: what the finance team calls this report in their source
+# catalogue, so the two can be matched up.
 catalog_names: ['Encounter Report']
+# lifecycle: active means silence from this source raises a freshness
+# alert. discontinued, no_access and planned sources are never alerted on.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no
+# new file in N days"), not a schedule. Files are uploaded every Sunday with
+# ad hoc midweek re-uploads; see CLAUDE.md "How files arrive". null means
+# irregular.
 expected_cadence_days: 7
+# coverage_start: no data exists before this date, so its absence is not a
+# gap for completeness checks to report.
 coverage_start: "2024-01-01"
 
+# filename_patterns: case-insensitive regexes, a routing hint only. What a
+# file actually is gets decided by the variant detector below from its header
+# row, so a renamed file still loads and a misnamed one does not load wrongly.
+# Not anchored on extension: the same source can arrive as CSV or XLSX.
 filename_patterns:
   - 'athena.*encounter'
 
+# natural_key: EMPTY. Best candidate tested was (patientid, cln enc date,
+# order dprtmnt, sendto provdr), still leaving 1,092 duplicates across 18,574
+# rows. The report simply does not carry the encounter id. Figures from
+# docs/data-findings.md section 13; the probe itself is not in this repo.
+#
+# Dedup (CLAUDE.md, "Duplicates"): no key, so identity is every landed column
+# plus an occurrence number in file order. The extract contains no
+# byte-identical rows, so every occurrence number is 1.
 natural_key: []
 
+# on_new_column / on_missing_column: drift policy when the vendor changes the
+# column set. An unexpected new column warns and the load continues; a missing
+# column fails the file. Nothing is ever silently dropped, which is what the
+# previous pipeline did.
 on_new_column: warn
 on_missing_column: fail
+# notes: free text. Mandatory when natural_key is empty - the spec model
+# rejects a keyless spec that does not record what was tested and why.
 notes: >
   No natural key. (patientid, cln enc date) leaves 13,729
   duplicate rows across 18,574; adding order dprtmnt changes nothing, and adding
@@ -36,13 +68,45 @@ notes: >
   holds an encounter id - the Prescription report exposes it as `cln enc id` - so
   adding it here would give this report a real key.
 
+# variants: the shapes this source's file can take. A variant is one shape,
+# detected from the header row alone - require_all lists columns that must be
+# present, require_none columns that must be absent. Exactly one variant must
+# match a file or the load stops; zero and two are both errors, never resolved
+# by guessing. Each variant has its own read settings and column map, but all
+# land on the same target names, so nothing downstream knows which shape wrote
+# a row.
 variants:
+  # One shape so far: 11 columns. The detector uses the encounter date and
+  # status, which the other two Athena reports do not carry.
   - name: encounters_11
     detect:
       require_all: ['cln enc date', 'patientid', 'cln enc status']
     read:
+      # "REPORT NAME :" title line precedes the header, so header is row 1.
       preamble_lines: 1
     columns:
+      # Column fields, explained once:
+      #   target        canonical column name in the warehouse. Stable; vendors
+      #                 rename, we do not.
+      #   sources       accepted vendor headers, matched after normalising case,
+      #                 punctuation and whitespace. List several when a vendor
+      #                 has renamed a column.
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #   required      the column must exist in the file AND every row must
+      #                 have a value. Column absent is drift (see policy above);
+      #                 value absent quarantines that one row.
+      #   date_formats  strptime formats tried in order. Mandatory for dates and
+      #                 never inferred: 01/02/2025 is ambiguous without one.
+      #   pii           none | join_key | quasi | direct | prohibited. direct lands
+      #                 encrypted; join_key stays in clear because reconciliation
+      #                 joins on it; prohibited is matched for drift checks and
+      #                 then discarded before any value is written anywhere.
+      #   on_error      quarantine (default) | null | fail, per cell parse failure.
+      #   control_total the column is additive and summed as a load control figure.
+      #   max_length    over-length text fails rather than truncates.
+      #   description   free text for the reader.
+      # Candidate-key columns: cln_enc_date, order_dprtmnt, sendto_provdr,
+      # patientid. Together they still do not identify a row; see notes.
       - target: cln_enc_date
         sources: ['cln enc date']
         type: date

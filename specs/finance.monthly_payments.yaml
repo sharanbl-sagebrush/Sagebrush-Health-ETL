@@ -38,42 +38,121 @@
 # transactions and charges from the same system. Confirm whether both are
 # needed before relying on either for revenue totals.
 
+# --- Identity: how this source is named and routed ------------------------
+# key: the stable identifier, <group>.<vendor>.<report>. Never changes; the
+# raw table, every batch and all history are keyed on it.
 key: finance.monthly_payments
+# name / vendor: human-readable labels for logs, alerts and reports.
 name: Monthly Payments - PM transaction ledger
 vendor: Sagebrush Practice Management
+# group: the delivery folder the file arrives in.
 group: Finance
+# catalog_names: what the finance team calls this feed in their source
+# catalogue, so a catalogue entry can be tied back to a spec.
 catalog_names: ["Monthly Payments"]
+# lifecycle: active sources are expected to keep delivering, so silence
+# raises a freshness alert. discontinued / no_access / planned do not.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no new
+# file has been seen in N days"), NOT a schedule. Files are uploaded by hand
+# every Sunday with ad hoc midweek re-uploads; an early upload just resets the
+# clock. See CLAUDE.md, "How files arrive". Nothing consumes this field yet.
+# 31 here because the extract is one file per calendar month, so a month
+# with nothing new is the earliest point at which silence means a gap.
 expected_cadence_days: 31
+# coverage_start: no data exists before this date, so absence before it is
+# not a gap. The first monthly file is 2023-04.
 coverage_start: "2023-04-01"
 
+# filename_patterns: case-insensitive regexes, a routing HINT only. The
+# variant detector below decides what a file is from its header row.
 filename_patterns:
   - "monthly.*payments"
 
+# period_from_filename: a regex with named groups year and month, for a
+# source delivered one file per period. The only spec that uses it. The
+# period it yields is metadata about the delivery; period assignment of a
+# transaction uses PostMonth, which can be months after TransMonth.
 # Handles both "Monthly Payments 2025-06.csv" and the partial-period form
 # "Monthly Payments 2026-07 upto 07212026.csv".
 period_from_filename: 'monthly payments (?P<year>\d{4})-(?P<month>\d{2})'
 
-# A transaction line is identified by its voucher, service and sequence within
-# the month. ClientID scopes it; the period keeps two months that reuse a
-# sequence number apart.
-natural_key: [clientid, voucher_number, service_id, seqnum]
+# natural_key: the target columns that identify one business row. Under the
+# single dedup rule (CLAUDE.md, "Duplicates") a row's identity is this key
+# plus an occurrence number in file order; same identity and same row hash on
+# a newer delivery = unchanged, different hash = correction that supersedes
+# the earlier row, and an older delivery never replaces a newer one.
+#
+# Evidence: docs/data-findings.md section 13 recorded the four-column key
+# (clientid, voucher_number, service_id, seqnum) as unique across 1,287,742
+# rows. The layer walk (docs/layer-walk/finance.monthly_payments.analysis.md)
+# showed it is not: 181,688 groups of two to four rows share it within a
+# month (paired legs of one transaction, kept apart by the occurrence
+# number), and 14,956 identities recur in exactly two months, every one a
+# void reversal posted later with VoidSign flipped from 1 to -1. Under the
+# four-column key the reversal superseded the original and $2.06M of
+# original postings left the current set.
+#
+# voidsign added 2026-10-16. Every cross-month pair becomes two identities
+# (no pair shares a VoidSign), so the original and its reversal both stay
+# current and reconciliation sums them. Within-month pairs are unaffected.
+# This mirrors Curve Monthly Services, whose key is (service_id, voidsign).
+#
+# A transaction line is identified by its voucher, service, sequence and void
+# sign within the month. ClientID scopes it; the period keeps two months that
+# reuse a sequence number apart.
+natural_key: [clientid, voucher_number, service_id, seqnum, voidsign]
 
+# Drift policies: what happens when the column set changes. Both fail here,
+# stricter than the warn default for new columns.
 # 116 columns is a wide, stable contract. A vendor change on either side is
 # worth stopping for rather than absorbing.
 on_new_column: fail
 on_missing_column: fail
 
+# variants: the shapes this source's file can take. A variant is one layout,
+# with its own detector, read settings and column map. Every variant lands on
+# the same target names, so nothing downstream knows which shape wrote a row.
+# Detection is by header presence alone (detect.require_all / require_none):
+# exactly one variant must match a file, and zero or several stops the load
+# rather than guessing, because the guess decides how every column is read.
 variants:
+  # One shape, stable across every delivery so far.
   - name: pm_ledger_116
     description: >
       The single observed shape - 116 columns, identical across all 40 monthly
       files from 2023-04 to 2026-07.
+    # detect: the key columns plus the transaction code and amount - the
+    # headers without which this is not a payments ledger.
     detect:
       require_all: ["ClientID", "Voucher_Number", "Service_ID", "TransCode", "Amount"]
+    # read: header on row 0, no preamble, no footer. Each file ends with a
+    # single trailing blank line, which skip_trailing_blank_rows drops (it is
+    # also the default).
     read:
       skip_trailing_blank_rows: true
+    # columns: one entry per target column. The fields, explained once:
+    #   target         canonical destination name; stable even when the vendor renames
+    #   sources        accepted vendor headers in preference order, matched on a
+    #                  normalised form (case, punctuation and whitespace folded)
+    #   type           text | integer | decimal | currency | date | boolean | ndc
+    #   required       the column must exist in the file AND every row must carry a
+    #                  value. Column absent = drift (on_missing_column); value absent
+    #                  = that one row quarantines
+    #   date_formats   strptime formats tried in order; mandatory for dates and never
+    #                  inferred, because 01/02/2025 is ambiguous
+    #   control_total  summed on load, recorded on the batch and checked against the
+    #                  file's own totals when it has a footer
+    #   pii            none | join_key | quasi | direct | prohibited. direct lands
+    #                  encrypted; prohibited is matched for drift checks and then
+    #                  discarded before any value is written anywhere
+    #   on_error       quarantine (default) | null | fail, for a cell that will not parse
+    #   max_length     text only; an over-length value fails rather than truncates
+    #   description    why the column matters, kept next to the mapping
     columns:
+      # The four natural-key columns come first. clientid is a join_key:
+      # stored in clear because reconciliation joins on it, still PHI in
+      # context.
       - target: clientid
         sources: ["ClientID"]
         type: text
@@ -91,12 +170,19 @@ variants:
         sources: ["SeqNum"]
         type: integer
         required: true
+      # IsVoided arrives as the strings True/False; VoidSign as 1/-1. Both are
+      # kept so a voided line can be excluded or reversed, whichever the
+      # reconciliation needs.
       - target: isvoided
         sources: ["IsVoided"]
         type: boolean
+      # Key column: a void reversal reuses the original's voucher, service and
+      # sequence with VoidSign -1. Amount is already signed, so VoidSign is a
+      # flag for identity and filtering, never a multiplier.
       - target: voidsign
         sources: ["VoidSign"]
         type: integer
+        required: true
       - target: voidflag
         sources: ["VoidFlag"]
         type: text
@@ -121,10 +207,15 @@ variants:
       - target: transdesc
         sources: ["TransDesc"]
         type: text
+      # type currency: Decimal end to end, and ($40.00) parses as -40.00. This
+      # column is the whole reason the spec header above exists.
       - target: amount
         sources: ["Amount"]
         type: currency
         required: true
+      # Three date columns, three formats in one file. TransDate is a full
+      # date; TransMonth and PostMonth are month names ("Jun 2025"), so they
+      # parse to the first of the month. Each declares only its own formats.
       - target: transdate
         sources: ["TransDate"]
         type: date
@@ -231,6 +322,9 @@ variants:
       - target: reference
         sources: ["Reference"]
         type: text
+      # PHI block begins. join_key columns stay in clear; direct columns are
+      # encrypted at rest; quasi columns are in clear but risky in
+      # combination; the one prohibited column never lands at all.
       - target: patnum
         sources: ["PatNum"]
         type: text
@@ -251,6 +345,8 @@ variants:
         sources: ["MI"]
         type: text
         pii: direct
+      # DOB is typed text, not date, deliberately: it is a direct identifier
+      # destined for encrypted storage, not a value anything computes on.
       - target: dob
         sources: ["DOB"]
         type: text
@@ -263,6 +359,9 @@ variants:
         sources: ["MaritalStatus"]
         type: text
         pii: quasi
+      # pii: prohibited. The column is still declared so the header index and
+      # drift checks see it; its value is discarded before it reaches the raw
+      # layer, quarantine or a log - even when another cell on the row fails.
       - target: ssn
         sources: ["SSN"]
         type: text
@@ -303,6 +402,7 @@ variants:
         sources: ["PatZipCode"]
         type: text
         pii: quasi
+      # PostMonth drives period assignment and can trail TransMonth by months.
       - target: postmonth
         sources: ["PostMonth"]
         type: date
@@ -436,6 +536,8 @@ variants:
       - target: dxdesc4
         sources: ["DxDesc4"]
         type: text
+      # fee and units: the charge-side figures, not control totals. Note that
+      # amount above is not marked control_total either.
       - target: fee
         sources: ["Fee"]
         type: currency

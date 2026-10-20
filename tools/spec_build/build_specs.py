@@ -5,6 +5,68 @@ columns, footers, PII, type overrides. Column lists come from the actual files
 so nothing is transcribed by hand and no header typo is introduced.
 
 Output is committed YAML, read and edited by people from then on.
+
+=============================================================================
+DO NOT RE-RUN THESE GENERATORS.
+
+The 19 files in ``specs/`` were produced by ``gen_wholesalers.py``,
+``gen_dispenses.py``, ``gen_tpa.py`` and ``gen_ehr.py`` exactly once, and
+have been hand-edited since - column descriptions, notes, detector tweaks
+and the Cardinal spec (which has no generator at all). Running a generator
+again would overwrite those edits. CLAUDE.md records this under "Layout":
+"generated once, hand-edited since".
+
+This package is kept as documentation of how each spec was derived, and as
+the starting point if a vendor ever ships a wholly new layout that needs a
+fresh column list. In that case, copy the relevant block, point it at the
+new file, write to a scratch path, and merge by hand.
+=============================================================================
+
+How the pieces fit
+    ``headers_of(path, sheet, preamble)``
+        Reads ONE row - the header - from a real extract. Nothing else is
+        read. This is what makes the column lists exact: the vendor's own
+        spelling, including the Wellpartner ``Days` Supply`` typo, is what
+        goes into ``sources``.
+    ``sample_values(path, preamble, limit)``
+        Reads the first ``limit`` rows of a CSV, per column, for value-based
+        type detection. Used only by ``gen_ehr.py`` for the Curve files.
+    ``detect_date_formats(values)``
+        Returns a format list when 98% of a column's values parse as dates.
+    ``spec_yaml(...)``
+        Renders one spec. Takes the top-level fields, a header comment block,
+        and one dict per variant. Each variant dict carries the real
+        ``headers`` list plus the curation tables described below.
+    ``write(filename, text)``
+        Writes into ``specs/``. The one side effect.
+
+The override pattern
+    A generator never lists columns by hand. It takes the real header list
+    from ``headers_of`` and, for each header, computes a target name with
+    ``target_of`` and looks that target up in the variant's ``overrides``
+    dict. A header with no override lands as ``type: text``, not required,
+    no PII class. So the override dict is the complete record of every
+    non-default decision about a column, and a column absent from it was
+    deliberately left as text.
+
+    Three further per-variant tables:
+    ``rename``    maps a raw header to a target that differs from its
+                  normalized form (WeInfuse's "Inner NDC Code" -> inner_ndc).
+    ``aliases``   extra accepted source names per target, so both the legacy
+                  and new-module header spellings bind to one column.
+    ``require_all`` / ``require_none``   the variant detector.
+
+Cadence
+    ``spec_yaml`` defaults ``cadence`` to 7, so every source was emitted with
+    ``expected_cadence_days: 7`` unless the generator said otherwise. Only
+    three did: BuyBill and Athena Eligibility pass ``None`` (irregular), and
+    Monthly Payments was hand-set to 31. The 7 is therefore a default, not a
+    measured delivery interval; the field is a staleness threshold for the
+    alerting engine (CLAUDE.md, "How files arrive"), which is not built yet.
+
+Inputs
+    ``SBH_SOURCE_ROOT`` - the folder above ``Original Files``. ``DROP`` and
+    ``NEW_DROP`` are the two delivery folders the specs were derived from.
 """
 
 from __future__ import annotations
@@ -24,7 +86,11 @@ ROOT = Path(
         r"C:\Users\SharanLokeshwar\OneDrive - Sagebrush Healthcare\Sagebrush ETL Files",
     )
 )
+#: The March 2026 drop: 2023-2026 history for every source. Most specs were
+#: derived from these files.
 DROP = ROOT / "Original Files" / "Sagebrush ETL files 03062026"
+#: The June 2026 drop, where WeInfuse's new reporting module first appeared.
+#: Only gen_dispenses.py reads from it.
 NEW_DROP = (
     ROOT / "Original Files" / "March012026-June102026" / "Sagebrush ETL files_ Mar012026-June102026"
 )
@@ -34,6 +100,13 @@ from sbh_data_bank.registry.headers import is_junk_header, normalize_header  # n
 
 
 def headers_of(path: Path, sheet: str | None = None, preamble: int = 0) -> list[str]:
+    """The header row of a real extract, exactly as the vendor spelled it.
+
+    ``preamble`` rows are skipped first (1 for ABC's workbook and the three
+    Athena reports). Reads one row and closes the file; no values are read.
+    Trailing empty cells are trimmed because a worksheet's used range can run
+    past the last real column.
+    """
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
         import openpyxl
 
@@ -113,6 +186,12 @@ def detect_date_formats(values: list[str], threshold: float = 0.98) -> list[str]
 
 
 def target_of(header: str) -> str:
+    """Canonical target name for a vendor header.
+
+    The binder's own normalization, plus one rule: a name that starts with a
+    digit gets an ``n`` prefix, because ``340B ID`` must become ``n340b_id``
+    to be a valid identifier in YAML, Python and SQL.
+    """
     name = normalize_header(header)
     name = re.sub(r"^(\d)", r"n\1", name)
     return name or "column"
@@ -121,6 +200,8 @@ def target_of(header: str) -> str:
 # --- curation -------------------------------------------------------------
 # type overrides, PII, required, control totals, and per-source prose.
 
+# Short names for the FieldType values in registry/spec.py, so the override
+# tables in the gen_* files read as a column of decisions.
 MONEY = "currency"
 NUM = "decimal"
 INT = "integer"
@@ -129,6 +210,9 @@ NDC = "ndc"
 TEXT = "text"
 BOOL = "boolean"
 
+# Format lists are ordered: the first is what the source usually ships, the
+# second is the fallback. Both are declared so a vendor switching between
+# them (Cardinal did) loads, and anything else fails loudly. Never inferred.
 US_DATE = ["%m/%d/%Y", "%Y-%m-%d"]
 ISO_DATE = ["%Y-%m-%d", "%m/%d/%Y"]
 
@@ -152,6 +236,16 @@ def spec_yaml(
     constants: dict[str, str] | None = None,
     notes: str = "",
 ) -> str:
+    """Render one complete spec as YAML text.
+
+    Hand-built lines rather than a YAML dumper so the header comment block,
+    key order and quoting match what a person would write and what the rest
+    of the file looks like after editing. ``cadence=None`` renders as
+    ``null`` (irregular source); the default 7 is a placeholder, see the
+    module docstring.
+    """
+    # Top-level identity and policy fields, in the order the spec model
+    # documents them.
     out: list[str] = [header.rstrip(), ""]
     out.append(f"key: {key}")
     out.append(f"name: {name}")
@@ -182,6 +276,9 @@ def spec_yaml(
     out.append("")
     out.append("variants:")
 
+    # One block per variant. The detector (require_all / require_none) is
+    # what the binder uses to choose this variant; read settings are the
+    # per-variant ReadSpec (sheet, header_marker, footer, preamble_lines).
     for variant in variants:
         out.append(f"  - name: {variant['name']}")
         if variant.get("action"):
@@ -205,6 +302,9 @@ def spec_yaml(
                 out.append(f"      {k}: {v!r}" if isinstance(v, str) else f"      {k}: {v}")
         out.append("    columns:")
 
+        # Columns: walk the REAL header list in file order. For each header,
+        # compute the target, look up its override, and emit. A header with
+        # no override lands as text. This is the whole override pattern.
         overrides = variant.get("overrides", {})
         aliases = variant.get("aliases", {})
         # rename maps a vendor header to a target that differs from its
@@ -213,15 +313,21 @@ def spec_yaml(
         # "Inner NDC" and "Inner NDC Code" are the same field.
         rename = variant.get("rename", {})
         for raw in variant["headers"]:
+            # "Unnamed: 0" and "Textbox42" columns are export artifacts. A
+            # comment marks the position so the column count still adds up.
             if is_junk_header(raw):
                 out.append("      # unnamed export artifact at this position, not data")
                 continue
             target = rename.get(raw, target_of(raw))
             spec = overrides.get(target, {})
+            # sources is the raw header first, then every alias, de-duplicated.
             sources = [raw] + [a for a in aliases.get(target, []) if a != raw]
             out.append(f"      - target: {target}")
             out.append(f"        sources: [{', '.join(repr(s) for s in sources)}]")
             out.append(f"        type: {spec.get('type', TEXT)}")
+            # A date column with no explicit formats gets US_DATE. The spec
+            # model requires a format list on every date column; this is the
+            # one place a default is supplied, and it is visible in the YAML.
             if spec.get("type") == DATE:
                 fmts = spec.get("formats", US_DATE)
                 out.append(f"        date_formats: [{', '.join(repr(f) for f in fmts)}]")
@@ -239,5 +345,6 @@ def spec_yaml(
 
 
 def write(filename: str, text: str) -> None:
+    """Overwrite ``specs/<filename>``. The destructive step the banner warns about."""
     (REPO / "specs" / filename).write_text(text, encoding="utf-8")
     print(f"wrote specs/{filename} ({len(text.splitlines())} lines)")

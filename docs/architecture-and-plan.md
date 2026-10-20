@@ -121,6 +121,9 @@ Current state is `superseded_by_batch_id IS NULL`. As-of state adds
 file appends new and changed rows and supersedes vanished ones. Nothing is deleted, so the
 delete-by-date-range class of bug cannot occur.
 
+This ledger shape applies to the curated layer. The layers themselves, and which rules run
+between them, are set out under "Storage layers" below.
+
 ### Tier 1 — Configuration and master data
 
 **`sbh_data_bank.registry`** — The source spec model. This is the centrepiece of configurability and
@@ -176,6 +179,24 @@ Two operational fixes the logs make urgent: an expected-source manifest, so "Car
 delivered in 8 days" is an alert rather than a `WARNING` nobody reads; and a run summary that
 counts inserts *and* supersessions, since today `rows_promoted` excludes MERGE updates and
 therefore reported `promoted=0` on runs that were working.
+
+**How files arrive (decided 2026-10-07).** Extracts are downloaded by hand from each
+vendor portal and uploaded to Azure Storage every Sunday. A source may also be
+re-pulled and uploaded midweek when data needs correcting, and the ETL must pick that up
+without waiting for the next Sunday. Three consequences for the design:
+
+- *Acquire is event- or poll-driven, not a Sunday cron.* The acquire step watches the
+  blob container on a short interval or reacts to blob-created events. The Sunday upload
+  is an operating habit, not a contract the pipeline depends on.
+- *`expected_cadence_days` is a staleness threshold, not a schedule.* It means "alert if
+  no new file for this source has been seen in N days". A midweek upload resets the
+  clock early, which is harmless. Specs keep the true expectation (7 for weekly sources);
+  the alerting engine adds a grace period so a check that runs Sunday morning before the
+  upload does not raise a false alarm.
+- *Overlapping deliveries are the normal case.* A midweek re-pull usually covers a wider
+  date range than Sunday's file. Content-hash file identity makes an identical re-upload
+  a no-op. Which of two differing deliveries wins is decided by as-of date, not upload
+  order; the rule is under "Duplicates and delivery order" below.
 
 ### Tier 3 — Canonicalization
 
@@ -260,6 +281,120 @@ Per-tenant Key Vault secrets and blob containers. Config rows tenant-scoped with
 inheritance. Secrets never in files — the recovered `settings.yaml` carries a plaintext SQL
 admin password, which is the posture being replaced.
 
+## Storage layers (decided 2026-10-07)
+
+The first schema built for this product landed typed, deduplicated rows directly into
+`raw.*` tables. That put three business decisions - which rows parse, which columns identify
+a row, and which rows supersede which - ahead of the first database write. If any of those
+rules turned out wrong, the only recovery was to re-read the vendor files, and the database
+never held the evidence of what a vendor actually sent. The McKesson natural key, declared
+unique and found on inspection to collide on 11 of 6,163 rows, is the case that showed the
+cost.
+
+The decision is a four-layer design in the medallion pattern (bronze, silver, gold), with
+the gold layer split into curated and presentation because the curated ledger and the views
+users query change for different reasons.
+
+| Layer | Schema | Content | Rebuilt from | Changes when |
+|---|---|---|---|---|
+| Landed | `landed` | Every cell as delivered text, one row per file line, plus file id, line number, delivery rank, ingested_at | Files, once | Never |
+| Typed | `typed` | Parsed values per the spec; quarantine for what will not parse; row hash | Landed | A parsing rule changes |
+| Curated | `curated` | Dedup policy, supersession, site resolution, canonical events, under a rule version | Typed | A business rule changes |
+| Presentation | `pres` | Views and marts for users and for reconciliation | Curated | Reporting needs change |
+
+Rules that follow from it:
+
+- **Landed is immutable and as-delivered, with one exception.** Prohibited columns (SSN in
+  Monthly Payments and Curve Monthly Services) are matched for drift detection and dropped
+  before landing. This is the minimum-necessary standard applied once, at the boundary, and
+  it is the only deviation from "exactly what the vendor sent". Direct identifiers that do
+  land are encrypted at rest with column-level access control from the landed layer onward.
+- **Nothing is dropped before landed.** Duplicate files are refused by content hash; that is
+  the only filter. Footer rows, blank rows and rows that will later fail typing all land.
+  Typing and quarantine happen landed-to-typed; dedup happens typed-to-curated.
+- **Every step between layers is a versioned rule that can be re-run from the layer below.**
+  Changing a natural key, a date format or a dedup policy is a re-run over data already in
+  the database, with the prior result kept under its rule version. No step re-reads files.
+- **The spec is still the single definition.** One source spec drives all three steps: how
+  to land (read settings), how to type (columns and formats), and how to curate (natural
+  key, dedup, site resolution). Nothing in the spec format changes.
+- **The existing `raw.*` tables are the typed layer under an old name.** They are renamed
+  rather than redesigned; the ledger columns they carry move to curated, and typed keeps
+  only file id, line number and row hash.
+- **Storage is the accepted cost.** Overlapping weekly deliveries land in full. Curve Monthly
+  Services is 260 MB per drop and Monthly Payments over a million rows; that is budgeted
+  for, because it is the price of showing what each delivery contained.
+
+Consequence for the build order: the commit engine (built 2026-10-20, `commit/`) is built
+against these four layers from the start. The McKesson key question moves from "decide
+before loading" to "a curated-layer rule that can be changed and re-run".
+
+## Duplicates and delivery order (decided 2026-10-15)
+
+The first schema carried three dedup policies (natural key, row hash, file position) because
+three sources defeated the first two. The decision is one rule for every source, so that a
+reader of any table reasons about duplicates the same way, with the source-specific part
+reduced to a list of columns in the spec.
+
+**Identity.** A row's identity is its identity columns plus an occurrence number. The
+identity columns are the spec's `natural_key`; a spec without one uses every landed column.
+Within one delivery, rows that share identity columns are numbered in file order. The number
+is part of the identity, so nothing within a file is ever collapsed: the two McKesson
+split-shipment lines that are identical in every identifier become occurrence 1 and 2, and
+the 8,100 byte-identical Allscripts eRx prescriptions are 8,100 identities. The known
+limitation is order dependence: if a vendor reorders two colliding lines between deliveries,
+the pipeline records a correction that is cosmetic. The three McKesson deliveries on disk are
+the test for whether that happens.
+
+**What dedup is not.** It never decides which business line is right. Probed on the McKesson
+history file: all 31 credit and return lines carry their own credit number, distinct from the
+original invoice number, and none shares an invoice-plus-item key with a purchase line. A
+return is a new identity, inserted beside the original purchase; reconciliation sums the two.
+An order of 8 followed by a return of 3 is two live rows totalling 5, never one row of 3.
+
+**As-of.** Every delivery carries an as-of date: when the vendor extracted it. Supersession
+is ordered by as-of, never by arrival, because an operator can upload a months-old download
+after a newer one and the newer data must stand. Where as-of comes from, in order:
+
+0. Decided later (2026-10-16, D5 in `docs/decision-record.md`): the dated upload folder
+   every Sunday upload goes into, for every source. It is tried before everything below,
+   which remains the chain for the backlog files that have no such folder.
+1. The workbook's internal creation stamp (`docProps/core.xml`). Probed on all 32 real
+   xlsx files: the vendor portals write it (SAP for ABC, Apache POI for Cardinal and WeInfuse,
+   Kendo for Wellpartner) and it is the extraction date. ABC's file named through April 5 was
+   created April 30, which is exactly the late-download case the stamp is for. Two files
+   lack it.
+2. The end date of the range in the filename. Every real file carries one. This is the only
+   option for CSV, which is 110 of the 142 real files, including every McKesson file.
+3. A date the operator supplies at upload.
+
+A file with none is refused rather than guessed. The as-of must not precede the latest event
+date in the file, or the batch fails. Filesystem timestamps are not used: every file in a
+drop shows the day it was copied to OneDrive. Upload time is recorded as arrival time for
+audit and plays no part in ordering.
+
+**Outcomes.** For each incoming row, compared with the current row of the same identity:
+
+| Incoming vs current | Outcome | Counted as |
+|---|---|---|
+| No current row | Insert | inserted |
+| Newer as-of, same hash | Nothing | unchanged |
+| Newer as-of, different hash | Insert; supersede current | corrected |
+| Older as-of | Insert as history behind the current row; current unchanged | late |
+| Same as-of, different hash | Batch held for a person | conflict |
+| Current row absent from a newer delivery covering its date | Supersede current | vanished |
+
+A late batch is not an error. Its rows reach landed, typed and curated in full, and improve
+the answer to "what was known on that date", but they never become current. The batch report
+states how many rows were late so the operator learns that an old file was uploaded.
+
+**Where it lives.** `store/schema.py::DEDUP_RULE` names the rule version recorded on every
+batch and every curated row; `identity_columns_for(spec)` gives the identity columns. The
+curated DDL carries `identity_hash`, `occurrence`, `as_of`, `outcome` and `supersede_reason`;
+`meta.source_file` carries `as_of` and `as_of_source`; `meta.batch` carries a counter per
+outcome. The commit engine (`commit/engine.py`, 2026-10-20) fills them; its own refusals
+and the engine-level decisions are in `docs/decision-record.md`, "The commit engine".
+
 ## Scope boundary: what counts as "the ETL"
 
 The instruction is to finish the ETL, have it be production ready, and never come back to
@@ -298,7 +433,8 @@ until all of them pass.
 
 ### Correctness of what lands
 
-- Every destination column is typed. No `NVARCHAR(MAX)` catch-alls outside the raw layer.
+- Every destination column is typed from the typed layer onward. Text catch-alls exist only
+  in the landed layer, which is as-delivered by design.
 - NDC normalized with `ndc11`, `ndc_raw` and `ndc_resolution_method` on every row;
   ambiguous and lossy values quarantined rather than guessed.
 - Dates parsed with explicit per-source formats. Nothing left to pandas inference.

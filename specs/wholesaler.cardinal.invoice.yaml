@@ -23,38 +23,109 @@
 # Note the filename `Cardinal_Invoice 01012023-...` contains no 2023 data at
 # all - invoice dates run 2024 to 2026. Filenames are a routing hint only.
 
+# --- Identity: how this source is named and routed ------------------------
+# key: the stable identifier, <group>.<vendor>.<report>. Never changes; the
+# raw table, every batch and all history are keyed on it.
 key: wholesaler.cardinal.invoice
+# name / vendor: human-readable labels for logs, alerts and reports.
 name: Cardinal Health - Invoice Review
 vendor: Cardinal Health
+# group: the delivery folder the file arrives in.
 group: "1 Wholesalers"
+# catalog_names: what the finance team calls this feed in their source
+# catalogue, so a catalogue entry can be tied back to a spec.
 catalog_names: ["Cardinal"]
+# lifecycle: active sources are expected to keep delivering, so silence
+# raises a freshness alert. discontinued / no_access / planned do not.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no new
+# file has been seen in N days"), NOT a schedule. Files are uploaded by hand
+# every Sunday with ad hoc midweek re-uploads; an early upload just resets the
+# clock. See CLAUDE.md, "How files arrive". Nothing consumes this field yet.
 expected_cadence_days: 7
 
+# filename_patterns: case-insensitive regexes, a routing HINT only. Both the
+# summary and the detail report match this pattern; the variant detectors
+# below are what tell them apart, from the header row.
 filename_patterns:
   - "cardinal.*invoice"
 
+# natural_key: the target columns that identify one business row. Under the
+# single dedup rule (CLAUDE.md, "Duplicates") a row's identity is this key
+# plus an occurrence number in file order; same identity and same row hash on
+# a newer delivery = unchanged, different hash = correction that supersedes
+# the earlier row, and an older delivery never replaces a newer one.
+# This matters for Cardinal in particular: three overlapping deliveries
+# loaded naively give 1,914 duplicate rows (8.2%) and overstate purchases by
+# $1,387,175.46.
+#
+# Evidence: docs/data-findings.md section 13 records (account, invoice,
+# invoice_line) as unique across all 20,602 rows of the detail report. The
+# uniqueness probe itself is not in this repository; the claim rests on the
+# findings document.
+#
 # Cardinal invoice lines are uniquely identified by invoice and line number.
 # The account is included because the same Cardinal invoice numbering is not
 # guaranteed unique across the 67 Sagebrush accounts.
 natural_key: [account_number, invoice_number, invoice_line_number]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      an extra column is recorded and the load continues
+#   on_missing_column: fail  an expected column has vanished; stop until a
+#                            human has looked, since every binding may be wrong
 on_new_column: warn
 on_missing_column: fail
 
+# variants: the shapes this source's file can take. A variant is one layout,
+# with its own detector, read settings and column map. Every variant lands on
+# the same target names, so nothing downstream knows which shape wrote a row.
+# Detection is by header presence alone (detect.require_all / require_none):
+# exactly one variant must match a file, and zero or several stops the load
+# rather than guessing, because the guess decides how every column is read.
+# Cardinal is the live example of why variants exist: two different reports
+# arrive under near-identical names, and only one of them may be loaded.
 variants:
+  # Variant 1: the 17-column detail report. The only one that loads.
   - name: invoice_detail
     description: >
       17-column line-level report. The reconciliation source.
+    # detect: NDC, line number and quantity are exactly the three things the
+    # summary report lacks, so requiring them cannot match the summary.
     detect:
       require_all: ["NDC", "Invoice Line #", "Ship Qty"]
+    # read: how to find the header row and the data rows. Header is on row
+    # 0 with no preamble, so only the tail of the file needs declaring.
     read:
+      # skip_trailing_blank_rows: the export ends with a fully empty row;
+      # drop it rather than quarantine it. (This is also the default.)
       skip_trailing_blank_rows: true
       # The export ends with a totals line - key columns blank, quantities and
       # amount populated. Recognised rather than landed, and its figures are
       # checked against ours.
+      # footer: totals_row - each figure the footer declares is compared with
+      # our own sum of the matching control_total column; a mismatch fails
+      # the load. 3 of the 17 cells are populated, at positions 14-16.
       footer: totals_row
+    # columns: one entry per target column. The fields, explained once:
+    #   target         canonical destination name; stable even when the vendor renames
+    #   sources        accepted vendor headers in preference order, matched on a
+    #                  normalised form (case, punctuation and whitespace folded)
+    #   type           text | integer | decimal | currency | date | boolean | ndc
+    #   required       the column must exist in the file AND every row must carry a
+    #                  value. Column absent = drift (on_missing_column); value absent
+    #                  = that one row quarantines
+    #   date_formats   strptime formats tried in order; mandatory for dates and never
+    #                  inferred, because 01/02/2025 is ambiguous
+    #   control_total  summed on load, recorded on the batch and checked against the
+    #                  file's own totals when it has a footer
+    #   pii            none | join_key | quasi | direct | prohibited. direct lands
+    #                  encrypted; prohibited is matched for drift checks and then
+    #                  discarded before any value is written anywhere
+    #   on_error       quarantine (default) | null | fail, for a cell that will not parse
+    #   max_length     text only; an over-length value fails rather than truncates
+    #   description    why the column matters, kept next to the mapping
     columns:
+      # Natural-key column 1 of 3.
       - target: account_number
         sources: ["Account #"]
         type: text
@@ -72,6 +143,8 @@ variants:
       - target: po_number
         sources: ["PO #"]
         type: text
+      # Natural-key columns 2 and 3 of 3. The line number is kept as text
+      # because Cardinal zero-pads it and the zeros are part of the identifier.
       - target: invoice_number
         sources: ["Invoice #"]
         type: text
@@ -83,6 +156,9 @@ variants:
         description: >
           Kept as text, not integer. Cardinal zero-pads it ("000010") and the
           leading zeros are part of the identifier.
+      # Both observed formats declared: ISO (April 2026 pull) and US (February
+      # 2026 pull), tried in order. A pull in a third format fails loudly
+      # instead of being reinterpreted.
       - target: invoice_date
         sources: ["Invoice Date"]
         type: date
@@ -102,6 +178,9 @@ variants:
         sources: ["CIN"]
         type: text
         description: Cardinal item number.
+      # type ndc: normalised to 11 digits; an unresolvable value quarantines the
+      # row. Required here, unlike ABC and McKesson Custom: NDC is present on
+      # 20,602 of the 20,603 rows in the April 2026 pull.
       - target: ndc
         sources: ["NDC"]
         type: ndc
@@ -115,6 +194,8 @@ variants:
       - target: unit_price
         sources: ["Unit price (Current Invoice)"]
         type: currency
+      # Control totals: ordered quantity, shipped quantity and purchase amount
+      # are the three figures the footer declares, and each is checked.
       - target: ordered_quantity
         sources: ["Original Ordered Qty"]
         type: decimal
@@ -135,7 +216,12 @@ variants:
         control_total: true
         description: Ships as "$3,767.71 " with a trailing space.
 
+  # Variant 2: the 9-column summary report. Recognised, never loaded.
   - name: invoice_summary
+    # action: recognise_only means the file is identified and then nothing
+    # lands. superseded_by names the variant that covers the same ground, so
+    # the reason sits next to the decision. The model rejects recognise_only
+    # without a superseded_by.
     action: recognise_only
     superseded_by: invoice_detail
     description: >
@@ -149,9 +235,16 @@ variants:
       because an unrecognised file is either an alert somebody has to chase or,
       if a detector were ever loosened to accommodate it, a summary silently
       read as detail.
+    # detect: require_none is what separates this from the detail report -
+    # the summary is the Cardinal file WITHOUT NDC or a line number. Without
+    # it both detectors would match a detail file and the load would stop
+    # with AmbiguousVariantError.
     detect:
       require_all: ["Invoice #", "Purchase/Return"]
       require_none: ["NDC", "Invoice Line #"]
+    # columns: declared in full even though nothing lands, because the model
+    # requires every natural-key column to exist in every variant. Field
+    # meanings are explained above the first variant's columns.
     columns:
       - target: account_number
         sources: ["Account #"]

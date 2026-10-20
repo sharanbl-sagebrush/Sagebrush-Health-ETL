@@ -290,8 +290,13 @@ patient's site, that link degrades from an identifier to a name match.
 
 ## 13. Natural keys for every source, tested against the data
 
-**Status: closed.** Every key below was probed against the full 2023–2026
-extract, not sampled.
+**Status: reopened 2026-10-16 by the layer walk, two rows corrected.** Every
+key below was probed against the full 2023–2026 extract, not sampled, but two
+probes answered the wrong question: uniqueness within one file, not identity
+across re-deliveries. The layer walk (`docs/layer-walk/`) replayed every
+delivery of every source through the dedup rule and found that Monthly
+Payments' four-column key is not unique and that Curve Monthly Services does
+have a key once `VoidSign` is included. Both specs were corrected the same day.
 
 The earlier validation pack listed five sources as "candidate key unknown". Two
 had keys nobody had found; three genuinely have none, and that turns out to be a
@@ -302,8 +307,8 @@ fact about the reports rather than a gap in the analysis.
 | Source | Key | Rows tested |
 |---|---|---:|
 | Cardinal invoice detail | `account, invoice, invoice_line` | 20,602 |
-| McKesson Purchasing Detail | `invoice_credit_number, mckesson_item_number` | 6,163 |
-| McKesson Custom | `invoice_credit_number, mckesson_item_number, po_number` | 6,165 |
+| McKesson Purchasing Detail | `invoice_credit_number, mckesson_item_number` | 6,163 - **not unique, see finding 16** |
+| McKesson Custom | `invoice_credit_number, mckesson_item_number, po_number` | 6,165 - **not unique, see finding 16** |
 | **WeInfuse Administered** | **`order_id, inventory_item_id`** | 51,178 |
 | **WeInfuse BuyBill** | **`order_id, inventory_item_id`** | 45,013 |
 | **WeInfuse Patients** | **`patient_identifier`** | 1,918 |
@@ -313,7 +318,8 @@ fact about the reports rather than a gap in the analysis.
 | Wellpartner invoices | `invoice, wholesaler, account, date` | 7,700 |
 | **Athena eligibility** | **`patientid`** | 23,188 |
 | Master COGS List | `source_sheet, payee, account_number, location` | 121 |
-| Monthly Payments | `clientid, voucher_number, service_id, seqnum` | 1,287,742 |
+| Monthly Payments | `clientid, voucher_number, service_id, seqnum, voidsign` | 1,287,742 (corrected: the four-column key had 181,688 within-month groups and 14,956 cross-month void reversals) |
+| Curve Monthly Services | `service_id, voidsign` | 230,192 (corrected: the 5,803 residual pairs are voided charges carried with VoidSign +1 and -1) |
 
 The three WeInfuse answers were the pack's open items. `Inventory Item ID` is
 the discriminator — one appointment administers several inventory items, so any
@@ -326,7 +332,6 @@ key without it collides by construction. The pack had been testing
 |---|---|---:|
 | Allscripts eRx | `imreenc_code, imremed_code, refill` | 14,325 of 132,974 |
 | Curve Appointments | `patient_number, appointment_datetime` | 11,385 of 199,591 |
-| Curve Monthly Services | `voucher_number, service_id` | 5,803 of 230,192 |
 | Athena Encounters | `patientid, enc_date, dprtmnt, provdr` | 1,092 of 18,574 |
 | Athena Prescriptions | `cln_enc_id, order_id, icd10_code` | 74 of 28,018 |
 
@@ -353,8 +358,8 @@ should read like one.
 - **Curve Appointments**: an appointment id. Curve holds one internally — Monthly
   Services and Monthly Payments both reference vouchers and services by id — so
   this is a reporting omission rather than a modelling one.
-- **Curve Monthly Services**: a line-sequence number. Monthly Payments, from the
-  same system, carries `SeqNum`; this report does not.
+- **Curve Monthly Services**: no longer needed. `(service_id, voidsign)` is
+  unique in every delivery (corrected 2026-10-16).
 - **Athena Encounters**: the encounter id. The Prescription report already
   exposes it as `cln enc id`.
 
@@ -409,6 +414,61 @@ The same pass caught `Check_In_Time` and `Check_Out_Time`, which a name rule
 reads as timestamps and which are in fact bare `HHMM` integers — `1454` for
 14:54, with no date part. They are kept as text, because resolving them to a
 timestamp means assuming which day they belong to.
+
+---
+
+## 16. Neither McKesson key is unique, and no column in the file completes it
+
+**Status: decided 2026-10-15 - key plus occurrence number** (candidate 2 below),
+as the single rule for every source; see `docs/architecture-and-plan.md`,
+"Duplicates and delivery order". Probed 2026-10-07 against all three deliveries
+of both reports; the probe is the ad hoc script described below and is not yet
+in the repository. A further probe on 2026-10-15 confirmed that credits and
+returns never collide with the purchase line they reverse: all 31 credit rows
+in the history file carry their own credit number and none shares an
+invoice-plus-item key with a purchase row, so a return is inserted beside the
+original line rather than replacing it.
+
+Finding 13 recorded both McKesson keys as verified unique. Re-running the check
+shows they are not:
+
+| Report | Key | Rows | Duplicate rows |
+|---|---|---:|---:|
+| Purchasing Detail | invoice, item | 6,163 | 11 |
+| Purchasing Detail | invoice, item, original invoice | 6,163 | 2 |
+| Custom | invoice, item | 6,165 | 13 |
+| Custom | invoice, item, PO | 6,165 | 4 |
+
+The residual collisions are split-shipment lines: the same item on the same
+invoice, once with ordered 36 and filled 18, once with ordered 18 and filled 0.
+They are identical in every identifier and differ only in quantities and
+prices. The small 2026 deliveries show the same shape (5 and 7 duplicate pairs
+on the two-column key, all resolved by the original-invoice reference).
+
+Columns that do not help, and why:
+
+- `ndc_upc_current` - every item number maps to exactly one NDC (0 of 427 items
+  map to more than one), so it adds nothing. It is also blank on 63 service
+  lines.
+- `account_number` - every invoice belongs to exactly one account (0 of 3,275
+  invoices span two), so it adds nothing.
+- quantities and prices - they separate the rows but are the measures, so a
+  corrected quantity would arrive as a new line rather than a correction.
+
+Consequence: under the natural-key policy the second of two colliding rows would
+supersede the first inside one file and a real purchase line would vanish. Under
+the layered design this is a curated-layer rule and the row survives in landed
+and typed regardless. The two candidates, with the same answer to be applied to
+both reports:
+
+1. **Row hash.** Every line survives today (none are byte-identical). A later
+   vendor correction lands as a second live row rather than superseding.
+2. **Key plus occurrence number.** Rows sharing a key within one delivery are
+   numbered in file order and the number joins the key. Keeps correction
+   semantics for every non-split line; depends on McKesson emitting split
+   lines in a stable order, which the three deliveries on disk can test.
+
+Asking McKesson for a line identifier is not an option.
 
 ---
 

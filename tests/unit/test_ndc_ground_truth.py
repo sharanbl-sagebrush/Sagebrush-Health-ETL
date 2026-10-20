@@ -1,12 +1,25 @@
 """NDC normalization against real vendor ground truth.
 
+Covers ``sbh_data_bank.transforms.ndc`` like test_ndc.py does, but with real
+data instead of hand-picked cases.
+
 The McKesson Custom export carries ``10 Digit NDC (Current)`` and
 ``NDC (Current)`` on the same row, so the vendor tells us how each 10-digit
 form is meant to expand.  That makes it a free correctness oracle for the
 directory-resolution path, and a permanent guard against anyone reintroducing
 a left-pad.
 
-The fixture holds identifiers only - no PHI.
+The fixture, ``tests/fixtures/ndc_ground_truth_mckesson.json``, is 101 distinct
+(10-digit, 11-digit) pairs lifted from ``McKesson_Custom Report
+Jan012025-Feb042026.csv``. It holds drug codes only - no patient, account or
+invoice data - which is why it can live in the repository. docs/data-findings.md
+finding 2 is the headline result: the new implementation resolves 101 of 101
+to the vendor's own 11-digit value, while the old left-pad is wrong on 55 of
+them and, worse, produces 55 codes that do not exist in the directory at all.
+
+How to read this file: the two fixtures build the pair list and a stand-in
+NDC dimension from the 11-digit column; each test then runs every 10-digit
+value through ``normalize_ndc`` and compares with the vendor's answer.
 """
 
 from __future__ import annotations
@@ -24,6 +37,7 @@ FIXTURE = Path(__file__).parent.parent / "fixtures" / "ndc_ground_truth_mckesson
 
 @pytest.fixture(scope="module")
 def pairs() -> list[tuple[str, str]]:
+    """(10-digit as the vendor wrote it, 11-digit as the vendor wrote it)."""
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
     return [(ten, eleven) for ten, eleven in data["pairs"]]
 
@@ -35,10 +49,14 @@ def directory(pairs) -> SetNdcDirectory:
 
 
 def _old_zfill(value: str) -> str:
+    """The previous implementation, reproduced so the regression is measured
+    against the real thing rather than described."""
     return re.sub(r"[^0-9]", "", str(value)).zfill(11)
 
 
 def test_fixture_is_present_and_non_trivial(pairs):
+    """Guards the oracle itself: enough pairs to mean something, and every
+    pair has the shape the rest of the file assumes."""
     assert len(pairs) >= 100
     assert all(len(ten) == 10 and len(eleven) == 11 for ten, eleven in pairs)
 
@@ -80,6 +98,8 @@ def test_the_old_left_pad_invented_ndcs_that_do_not_exist(pairs, directory):
 
 
 def test_resolution_is_deterministic(pairs, directory):
+    """The same input and the same directory always give the same result
+    object, which replay depends on."""
     for ten, _ in pairs[:20]:
         assert normalize_ndc(ten, directory) == normalize_ndc(ten, directory)
 

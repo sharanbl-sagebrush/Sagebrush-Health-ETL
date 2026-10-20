@@ -8,22 +8,58 @@
 # this with a hand-written `or` fallback for this one case; they are two
 # distinct columns and are mapped as such.
 
+# ---- Identity and routing -------------------------------------------------
+# key: stable identifier for this source. Ledger history is keyed on it, so
+# it never changes. name and vendor are for display only.
 key: ehr.allscripts.erx
 name: Allscripts - Prescribe Medication (eRx)
 vendor: Allscripts
+# group: the delivery folder the finance team drops this file into.
 group: "3 AllscriptsCurve"
+# catalog_names: what the finance team calls this report in their source
+# catalogue, so the two can be matched up.
 catalog_names: ['ERX - Prescribe Medication']
+# lifecycle: active means silence from this source raises a freshness
+# alert. discontinued, no_access and planned sources are never alerted on.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no
+# new file in N days"), not a schedule. Files are uploaded every Sunday with
+# ad hoc midweek re-uploads; see CLAUDE.md "How files arrive". null means
+# irregular.
 expected_cadence_days: 7
 
+# filename_patterns: case-insensitive regexes, a routing hint only. What a
+# file actually is gets decided by the variant detector below from its header
+# row, so a renamed file still loads and a misnamed one does not load wrongly.
+# Not anchored on extension: the same source can arrive as CSV or XLSX.
 filename_patterns:
+  # Both spellings: the delivered file is named "AllScripts_Prescibe
+  # Medication_v2 ...", so the misspelling is the vendor's and must route.
   - 'allscripts.*prescibe'
   - 'allscripts.*prescribe'
 
+# natural_key: EMPTY. No subset of columns identifies a row. Best candidate
+# tested was (IMREENC_CODE, IMREMED_CODE, Refill), still leaving 14,325
+# duplicates across 132,974 rows - full list in notes below. The uniqueness
+# probe itself is not in this repo; the figures come from
+# docs/data-findings.md section 13.
+#
+# Dedup (CLAUDE.md, "Duplicates"): no key, so identity is every landed column
+# plus an occurrence number in file order. The 8,100 byte-identical rows are
+# therefore 8,100 identities and nothing within a file is collapsed; this
+# used to need its own file_position policy and no longer does. A delivery
+# with a newer as-of retires the rows it no longer carries for the dates it
+# covers (the "vanished" outcome). Decided, not yet built.
 natural_key: []
 
+# on_new_column / on_missing_column: drift policy when the vendor changes the
+# column set. An unexpected new column warns and the load continues; a missing
+# column fails the file. Nothing is ever silently dropped, which is what the
+# previous pipeline did.
 on_new_column: warn
 on_missing_column: fail
+# notes: free text. Mandatory when natural_key is empty - the spec model
+# rejects a keyless spec that does not record what was tested and why.
 notes: >
   No natural key exists in the delivered columns. Candidates tested
   against all 132,974 rows of the 2023-2026 extract: IMREMED_CODE (87,824
@@ -36,11 +72,45 @@ notes: >
   replaces its date range rather than being merged into it. Asking Allscripts for
   an order identifier would remove the problem entirely and is worth doing.
 
+# variants: the shapes this source's file can take. A variant is one shape,
+# detected from the header row alone - require_all lists columns that must be
+# present, require_none columns that must be absent. Exactly one variant must
+# match a file or the load stops; zero and two are both errors, never resolved
+# by guessing. Each variant has its own read settings and column map, but all
+# land on the same target names, so nothing downstream knows which shape wrote
+# a row.
 variants:
+  # One shape so far: 21 columns. The detector names three columns that only
+  # this report carries - the medication code, order date and title.
   - name: erx_21
     detect:
       require_all: ['IMREMED_CODE', 'ORDERED_DATE', 'MED_TITLE']
+    # No read block: defaults apply. Header on row 0, no footer, and the
+    # default utf-8-sig encoding strips the UTF-8 BOM this file opens with.
     columns:
+      # Column fields, explained once:
+      #   target        canonical column name in the warehouse. Stable; vendors
+      #                 rename, we do not.
+      #   sources       accepted vendor headers, matched after normalising case,
+      #                 punctuation and whitespace. List several when a vendor
+      #                 has renamed a column.
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #   required      the column must exist in the file AND every row must
+      #                 have a value. Column absent is drift (see policy above);
+      #                 value absent quarantines that one row.
+      #   date_formats  strptime formats tried in order. Mandatory for dates and
+      #                 never inferred: 01/02/2025 is ambiguous without one.
+      #   pii           none | join_key | quasi | direct | prohibited. direct lands
+      #                 encrypted; join_key stays in clear because reconciliation
+      #                 joins on it; prohibited is matched for drift checks and
+      #                 then discarded before any value is written anywhere.
+      #   on_error      quarantine (default) | null | fail, per cell parse failure.
+      #   control_total the column is additive and summed as a load control figure.
+      #   max_length    over-length text fails rather than truncates.
+      #   description   free text for the reader.
+      # LOCATION_NAME1 and LOCATION_NAME (further down) are two distinct vendor
+      # columns, mapped to two distinct targets. The previous parser treated
+      # them as a rename and fell back from one to the other.
       - target: location_name1
         sources: ['LOCATION_NAME1']
         type: text
@@ -56,6 +126,7 @@ variants:
       - target: med_title
         sources: ['MED_TITLE']
         type: text
+      # Candidate-key columns: imremed_code, imreenc_code, refill. See notes.
       - target: imremed_code
         sources: ['IMREMED_CODE']
         type: text
@@ -86,6 +157,7 @@ variants:
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
         pii: direct
+      # join_key: the patient identifier reconciliation joins on. Stays in clear.
       - target: dem_externalid
         sources: ['DEM_EXTERNALID']
         type: text

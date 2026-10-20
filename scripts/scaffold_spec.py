@@ -18,6 +18,45 @@ Every draft is emitted with ``required: false`` on everything and a review
 banner at the top. Guessing which fields are mandatory from a sample is exactly
 the kind of inference that looks right and quarantines a year of history the
 first time a legitimately empty value appears.
+
+How to run
+    ``python scripts/scaffold_spec.py <file> --key <group.vendor.report>``
+        Print the draft to stdout.
+    ``... --out specs/<key>.yaml``   write it to a file instead.
+    ``... --sheet Results``          pick a worksheet (default: the first).
+    ``... --zip-member "x.csv"``     profile one CSV inside a zip.
+    ``... --rows 5000``              sample more rows (default 2000).
+
+Inputs
+    One vendor file. No environment variables, no database, no specs.
+
+Outputs
+    A YAML spec skeleton with: a review banner, the top-level fields as
+    ``TODO`` placeholders, ``natural_key: []  # TODO``, one variant with an
+    empty detector, and one column entry per real header carrying the
+    inferred ``type``, ``date_formats``, ``pii`` class and ``control_total``.
+    Export-artifact columns (``Unnamed: 0``, ``Textbox42``) are emitted as a
+    comment line rather than a column.
+
+Why everything is ``required: false`` and the key is a TODO
+    docs/data-findings.md section 9: the first ABC spec marked ``ndc``
+    required and quarantined 367 of 4,513 rows - real service-charge invoice
+    lines that carry dollars but no NDC. Requiredness is a claim about the
+    data that has to be checked against the data, not inferred from a
+    sample. The natural key is the same kind of claim: it must be probed for
+    uniqueness against the full extract, which this script does not do.
+
+What it does NOT do
+    Detect variants, find a natural key, set ``preamble_lines`` or
+    ``header_marker`` (the header search here is a heuristic, not a spec
+    setting), or validate the output against the spec model. The draft will
+    not load until the TODOs are filled in.
+
+Where it fits
+    This is the onboarding path for a new source (docs/architecture-and-plan.md,
+    commitment 5). The 19 shipped specs were not produced by it; they came
+    from ``tools/spec_build``, which did the same job with hand-curated
+    overrides. Use this for the twentieth source.
 """
 
 from __future__ import annotations
@@ -35,8 +74,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from sbh_data_bank.registry.headers import is_junk_header, normalize_header  # noqa: E402
 
+#: Default number of data rows to sample for type inference.
 SAMPLE_ROWS = 2000
 
+#: Formats tried, in order, against every column's values. A column is typed
+#: as a date when 95% of its sampled values parse under one of these.
 DATE_FORMATS = [
     "%Y-%m-%d",
     "%m/%d/%Y",
@@ -50,7 +92,9 @@ DATE_FORMATS = [
 ]
 
 # Column-name signals. Matched against the normalized header, so "Patient DOB"
-# and "PAT_DOB" both hit "dob".
+# and "PAT_DOB" both hit "dob". These map to the PiiClass enum in
+# registry/spec.py: prohibited is never landed (SSN), direct lands encrypted,
+# quasi is identifying in combination, join_key stays in clear for matching.
 PII_DIRECT = (
     "first_name", "last_name", "fname", "lname", "patient_name", "middle_name",
     "dob", "birth", "email", "phone", "cell", "street", "address", "zip_code",
@@ -59,6 +103,8 @@ PII_PROHIBITED = ("ssn", "social_security")
 PII_QUASI = ("city", "state", "gender", "sex", "marital", "zip", "postal")
 PII_JOIN = ("patient_id", "patient_identifier", "mrn", "pat_num", "patnum", "client_id", "uid")
 
+# Name signals for money and quantity. A numeric column whose name hits
+# MONEY_WORDS and not QTY_WORDS becomes currency; "Total Units" stays decimal.
 MONEY_WORDS = (
     "amount", "cost", "price", "dollars", "fee", "payment", "paid", "revenue",
     "savings", "charge", "awp", "wac", "total", "subsidy", "receivable", "profit",
@@ -67,6 +113,7 @@ QTY_WORDS = ("qty", "quantity", "units", "count", "size", "rvu", "days_supply")
 
 
 def _decode(raw: bytes) -> str:
+    """Decode a zip member's bytes, trying the usual vendor encodings in order."""
     for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
             return raw.decode(encoding)
@@ -76,6 +123,13 @@ def _decode(raw: bytes) -> str:
 
 
 def _read_csv(handle: io.TextIOBase, limit: int) -> tuple[list[str], list[list[str]]]:
+    """Find the header row in a CSV and return it with up to ``limit`` data rows.
+
+    The header is the first row with at least three populated, all-distinct
+    cells. That skips a ``sep=,`` line and a report title, which is how ABC
+    and Athena files open. The loader does not guess this way; the spec
+    author records the result as ``preamble_lines`` or ``header_marker``.
+    """
     reader = csv.reader(handle)
     header: list[str] = []
     for row in reader:
@@ -88,6 +142,7 @@ def _read_csv(handle: io.TextIOBase, limit: int) -> tuple[list[str], list[list[s
         if index >= limit:
             break
         rows.append(row)
+    # Trailing empty header cells are Excel padding past the real columns.
     while header and not header[-1].strip():
         header.pop()
     return header, rows
@@ -96,10 +151,19 @@ def _read_csv(handle: io.TextIOBase, limit: int) -> tuple[list[str], list[list[s
 def load_sample(
     path: Path, *, sheet: str | None, zip_member: str | None, limit: int
 ) -> tuple[list[str], list[list[str]]]:
+    """Open the file (zip member, workbook sheet, or CSV) and return header + sample.
+
+    Values are read into memory for inference and never leave this process.
+    """
+    # A zip member is read fully into memory (capped at 20 MB) and treated
+    # as a CSV. This is the Monthly Payments path.
     if zip_member:
         with zipfile.ZipFile(path) as archive, archive.open(zip_member) as raw:
             return _read_csv(io.StringIO(_decode(raw.read(20_000_000))), limit)
 
+    # A workbook: stream the chosen sheet and apply the same header
+    # heuristic as the CSV path. data_only=True reads cached values rather
+    # than formulas.
     if path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
         import openpyxl
 
@@ -122,10 +186,16 @@ def load_sample(
             header.pop()
         return header, rows
 
+    # Plain CSV. utf-8-sig swallows a byte-order mark if there is one.
     return _read_csv(path.open("r", encoding="utf-8-sig", errors="replace", newline=""), limit)
 
 
 def _values_for(rows: list[list[str]], index: int) -> list[str]:
+    """The non-empty values of one column, with the usual null spellings dropped.
+
+    "nan", "none", "null", "n/a" and "-" are what pandas and vendors write for
+    missing, and they would otherwise make every column look like text.
+    """
     out = []
     for row in rows:
         if index < len(row):
@@ -136,6 +206,12 @@ def _values_for(rows: list[list[str]], index: int) -> list[str]:
 
 
 def _detect_date_formats(values: list[str]) -> list[str]:
+    """Every format in ``DATE_FORMATS`` that parses at least 95% of the sample.
+
+    Checks the first 200 values. Returns a list because an ambiguous column
+    (``%m/%d/%Y`` and ``%d/%m/%Y`` both fitting) should be visible in the
+    draft for a person to resolve, not silently narrowed to one.
+    """
     from datetime import datetime
 
     hits = []
@@ -153,11 +229,22 @@ def _detect_date_formats(values: list[str]) -> list[str]:
 
 
 def _is_money(values: list[str]) -> bool:
+    """Money by value: a leading ``$`` or accounting parentheses on 5% or more.
+
+    Parentheses matter: ``($40.00)`` is minus forty, and the parser that
+    missed that nulled $39.97M of credits (docs/data-findings.md section 1).
+    """
     signals = sum(1 for v in values[:200] if v.startswith(("$", "(")) or v.endswith(")"))
     return signals >= max(1, len(values[:200]) * 0.05)
 
 
 def _numeric_kind(values: list[str]) -> str | None:
+    """``"integer"`` if every sampled value is a whole number, ``"decimal"`` if
+    all are numeric but some have fractions, ``None`` if any is not a number.
+
+    Strips ``,`` and ``$`` and unwraps parentheses first so money-formatted
+    values still count as numeric. Uses Decimal, never float.
+    """
     sample = values[:300]
     if not sample:
         return None
@@ -175,6 +262,7 @@ def _numeric_kind(values: list[str]) -> str | None:
 
 
 def _pii_class(normalized: str) -> str:
+    """Name-based PII class, most restrictive first so "ssn" beats everything."""
     if any(w in normalized for w in PII_PROHIBITED):
         return "prohibited"
     if any(w in normalized for w in PII_DIRECT):
@@ -187,12 +275,25 @@ def _pii_class(normalized: str) -> str:
 
 
 def infer_column(header: str, values: list[str]) -> dict:
+    """Propose one column entry: target name, type, formats, PII, control total.
+
+    Order of tests matters. NDC by name first (an NDC column full of digits
+    would otherwise be typed integer and lose its leading zeros). Then dates
+    by value. Then numbers, with money decided by value or name. Boolean
+    last. Anything else stays text, which is always safe.
+    """
+    # The target is the normalized header: lower case, punctuation folded to
+    # underscores. The same function the binder uses, so the draft's targets
+    # match what the loader would compute.
     normalized = normalize_header(header)
     column: dict = {"target": normalized or "column", "sources": [header], "type": "text"}
 
     if "ndc" in normalized:
         column["type"] = "ndc"
     else:
+        # A column is a date if its values parse AND either its name says so
+        # or exactly one format fits. Two fitting formats on a column with no
+        # date-like name is more likely a code than a date.
         formats = _detect_date_formats(values)
         if formats and ("date" in normalized or "month" in normalized or len(formats) == 1):
             column["type"] = "date"
@@ -212,12 +313,17 @@ def infer_column(header: str, values: list[str]) -> dict:
     pii = _pii_class(normalized)
     if pii != "none":
         column["pii"] = pii
+    # Every currency column is proposed as a control total. The reviewer must
+    # remove it from rates (unit price, AWP): summing a rate is meaningless,
+    # and the banner says so.
     if column["type"] == "currency":
         column["control_total"] = True
     return column
 
 
 def render(key: str, path: Path, header: list[str], rows: list[list[str]]) -> str:
+    """Lay out the draft YAML. Hand-built text rather than a YAML dumper so the
+    banner, comments and ordering come out the way a person would write them."""
     lines = [
         "# DRAFT - generated by scripts/scaffold_spec.py. Review before use.",
         "#",
@@ -254,6 +360,8 @@ def render(key: str, path: Path, header: list[str], rows: list[list[str]]) -> st
         "    columns:",
     ]
     for index, raw_header in enumerate(header):
+        # "Unnamed: 0" and "Textbox42" are export artifacts, not columns.
+        # Emitted as a comment so the reviewer can see they were seen.
         if is_junk_header(raw_header):
             lines.append(f"      # skipped export artifact: {raw_header!r}")
             continue
@@ -272,6 +380,7 @@ def render(key: str, path: Path, header: list[str], rows: list[list[str]]) -> st
 
 
 def main() -> int:
+    """Parse arguments, sample the file, render the draft, print or write it."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", type=Path)
     parser.add_argument("--key", required=True)
@@ -288,6 +397,8 @@ def main() -> int:
         print(f"could not find a header row in {args.file.name}", file=sys.stderr)
         return 1
 
+    # Two vendor headers that normalize to the same name would be refused by
+    # the binder as ambiguous. Warn now so the reviewer adds a rename.
     duplicates = [h for h, n in Counter(normalize_header(h) for h in header).items() if n > 1]
     if duplicates:
         print(f"warning: duplicate normalized headers {duplicates}", file=sys.stderr)

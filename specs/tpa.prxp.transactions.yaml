@@ -9,29 +9,90 @@
 # than the whole file being refused. Tighten this to fail once the added columns
 # are known and mapped.
 
+# ---- Source identity -------------------------------------------------------
+# Everything above `variants:` describes the source as a whole. Each variant
+# below describes one file shape the source can arrive in. Field meanings come
+# from src/sbh_data_bank/registry/spec.py (SourceSpec).
+#
+# Stable identifier. Ledger tables and history are keyed on it; never renamed.
 key: tpa.prxp.transactions
+# Display name for logs, reports and alerts.
 name: PRXP - Rx Transaction Details
+# Who produces the extract.
 vendor: PRXP
+# The delivery folder the file arrives under.
 group: "4 TPA"
+# What the finance team calls this source in the delivery catalogue.
 catalog_names: ['Prxp']
+# active: the source is expected to keep delivering, so silence raises an alert.
 lifecycle: active
+# Staleness threshold for freshness alerting, NOT a run schedule: alert when no
+# new file has been seen for this many days. Files are uploaded every Sunday
+# with ad hoc midweek re-uploads (CLAUDE.md, "How files arrive"); a midweek
+# upload just resets the clock. Alerting is not built yet, so nothing reads
+# this today. 7 is the generator default, not a measured delivery interval.
 expected_cadence_days: 7
 
+# Routing hint only: case-insensitive regexes tried against the filename. What
+# a file IS is decided by the header fingerprint in the variant detectors
+# below, so a renamed file still loads and a misnamed one does not load wrongly.
 filename_patterns:
   - 'prxp.*transaction'
 
+# Natural key: the column that identifies one business row. Evidence: Rx
+# Transaction ID was probed unique across all 5,133 rows (docs/data-findings.md,
+# section 13). The probe itself is not in the repo.
 natural_key: [rx_transaction_id]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      load anyway and record the extra column for review
+#   on_missing_column: fail  stop; a declared column that vanished means the
+#                            file is not what this spec says it is
 on_new_column: warn
 on_missing_column: fail
 
+# ---- Variants --------------------------------------------------------------
+# A variant is one shape this source's file can take. Detection is by header
+# presence only: every `require_all` header must exist and no `require_none`
+# header may. Exactly one variant must match or the load stops - zero matches
+# is an unknown file, two is a spec bug (overlapping detectors) - and there is
+# never a fallback default. Each variant carries its own `read` settings and
+# column map, but all variants land on the same `target` names, so nothing
+# downstream knows which shape wrote a row.
 variants:
+  # Single variant, named for the 90-column shape it was written from. The
+  # detector requires only `Rx Transaction ID`, so the later 94-column drops
+  # match it too; their four extra columns are reported under on_new_column:
+  # warn rather than refused (see the header note).
   - name: transactions_90
     description: >
       90 columns, the 2023-2026 shape.
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Rx Transaction ID']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
+      # Column fields, explained once; they mean the same in every spec:
+      #   target        canonical column name the value lands under; stable
+      #   sources       accepted vendor headers, tried in order, matched after
+      #                 normalising case, punctuation and whitespace (no fuzzy match)
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #                 currency is Decimal, never float, and reads "($40.00)" as -40
+      #                 ndc normalises to 11 digits or quarantines when ambiguous
+      #   required      the column must exist in the file AND every row must have a
+      #                 value; a blank value quarantines that one row
+      #   date_formats  explicit strptime formats tried in order; never inferred
+      #   control_total summed per file and checked against the file's own totals
+      #                 where it has them; only for additive amounts, never rates
+      #   pii           none | join_key | quasi | direct | prohibited
+      #                 direct is to land encrypted; prohibited is matched so drift
+      #                 checks see it, then discarded before any value is written
+      #   on_error      quarantine (default) | null | fail, per cell parse failure
+      #   max_length    over-length text fails rather than truncates
+      #   description   free text for the reader; the pipeline does not use it
+      #
+      # The natural key.
       - target: rx_transaction_id
         sources: ['Rx Transaction ID']
         type: text
@@ -59,12 +120,14 @@ variants:
         sources: ['Patient Date Of Birth']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      # type ndc: normalised to the 11-digit form; see transforms/ndc.py.
       - target: ndc
         sources: ['NDC']
         type: ndc
       - target: days_supply
         sources: ['Days Supply']
         type: decimal
+      # The only quantity control total in this spec.
       - target: qty_dispensed
         sources: ['Qty Dispensed']
         type: decimal
@@ -170,6 +233,9 @@ variants:
         sources: ['Waiting for Check Date']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      # Typed date with date-only formats. If the vendor writes a time component in
+      # these `*DateTime` columns the value will not parse and the row quarantines,
+      # which is the intended "stop rather than reinterpret" behaviour.
       - target: waiting_for_check_datetime
         sources: ['Waiting for Check DateTime']
         type: date
@@ -289,6 +355,10 @@ variants:
       - target: tertiary_payer_plan_group_code
         sources: ['Tertiary Payer Plan Group Code']
         type: text
+      # The paid-amount, cost and price columns below are landed as TEXT, not
+      # currency, so they are not control totals and carry no Decimal guarantee.
+      # Only `total_amount_collected` is parsed as money. Retype these after
+      # sampling the values (CLAUDE.md: type by sampling values, never by name).
       - target: patient_paid_amount
         sources: ['Patient Paid Amount']
         type: text
@@ -304,6 +374,7 @@ variants:
       - target: ce_responsibility
         sources: ['CE Responsibility']
         type: text
+      # The one money column parsed as currency, and the only money control total.
       - target: total_amount_collected
         sources: ['Total Amount Collected']
         type: currency

@@ -1,3 +1,17 @@
+"""Generator for the four third-party-administrator specs: Pharmaforce claims,
+PRXP transactions, Wellpartner claims, Wellpartner wholesaler invoices.
+
+DO NOT RE-RUN. The specs this file produced have been hand-edited since they
+were generated (CLAUDE.md, "Layout": "generated once, hand-edited since").
+Running it would overwrite those edits with the state of the curation below.
+It is kept because it is the record of how each spec was derived from the
+real headers, and because the override tables are the most compact summary
+of the per-column decisions. See ``build_specs.py`` for the mechanics.
+
+Importing ``build_specs`` has side effects only through the ``write`` calls
+below; the ``headers_of`` calls read real extracts and need SBH_SOURCE_ROOT.
+"""
+
 import sys
 from pathlib import Path
 
@@ -22,6 +36,9 @@ prxp = headers_of(T / "PRXP_Rx Transaction Details 01012023-03062026.xlsx")
 wp_claims = headers_of(T / "Wellpartner_Claims 01012023-03062026.xlsx")
 wp_inv = headers_of(T / "Wellpartner_WholesalerInvoices 01012023-03062026.xlsx")
 
+# Shared description for the covered-entity (340B ID / OPAID) column, which
+# appears under different names in Pharmaforce, both Wellpartner reports and
+# McKesson Custom. It is the one key that ties every feed to an entity.
 CE_DESC = """The covered-entity key. Two exist in this data: STD891281 (Fire
 Mesa, Nevada) and STD06489 (Southington, Connecticut). The same identifier
 appears as OPAID here, as 340B ID in Wellpartner Claims, embedded in Entity Name
@@ -29,6 +46,18 @@ in Wellpartner Invoices, and as Associated 340B ID in the McKesson Custom
 report - which makes it the one key that ties every feed to a covered entity."""
 
 # ------------------------------------------------------------- Pharmaforce
+# Produces specs/tpa.pharmaforce.claims.yaml.
+#
+# Decisions encoded here:
+#   - ONE spec for the Fire Mesa and Southington files. Claim ID is unique
+#     across both (196,187 rows, zero collisions), and every row carries
+#     OPAID, so the entity comes from the data rather than from a per-file
+#     constant as the previous parser did. The header is read from the Fire
+#     Mesa file; the Southington file has the same 65 columns.
+#   - qty_dispensed is negative on ~8.7% of rows (17,052 of 194,907). Those
+#     are reversals, not errors, and are summed - see the column note.
+#   - ce_receivable and profit_or_loss are kept as separate control totals;
+#     the previous financial view conflated them.
 PF_OVER = {
     "claim_id": dict(type=TEXT, required=True),
     "opaid": dict(type=TEXT, required=True, desc=CE_DESC),
@@ -129,6 +158,20 @@ write(
 )
 
 # --------------------------------------------------------------------- PRXP
+# Produces specs/tpa.prxp.transactions.yaml.
+#
+# Decisions encoded here:
+#   - natural_key rx_transaction_id: unique across 5,133 rows.
+#   - 90 columns in the history file, 94 in later drops. on_new_column is
+#     "warn" so the newer shape loads and reports the four additions rather
+#     than being refused; the header comment says to tighten this to "fail"
+#     once they are mapped.
+#   - Most of the 90 columns are left as text. The loop below types any
+#     column whose name contains "date" or "dob" as a US date, and flags
+#     name/address/phone/email columns as direct PII. This is the one place
+#     in the generators where typing is by NAME rather than by value - the
+#     practice data-findings.md section 15 warns about. It was accepted here
+#     because the PRXP header names are explicit, but it is worth a check.
 PRXP_OVER = {
     "rx_transaction_id": dict(type=TEXT, required=True),
     "covered_entity_name": dict(type=TEXT),
@@ -140,6 +183,9 @@ PRXP_OVER = {
 }
 for name in prxp:
     t = name.strip().lower()
+    # The key built here must equal target_of(name), or the override is
+    # silently ignored. This is a hand-rolled approximation of that function
+    # and the second branch uses a different, narrower one.
     if any(w in t for w in ("date", "dob")):
         key = (
             name.strip()
@@ -195,6 +241,17 @@ write(
 )
 
 # --------------------------------------------------------- Wellpartner claims
+# Produces specs/tpa.wellpartner.claims.yaml.
+#
+# Decisions encoded here:
+#   - natural_key transaction (the "Transaction #" column): unique across
+#     42,018 rows.
+#   - The 340B ID column becomes target n340b_id (digit-leading names get an
+#     "n" prefix in target_of).
+#   - est_entity_net_savings has one meaning; Program Revenue, Entity Subsidy
+#     and Est 340B Cost are the separate figures the old view collapsed.
+#   - 119 columns; the ``Days` Supply`` header typo is matched by the
+#     binder's normalization, not reproduced here.
 WP_OVER = {
     "transaction": dict(type=TEXT, required=True),
     "n340b_id": dict(type=TEXT, required=True, desc=CE_DESC),
@@ -280,6 +337,15 @@ write(
 )
 
 # ------------------------------------------------------- Wellpartner invoices
+# Produces specs/tpa.wellpartner.invoices.yaml.
+#
+# Decisions encoded here:
+#   - natural_key is the real business key (invoice, wholesaler, account,
+#     date). The validation pack's "10 duplicates" are ten invoices written
+#     twice with "(STD06489 )" vs "(STD06489)" in the entity name - genuine
+#     duplicates for the ledger to collapse, not evidence the key is narrow.
+#   - This is Wellpartner's view of wholesaler invoices, a second independent
+#     source of purchases. It must not be unioned with the wholesaler feeds.
 WPI_OVER = {
     "entity_name": dict(
         type=TEXT,

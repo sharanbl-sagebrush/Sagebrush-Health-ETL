@@ -16,27 +16,87 @@
 # reporting what it was invoiced. It is not the same as the wholesaler extracts
 # and must not be unioned with them.
 
+# ---- Source identity -------------------------------------------------------
+# Everything above `variants:` describes the source as a whole. Each variant
+# below describes one file shape the source can arrive in. Field meanings come
+# from src/sbh_data_bank/registry/spec.py (SourceSpec).
+#
+# Stable identifier. Ledger tables and history are keyed on it; never renamed.
 key: tpa.wellpartner.invoices
+# Display name for logs, reports and alerts.
 name: Wellpartner - Wholesaler Invoices
+# Who produces the extract.
 vendor: Wellpartner
+# The delivery folder the file arrives under.
 group: "4 TPA"
+# What the finance team calls this source in the delivery catalogue.
 catalog_names: ['Wellpartner Wholesaler Invoices (under Inventory activity)']
+# active: the source is expected to keep delivering, so silence raises an alert.
 lifecycle: active
+# Staleness threshold for freshness alerting, NOT a run schedule: alert when no
+# new file has been seen for this many days. Files are uploaded every Sunday
+# with ad hoc midweek re-uploads (CLAUDE.md, "How files arrive"); a midweek
+# upload just resets the clock. Alerting is not built yet, so nothing reads
+# this today. 7 is the generator default, not a measured delivery interval.
 expected_cadence_days: 7
 
+# Routing hint only: case-insensitive regexes tried against the filename. What
+# a file IS is decided by the header fingerprint in the variant detectors
+# below, so a renamed file still loads and a misnamed one does not load wrongly.
 filename_patterns:
   - 'wellpartner.*wholesalerinvoice'
 
+# Natural key: the real business identity of an invoice line - invoice number,
+# wholesaler, account and date. Verified against all 7,700 rows
+# (docs/data-findings.md, section 13). `entity_name` is deliberately NOT in
+# the key: the ten rows that differ only by a stray space inside the entity
+# name then collapse as true duplicates instead of landing twice (header
+# note). The probe itself is not in the repo.
 natural_key: [wholesaler_invoice, wholesaler_name, wholesaler_account, wholesaler_invoice_date]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      load anyway and record the extra column for review
+#   on_missing_column: fail  stop; a declared column that vanished means the
+#                            file is not what this spec says it is
 on_new_column: warn
 on_missing_column: fail
 
+# ---- Variants --------------------------------------------------------------
+# A variant is one shape this source's file can take. Detection is by header
+# presence only: every `require_all` header must exist and no `require_none`
+# header may. Exactly one variant must match or the load stops - zero matches
+# is an unknown file, two is a spec bug (overlapping detectors) - and there is
+# never a fallback default. Each variant carries its own `read` settings and
+# column map, but all variants land on the same `target` names, so nothing
+# downstream knows which shape wrote a row.
 variants:
+  # Single variant, 10 columns. Detected by the invoice number, the net amount
+  # and `Hub-Spoke`, a column no other Wellpartner report shares.
   - name: invoices_10
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Wholesaler Invoice #', 'Invoice Net Amount', 'Hub-Spoke']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
+      # Column fields, explained once; they mean the same in every spec:
+      #   target        canonical column name the value lands under; stable
+      #   sources       accepted vendor headers, tried in order, matched after
+      #                 normalising case, punctuation and whitespace (no fuzzy match)
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #                 currency is Decimal, never float, and reads "($40.00)" as -40
+      #                 ndc normalises to 11 digits or quarantines when ambiguous
+      #   required      the column must exist in the file AND every row must have a
+      #                 value; a blank value quarantines that one row
+      #   date_formats  explicit strptime formats tried in order; never inferred
+      #   control_total summed per file and checked against the file's own totals
+      #                 where it has them; only for additive amounts, never rates
+      #   pii           none | join_key | quasi | direct | prohibited
+      #                 direct is to land encrypted; prohibited is matched so drift
+      #                 checks see it, then discarded before any value is written
+      #   on_error      quarantine (default) | null | fail, per cell parse failure
+      #   max_length    over-length text fails rather than truncates
+      #   description   free text for the reader; the pipeline does not use it
       - target: entity_name
         sources: ['Entity Name']
         type: text
@@ -46,6 +106,7 @@ variants:
           (STD891281)". Ten rows carry it as "(STD06489 )" with a trailing space
           inside the parenthesis, which is what makes them look like duplicate
           invoices - see the note on this source.
+      # Part of the natural key, as are the next three columns.
       - target: wholesaler_invoice_date
         sources: ['Wholesaler Invoice Date']
         type: date
@@ -63,6 +124,9 @@ variants:
         sources: ['Wholesaler Invoice #']
         type: text
         required: true
+      # The one money column and the file's control total. `invoice_type` below
+      # says whether it is a debit or a credit, so a credit must not be summed as a
+      # purchase without looking at that flag.
       - target: invoice_net_amount
         sources: ['Invoice Net Amount']
         type: currency

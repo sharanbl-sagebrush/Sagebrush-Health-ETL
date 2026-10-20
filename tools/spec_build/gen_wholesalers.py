@@ -1,3 +1,17 @@
+"""Generator for the three wholesaler specs: ABC, McKesson Purchasing Detail,
+McKesson Custom. Cardinal has no generator; its spec was written by hand.
+
+DO NOT RE-RUN. The specs this file produced have been hand-edited since they
+were generated (CLAUDE.md, "Layout": "generated once, hand-edited since").
+Running it would overwrite those edits with the state of the curation below.
+It is kept because it is the record of how each spec was derived from the
+real headers, and because the override tables are the most compact summary
+of the per-column decisions. See ``build_specs.py`` for the mechanics.
+
+Importing ``build_specs`` has side effects only through the ``write`` calls
+below; the ``headers_of`` calls read real extracts and need SBH_SOURCE_ROOT.
+"""
+
 import sys
 from pathlib import Path
 
@@ -17,6 +31,19 @@ from build_specs import (  # noqa: E402
 )
 
 # ---------------------------------------------------------------- ABC
+# Produces specs/wholesaler.abc.purchases.yaml.
+#
+# Decisions encoded here:
+#   - Header read from the workbook form, sheet "Results", one preamble row.
+#     The spec itself uses header_marker "Account #" so the CSV form (two
+#     preamble lines) binds with the same variant - docs/file-audit.md.
+#   - ndc is NOT required: 367 of 4,513 rows are service-charge lines with
+#     dollars and no NDC (docs/data-findings.md section 9).
+#   - natural_key (account, invoice, ndc) is the widest available and is
+#     declared although the validation pack found two duplicates on it; see
+#     ABC_NOTES. There is no line number in this export.
+#   - coverage_start 2024-01-01: no 2023 data exists for ABC.
+#   - account is text: leading zeros (0100461951) are significant.
 abc_headers = headers_of(
     DROP / "1 Wholesalers" / "ABC_ Purchases Report - Invoice Detail - 01012024-03062026.xlsx",
     "Results",
@@ -118,6 +145,19 @@ write(
 )
 
 # ------------------------------------------------- McKesson Purchasing Detail
+# Produces specs/wholesaler.mckesson.invoice.yaml.
+#
+# Decisions encoded here:
+#   - footer: totals_row. Line 6165 of the history file is McKesson's own
+#     totals; it is checked against our sums, never landed (file-audit.md).
+#   - natural_key (invoice_credit_number, mckesson_item_number): declared
+#     here, later found to collide on 11 of 6,163 rows (data-findings.md
+#     finding 16); the key is now a curated-layer rule. The probe is not in
+#     the repo; the figure is the record.
+#   - Every additive amount and quantity is a control_total; the per-dose
+#     price is a rate and deliberately is not.
+#   - invoice_credit_date ships ISO, so ISO_DATE puts %Y-%m-%d first.
+#   - The leading unnamed row-number column is emitted as a comment.
 mck_inv = headers_of(
     DROP / "1 Wholesalers" / "McKesson_Purchasing Detail - Invoice Level 01012023-03062026.csv"
 )
@@ -192,6 +232,23 @@ write(
 )
 
 # ------------------------------------------------------ McKesson Custom (R&S)
+# Produces specs/wholesaler.mckesson.custom.yaml.
+#
+# Decisions encoded here:
+#   - natural_key adds po_number to the Purchasing Detail key, because this
+#     report is one row per (invoice, item, PO) - 6,165 rows, later found
+#     to collide on 4 (data-findings.md finding 16).
+#   - ndc_current (11-digit) is type ndc; n10_digit_ndc_current is TEXT.
+#     Typing the 10-digit column as ndc quarantined 6,102 of 6,165 rows on
+#     the first run, since an unhyphenated 10-digit NDC cannot be resolved
+#     without a directory. The pair is the ground truth behind
+#     tests/fixtures/ndc_ground_truth_mckesson.json.
+#   - No footer. Verified: the last row is data.
+#   - package_size_multiplier is captured as an input to unit conversion,
+#     which is reconciliation work (architecture-and-plan.md, scope boundary).
+#   - This report and Purchasing Detail are the same purchases; loading both
+#     as purchases double-counts (data-findings.md section 8). The spec
+#     loads it anyway because which one is authoritative is an open question.
 mck_cust = headers_of(DROP / "1 Wholesalers" / "McKesson_Custom Report 01012023-03062026.csv")
 mck_cust_over = {
     "account_number": dict(type=TEXT, required=True),

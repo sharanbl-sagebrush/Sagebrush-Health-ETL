@@ -18,33 +18,100 @@
 # reading one as the other would mix medical-benefit administrations with
 # buy-and-bill ones.
 
+# ---- Source identity -------------------------------------------------------
+# Everything above `variants:` describes the source as a whole. Each variant
+# below describes one file shape the source can arrive in. Field meanings come
+# from src/sbh_data_bank/registry/spec.py (SourceSpec).
+#
+# Stable identifier. Ledger tables and history are keyed on it; never renamed.
 key: dispense.weinfuse.administered
+# Display name for logs, reports and alerts.
 name: WeInfuse - Administered Drugs
+# Who produces the extract.
 vendor: WeInfuse
+# The delivery folder the file arrives under.
 group: "2 Dispenses"
+# What the finance team calls this source in the delivery catalogue.
 catalog_names: ['Weinfuses - Administered Drug']
+# active: the source is expected to keep delivering, so silence raises an alert.
 lifecycle: active
+# Staleness threshold for freshness alerting, NOT a run schedule: alert when no
+# new file has been seen for this many days. Files are uploaded every Sunday
+# with ad hoc midweek re-uploads (CLAUDE.md, "How files arrive"); a midweek
+# upload just resets the clock. Alerting is not built yet, so nothing reads
+# this today. 7 is the generator default, not a measured delivery interval.
 expected_cadence_days: 7
 
+# Routing hint only: case-insensitive regexes tried against the filename. What
+# a file IS is decided by the header fingerprint in the variant detectors
+# below, so a renamed file still loads and a misnamed one does not load wrongly.
 filename_patterns:
   - 'weinfuse.*administereddrugs(?!.*buybill)'
   - 'weinfuse_administered'
 
+# Natural key: the target columns that identify one business row. Identity
+# is this key plus an occurrence number; a newer delivery with a different
+# hash is a correction that supersedes the earlier row (CLAUDE.md,
+# "Duplicates").
+# Evidence: (Order ID, Inventory Item ID) was probed unique across all 51,178
+# rows of the 2023-2026 extract (docs/data-findings.md, sections 10 and 13).
+# Why these two: one appointment administers several inventory items, so any
+# key without Inventory Item ID collides by construction - the earlier
+# validation pack's (Weinfuse UID, Appointment ID) gave 25,738 duplicates.
+# The uniqueness probe itself is not in this repo; the claim rests on the
+# findings doc and commit history and cannot yet be re-run on a new delivery.
 natural_key: [order_id, inventory_item_id]
 
+# Drift policies: what happens when the vendor's column set changes.
+#   on_new_column: warn      load anyway and record the extra column for review
+#   on_missing_column: fail  stop; a declared column that vanished means the
+#                            file is not what this spec says it is
 on_new_column: warn
 on_missing_column: fail
 
+# ---- Variants --------------------------------------------------------------
+# A variant is one shape this source's file can take. Detection is by header
+# presence only: every `require_all` header must exist and no `require_none`
+# header may. Exactly one variant must match or the load stops - zero matches
+# is an unknown file, two is a spec bug (overlapping detectors) - and there is
+# never a fallback default. Each variant carries its own `read` settings and
+# column map, but all variants land on the same `target` names, so nothing
+# downstream knows which shape wrote a row.
 variants:
+  # Variant 1: the new reporting module (June 2026 drop onward). Detected by
+  # `Inventory Type` (only the new module has it) plus `Inner NDC Code` (the
+  # renamed form of `Inner NDC`). No `require_none` is needed because the
+  # legacy variant below excludes `Inventory Type`.
   - name: reporting_module_2026
     description: >
       35-column workbook from the reporting module
       introduced in the June 2026 drop. Adds Inventory Type and Date of
       Birth Date; renames 14 columns.
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Inventory Type', 'Inner NDC Code', 'Billing Units']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
       # unnamed export artifact at this position, not data
+      # Column fields, explained once; they mean the same in every spec:
+      #   target        canonical column name the value lands under; stable
+      #   sources       accepted vendor headers, tried in order, matched after
+      #                 normalising case, punctuation and whitespace (no fuzzy match)
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #                 currency is Decimal, never float, and reads "($40.00)" as -40
+      #                 ndc normalises to 11 digits or quarantines when ambiguous
+      #   required      the column must exist in the file AND every row must have a
+      #                 value; a blank value quarantines that one row
+      #   date_formats  explicit strptime formats tried in order; never inferred
+      #   control_total summed per file and checked against the file's own totals
+      #                 where it has them; only for additive amounts, never rates
+      #   pii           none | join_key | quasi | direct | prohibited
+      #                 direct is to land encrypted; prohibited is matched so drift
+      #                 checks see it, then discarded before any value is written
+      #   on_error      quarantine (default) | null | fail, per cell parse failure
+      #   max_length    over-length text fails rather than truncates
+      #   description   free text for the reader; the pipeline does not use it
       - target: group_id
         sources: ['Group ID']
         type: text
@@ -65,6 +132,7 @@ variants:
       - target: order_series_id
         sources: ['Order Series ID']
         type: text
+      # First half of the natural key.
       - target: order_id
         sources: ['Order ID']
         type: text
@@ -115,6 +183,7 @@ variants:
           The discriminator that makes a row unique. One appointment
           administers several inventory items, which is why keys built on
           appointment alone showed 25,738 duplicates in 51,178 rows.
+      # type ndc: normalised to the 11-digit form; see transforms/ndc.py.
       - target: inner_ndc
         sources: ['Inner NDC Code', 'Inner NDC']
         type: ndc
@@ -161,6 +230,9 @@ variants:
           no comparison between the two is valid without multiplying purchases by
           BILLUNITSPKG from the ASP crosswalk. That conversion is reconciliation
           work; this is the figure it starts from.
+      # The event date. `required` here means a row with no date quarantines, which
+      # is intended: an administration without a date cannot be placed in a period.
+      # Both formats are declared because the two modules write dates differently.
       - target: administration_date
         sources: ['Appointment Date', 'Date']
         type: date
@@ -169,6 +241,7 @@ variants:
       - target: administration_time
         sources: ['Appointment Time', 'Time']
         type: text
+      # System timestamp, landed as text rather than parsed; not used for period logic.
       - target: created_at
         sources: ['Created Date', 'Created At']
         type: text
@@ -182,14 +255,21 @@ variants:
         type: currency
         description: >
           A rate - deliberately not a control total.
+  # Variant 2: the 33-column CSV export used through the March 2026 drop.
+  # Detected by `Type` and `Inner NDC` (legacy names) and by the ABSENCE of
+  # `Inventory Type` (not the new module) and `Vendor` (not the BuyBill export,
+  # which is otherwise the same 33 columns).
   - name: legacy_export
     description: >
       33-column CSV export used through the March 2026
       drop. Distinguished from BuyBill by carrying Type and Location
       where BuyBill carries Vendor and Location Name.
+    # Header-presence detector; see the note above `variants:`.
     detect:
       require_all: ['Type', 'Inner NDC', 'Billing Units']
       require_none: ['Inventory Type', 'Vendor']
+    # No `read:` block: defaults apply (first sheet, header on row 0, utf-8-sig,
+    # comma delimiter, trailing blank rows skipped, no totals footer).
     columns:
       - target: group_id
         sources: ['Group ID']
@@ -211,6 +291,7 @@ variants:
       - target: order_series_id
         sources: ['Order Series ID']
         type: text
+      # First half of the natural key.
       - target: order_id
         sources: ['Order ID']
         type: text
@@ -261,6 +342,7 @@ variants:
           The discriminator that makes a row unique. One appointment
           administers several inventory items, which is why keys built on
           appointment alone showed 25,738 duplicates in 51,178 rows.
+      # type ndc: normalised to the 11-digit form; see transforms/ndc.py.
       - target: inner_ndc
         sources: ['Inner NDC', 'Inner NDC Code']
         type: ndc
@@ -312,6 +394,9 @@ variants:
           no comparison between the two is valid without multiplying purchases by
           BILLUNITSPKG from the ASP crosswalk. That conversion is reconciliation
           work; this is the figure it starts from.
+      # The event date. `required` here means a row with no date quarantines, which
+      # is intended: an administration without a date cannot be placed in a period.
+      # Both formats are declared because the two modules write dates differently.
       - target: administration_date
         sources: ['Date', 'Appointment Date']
         type: date
@@ -320,6 +405,7 @@ variants:
       - target: administration_time
         sources: ['Time', 'Appointment Time']
         type: text
+      # System timestamp, landed as text rather than parsed; not used for period logic.
       - target: created_at
         sources: ['Created At', 'Created Date']
         type: text

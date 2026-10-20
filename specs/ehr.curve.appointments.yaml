@@ -7,21 +7,52 @@
 # Heavily identifying: patient and guarantor names, addresses, dates of birth,
 # telephone numbers and email. Classified so they land encrypted.
 
+# ---- Identity and routing -------------------------------------------------
+# key: stable identifier for this source. Ledger history is keyed on it, so
+# it never changes. name and vendor are for display only.
 key: ehr.curve.appointments
 name: Curve - Appointment Details by Date
 vendor: Curve / Allscripts
+# group: the delivery folder the finance team drops this file into.
 group: "3 AllscriptsCurve"
+# catalog_names: what the finance team calls this report in their source
+# catalogue, so the two can be matched up.
 catalog_names: ['Encounter']
+# lifecycle: active means silence from this source raises a freshness
+# alert. discontinued, no_access and planned sources are never alerted on.
 lifecycle: active
+# expected_cadence_days: a staleness threshold for alerting ("alert if no
+# new file in N days"), not a schedule. Files are uploaded every Sunday with
+# ad hoc midweek re-uploads; see CLAUDE.md "How files arrive". null means
+# irregular.
 expected_cadence_days: 7
 
+# filename_patterns: case-insensitive regexes, a routing hint only. What a
+# file actually is gets decided by the variant detector below from its header
+# row, so a renamed file still loads and a misnamed one does not load wrongly.
+# Not anchored on extension: the same source can arrive as CSV or XLSX.
 filename_patterns:
   - 'curve.*appointment'
 
+# natural_key: EMPTY. The export carries no appointment identifier. Best
+# candidate tested was (Patient_Number, Appointment_DateTime), still leaving
+# 11,385 duplicates across 199,591 rows. Figures from docs/data-findings.md
+# section 13; the probe itself is not in this repo.
+#
+# Dedup (CLAUDE.md, "Duplicates"): no key, so identity is every landed column
+# plus an occurrence number in file order. The ten exact-duplicate rows
+# in the notes become occurrence 2 of their identity and survive; they are
+# also reported as duplicate findings (stg.duplicate_finding).
 natural_key: []
 
+# on_new_column / on_missing_column: drift policy when the vendor changes the
+# column set. An unexpected new column warns and the load continues; a missing
+# column fails the file. Nothing is ever silently dropped, which is what the
+# previous pipeline did.
 on_new_column: warn
 on_missing_column: fail
+# notes: free text. Mandatory when natural_key is empty - the spec model
+# rejects a keyless spec that does not record what was tested and why.
 notes: >
   Three temporal shapes, none interchangeable: plain dates
   (Patient_DOB, Date_Of_Account) as MM/DD/YYYY, timestamps (Appointment_DateTime,
@@ -38,11 +69,45 @@ notes: >
   both reference vouchers and services by id - so this is a reporting omission
   rather than a modelling one, and worth requesting.
 
+# variants: the shapes this source's file can take. A variant is one shape,
+# detected from the header row alone - require_all lists columns that must be
+# present, require_none columns that must be absent. Exactly one variant must
+# match a file or the load stops; zero and two are both errors, never resolved
+# by guessing. Each variant has its own read settings and column map, but all
+# land on the same target names, so nothing downstream knows which shape wrote
+# a row.
 variants:
+  # One shape so far: 101 columns. The detector pairs the patient number with
+  # the scheduling-resource columns that only this Curve report carries.
   - name: appointments_101
     detect:
       require_all: ['Patient_Number', 'ResDesc', 'Resource_Abbr']
+    # No read block: header on row 0, no footer, default encoding. At 143 MB
+    # the file is read by the streaming reader rather than loaded whole.
     columns:
+      # Column fields, explained once:
+      #   target        canonical column name in the warehouse. Stable; vendors
+      #                 rename, we do not.
+      #   sources       accepted vendor headers, matched after normalising case,
+      #                 punctuation and whitespace. List several when a vendor
+      #                 has renamed a column.
+      #   type          text | integer | decimal | currency | date | boolean | ndc
+      #   required      the column must exist in the file AND every row must
+      #                 have a value. Column absent is drift (see policy above);
+      #                 value absent quarantines that one row.
+      #   date_formats  strptime formats tried in order. Mandatory for dates and
+      #                 never inferred: 01/02/2025 is ambiguous without one.
+      #   pii           none | join_key | quasi | direct | prohibited. direct lands
+      #                 encrypted; join_key stays in clear because reconciliation
+      #                 joins on it; prohibited is matched for drift checks and
+      #                 then discarded before any value is written anywhere.
+      #   on_error      quarantine (default) | null | fail, per cell parse failure.
+      #   control_total the column is additive and summed as a load control figure.
+      #   max_length    over-length text fails rather than truncates.
+      #   description   free text for the reader.
+      #
+      # 101 columns follow. Most are self-explanatory and carry only a pii
+      # class; comments below mark the ones with something to know.
       - target: resdesc
         sources: ['ResDesc']
         type: text
@@ -63,6 +128,7 @@ variants:
         sources: ['Patient_First_Name']
         type: text
         pii: direct
+      # Candidate-key column, with appointment_datetime further down.
       - target: patient_number
         sources: ['Patient_Number']
         type: text
@@ -125,6 +191,8 @@ variants:
         sources: ['Patient_Email']
         type: text
         pii: direct
+      # guar_* columns are the guarantor (the person financially responsible),
+      # a second identified individual on every row. Classified direct.
       - target: guar_last_name
         sources: ['Guar_Last_Name']
         type: text
@@ -222,6 +290,9 @@ variants:
       - target: registration_last_modified_by
         sources: ['Registration_Last_Modified_By']
         type: text
+      # Timestamps, not dates: MM/DD/YYYY H:MM with a non-padded hour. Three
+      # formats are listed because the seconds and time part are not always
+      # present. Candidate-key column.
       - target: appointment_datetime
         sources: ['Appointment_DateTime']
         type: date
@@ -263,6 +334,9 @@ variants:
       - target: acknowledged_by
         sources: ['Acknowledged_By']
         type: text
+      # Empty in every delivery so far, so no format could be detected from
+      # values. Typed by hand to match its DateTime_ siblings - a decision for
+      # a person, recorded in the description, not a default.
       - target: datetime_bumped
         sources: ['DateTime_Bumped']
         type: date
@@ -278,6 +352,8 @@ variants:
       - target: bumped_reason
         sources: ['Bumped_Reason']
         type: text
+      # Kept as text on purpose. A name rule would read these two as timestamps;
+      # the values are bare HHMM integers (1454 for 14:54) with no date part.
       - target: check_in_time
         sources: ['Check_In_Time']
         type: text
@@ -380,6 +456,7 @@ variants:
       - target: cm_case_status_id
         sources: ['CM_Case_Status_ID']
         type: text
+      # Second column empty in every delivery; typed by hand like datetime_bumped.
       - target: cm_date_of_injury
         sources: ['CM_Date_Of_Injury']
         type: date
