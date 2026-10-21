@@ -164,6 +164,24 @@ class TestPerSourceStatements:
             assert "_live ON " in text and "_identity ON " in text
             assert ("_key ON " in text) == bool(spec.natural_key), spec.key
 
+    def test_no_generated_table_repeats_a_column_name(self, registry):
+        """The first Azure migration failed here: a vendor column mapped to
+        ``created_at`` collided with the audit column of the same name
+        (2026-10-21). The spec model now refuses the name; this sweep is the
+        backstop for any future ledger column."""
+        for spec in registry:
+            for statement in table_statements(spec):
+                if "CREATE TABLE" not in statement:
+                    continue
+                names = [
+                    m.group(1)
+                    for line in statement.splitlines()
+                    if (m := re.match(r"\s+\[?([A-Za-z_][A-Za-z0-9_]*)\]?\s+[A-Z]", line))
+                    and not line.strip().startswith("CONSTRAINT")
+                ]
+                repeated = sorted({n for n in names if names.count(n) > 1})
+                assert not repeated, f"{spec.key}: repeated columns {repeated}"
+
     def test_every_layer_carries_the_four_audit_columns(self, registry):
         """Decision D11: created_at/by on every table, updated_at/by null on
         the immutable layers and set only on supersession in curated."""

@@ -304,3 +304,19 @@ record did not already fix:
 Not done: running against Azure (the layered migration has not been
 applied), the backfill script over every file in as-of order, zip members
 (Monthly Payments) in `commit_path`, and the quarantine-rate threshold.
+
+## D13. A vendor column may not take a ledger column's name (2026-10-21, found by the migration)
+
+The first run of the layered migration against `sbh_data_bank` failed on
+`landed.dispense_weinfuse_administered`: the WeInfuse `Created At` column
+was mapped to `created_at`, which is also the D11 audit column on every
+table. `RESERVED_COLUMN_NAMES` now lives with the spec model and a spec
+that maps any of those names is rejected at load; `store/schema.py`
+re-exports the same set as `LEDGER_COLUMN_NAMES`. The two WeInfuse specs
+map the vendor stamp to `vendor_created_at`, and `tools/spec_build` does
+the same for any future WeInfuse spec. Nothing had been loaded, so the
+rename costs nothing. The migration then applied cleanly: 153 statements,
+81 tables, and a second run applied nothing new.
+
+Also decided the same day: the development env file is `.env` in the
+repository root, git-ignored, rather than a file outside the repository.

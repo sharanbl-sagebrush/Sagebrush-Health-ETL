@@ -6,7 +6,7 @@ previous implementation kept a SQL admin password in plaintext in
 ``settings.yaml`` and in 22 other files; this module exists so there is no
 convenient place to do that again.
 
-Development reads from an env file outside the repository. Production reads
+Development reads from a git-ignored ``.env`` in the repository root. Production reads
 from the process environment, populated from Key Vault by managed identity.
 Both arrive here as the same :class:`SqlSettings`.
 
@@ -55,9 +55,10 @@ DEFAULT_DRIVER = "ODBC Driver 18 for SQL Server"
 def load_env_file(path: str | Path) -> dict[str, str]:
     """Read ``KEY=value`` lines into the process environment.
 
-    For development only, and deliberately not defaulted to a path inside the
-    repository - the file holds a live credential and must live somewhere that
-    cannot be committed by accident.
+    For development only, and deliberately not defaulted to a path: the file
+    holds a live credential. The convention is ``.env`` in the repository root,
+    which ``.gitignore`` excludes (decided 2026-10-21) so it cannot be
+    committed by accident.
 
     Existing environment variables win, so a real deployment is never
     overridden by a stray file.

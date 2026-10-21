@@ -11,7 +11,7 @@ files caught by this spec's filename pattern, and one misnamed BuyBill file (see
 Loadable, not yet safe to interpret. Every real delivery binds, zero rows quarantine, the natural key is unique
 in all three files, the late-file replay changes nothing, and the current-row count reconciles with a
 month-partitioned union to within the 3 rows the unbuilt vanish rule would retire. Three decisions are needed
-before the curated layer means anything: (1) `created_at` is text and the two modules (plus an Excel pass over
+before the curated layer means anything: (1) `vendor_created_at` is text and the two modules (plus an Excel pass over
 D1) format it differently, so 19,641 of the 19,644 D1-to-D2 "corrections" and all 411 D2-to-D3 corrections are
 formatting, not vendor edits; (2) legacy `Created At` and new-module `Created Date` are different timestamps
 (one follows the administration, the other precedes it), so one target conflates two fields; (3) the
@@ -41,7 +41,7 @@ billing units. The spec comment saying the two exports hold different population
   `administereddrugs`; three BuyBill files are walked and reported UNRECOGNISED. Harmless now, noisy under
   alerting. `^(?!.*buybill).*weinfuse.*administereddrugs` matches the Administered names only (probed). Not changed.
 - Event date: `administration_date` (sources `Date` / `Appointment Date`); see the proposal.
-- Vendor timestamp: `Created At` / `Created Date`, landed as `created_at` text. Later than the event date on
+- Vendor timestamp: `Created At` / `Created Date`, landed as `vendor_created_at` text. Later than the event date on
   1,101 of 19,645 rows (D1), 4,763 of 51,178 (D2; 1,988 by more than 30 days, max 904), 63 of 5,671 (D3). Not a
   row version: the 3 real D1-to-D2 edits left it equal to the minute (a creation stamp, not last-updated), and in
   D3 it precedes the administration on 5,325 of 5,671 rows (order creation, a different field). On the 411 shared
@@ -64,7 +64,7 @@ billing units. The spec comment saying the two exports hold different population
   `lot` 1 / 1 / 0, `unit_price` 10 in D3, `date_of_birth` on every legacy row.
 - Native xlsx datetimes: `Appointment Date`, `Expiration Date`, `Date of Birth Date`, `Created Date` are midnight
   datetimes (0 non-midnight), so `.date()` loses nothing for the `date` targets. The text targets are hit:
-  `administration_time` and `created_at` arrive as `str(datetime)` (`YYYY-MM-DD HH:MM:SS`) where the legacy CSV
+  `administration_time` and `vendor_created_at` arrive as `str(datetime)` (`YYYY-MM-DD HH:MM:SS`) where the legacy CSV
   carries `2000-01-01 HH:MM:SS UTC` and `YYYY-MM-DD HH:MM:SS -0700/-0800`. Same value, different hash input.
 - Time zone: legacy `Time` is labelled UTC but its hours run 07-16 (clinic hours); new-module `Appointment Time`
   runs 12-23 and sits +8 h (279 rows) or +5 h (132) from the legacy value on shared rows, so one is UTC, the other
@@ -82,10 +82,10 @@ billing units. The spec comment saying the two exports hold different population
 
 - (`order_id`, `inventory_item_id`) unique in every delivery (19,645 / 51,178 / 5,671 identities, 0 groups), as
   is (`appointment_id`, `inventory_item_id`). Max occurrence 1; numbering never matters.
-- D1 to D2, 19,644 corrections: `created_at` text differs on all, agrees to the minute on 19,643. Real edits:
-  `lot` 2, `billing_units` 1 (newer lower), `created_at` 1 (139 h apart, nothing else changed). `strength`
+- D1 to D2, 19,644 corrections: `vendor_created_at` text differs on all, agrees to the minute on 19,643. Real edits:
+  `lot` 2, `billing_units` 1 (newer lower), `vendor_created_at` 1 (139 h apart, nothing else changed). `strength`
   (19,617) and `unit_price` (4,248) differ in Decimal exponent only and hash equal. 19,641 spurious supersessions.
-- D2 to D3, 411 corrections: `administration_time` 411 (format, zone), `created_at` 411 (different field),
+- D2 to D3, 411 corrections: `administration_time` 411 (format, zone), `vendor_created_at` 411 (different field),
   `date_of_birth` 411 (new column), `patient_first_name`/`patient_last_name` 54 (all equal after case fold, 15
   patients, same `patient_identifier`), `label_name` 2 (real). No key, date, NDC, HCPCS, unit or price changed.
   The module switch re-supersedes every overlapping row; the DOB part is unavoidable under the all-columns hash.
@@ -114,13 +114,13 @@ billing units. The spec comment saying the two exports hold different population
 `administration_date`. The only per-row date of the clinical event, required and populated on every row, parses
 in both modules (ISO in D2, US in D1, native datetime in D3), never exceeds the as-of, equals the date part of the
 new module's `Appointment Time` on every row, and is what the vendor filter is applied to (the 31-row spill is
-one day at the start, never at the end). `created_at` trails the administration by up to 904 days in the legacy
+one day at the start, never at the end). `vendor_created_at` trails the administration by up to 904 days in the legacy
 module and precedes it in the new one; `expiration` and `date_of_birth` are attributes. For the vanish rule:
 scope coverage by location as well as date, and allow the one-day start spill.
 
 ## Open questions for the developer
 
-1. `created_at`: add a timestamp type with offset-aware formats, or exclude it from the row hash? Named decision.
+1. `vendor_created_at`: add a timestamp type with offset-aware formats, or exclude it from the row hash? Named decision.
 2. Split `Created Date` (order creation) from `Created At` (record creation) into two targets: yes/no?
 3. Declare `administration_date` as the event-date column: yes/no?
 4. Treat `dispense.weinfuse.buybill` as a subset of this source and never sum the two: retire it or mark it
@@ -138,10 +138,10 @@ scope coverage by location as well as date, and allow the one-day start spill.
 
 - Raw CSV bytes per file: BOM, line endings, physical lines after header, record count and widths, blank records; xlsx `core.xml`/`app.xml` stamps, sheet names, row count, Python cell type per column; header name and order diff across all seven distinct files.
 - Real loader on D1, D2, D3: outcome, variant, drift, min/max `administration_date`, rows after as-of and before start, rows per year and month, null counts, distinct status/type/location/group counts, Decimal exponents, NDC lengths, sign and zero counts.
-- Shape classification of `created_at` and `administration_time` text and offset suffixes; `created_at` parsed and compared with `administration_date` and the as-of, with lag buckets.
+- Shape classification of `vendor_created_at` and `administration_time` text and offset suffixes; `vendor_created_at` parsed and compared with `administration_date` and the as-of, with lag buckets.
 - Non-midnight native datetime cells per xlsx column; `Appointment Time` date part vs `Appointment Date`; hour histograms per module and hour offset on shared rows.
 - Keyed every file by (`order_id`, `inventory_item_id`) and by (`appointment_id`, `inventory_item_id`); duplicate group counts.
-- Per delivery pair: shared identities, hash-identical rows, differing columns by equality and by repr, `created_at` agreement to the minute and day, name and label equality after case fold, window-only identities with lag, month, status, order and location breakdowns.
+- Per delivery pair: shared identities, hash-identical rows, differing columns by equality and by repr, `vendor_created_at` agreement to the minute and day, name and label equality after case fold, window-only identities with lag, month, status, order and location breakdowns.
 - Dedup rule replicated in memory: current rows by setter and year, `billing_units` sum, month-partitioned union, D1 replayed last.
 - Spec filename pattern and a start-anchored alternative tested against the three filename shapes.
 - BuyBill files loaded with the BuyBill spec: shared identities with D1/D2, agreement on common targets, `inventory_type` and `unit_price` profile of Administered-only rows.

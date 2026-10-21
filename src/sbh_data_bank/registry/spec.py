@@ -64,6 +64,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "EVENT_DATE_AS_OF",
+    "RESERVED_COLUMN_NAMES",
     "AsOfSource",
     "ColumnSpec",
     "CoverageSource",
@@ -85,6 +86,21 @@ __all__ = [
 #: snapshot covers every row of an older one, so the delivery's as-of stands
 #: in for the event date (decision D1, docs/decision-record.md).
 EVENT_DATE_AS_OF = "as_of"
+
+#: Target names a spec may not use, because every generated table carries a
+#: column of that name for the ledger itself (``store/schema.py``, which
+#: re-exports this set as ``LEDGER_COLUMN_NAMES``). Found 2026-10-21 when the
+#: first migration failed: WeInfuse ships a ``Created At`` column that had
+#: been mapped to ``created_at``, the audit column. A vendor stamp with such a
+#: name is mapped to ``vendor_<name>`` instead.
+RESERVED_COLUMN_NAMES = frozenset(
+    {
+        "tenant_id", "source_file_id", "line_number", "extra_cells", "spec_sha256",
+        "row_hash", "batch_id", "dedup_rule", "identity_hash", "occurrence", "as_of",
+        "outcome", "superseded_by", "superseded_at", "supersede_reason",
+        "created_at", "created_by", "updated_at", "updated_by",
+    }
+)  # fmt: skip
 
 # Two string shapes used throughout, enforced by pydantic at load time.
 #
@@ -808,6 +824,16 @@ class SourceSpec(BaseModel):
         # shape would land keyless and silently duplicate on re-delivery.
         for variant in self.variants:
             targets = {c.target for c in variant.columns}
+            # Every generated table carries the ledger columns, so a vendor
+            # column with one of their names would make CREATE TABLE fail
+            # (or, worse, be shadowed by the audit value).
+            reserved = sorted(targets & RESERVED_COLUMN_NAMES)
+            if reserved:
+                raise ValueError(
+                    f"{self.key}: variant {variant.name!r} maps {reserved}, which are "
+                    "ledger column names on every generated table; map a vendor "
+                    "column of that name to vendor_<name>"
+                )
             missing = [k for k in self.natural_key if k not in targets]
             if missing:
                 raise ValueError(

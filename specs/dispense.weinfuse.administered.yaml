@@ -242,7 +242,7 @@ variants:
         sources: ['Appointment Time', 'Time']
         type: text
       # System timestamp, landed as text rather than parsed; not used for period logic.
-      - target: created_at
+      - target: vendor_created_at
         sources: ['Created Date', 'Created At']
         type: text
       - target: date_of_birth
@@ -406,6 +406,6 @@ variants:
         sources: ['Time', 'Appointment Time']
         type: text
       # System timestamp, landed as text rather than parsed; not used for period logic.
-      - target: created_at
+      - target: vendor_created_at
         sources: ['Created At', 'Created Date']
         type: text

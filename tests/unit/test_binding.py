@@ -157,6 +157,15 @@ class TestSpecValidation:
         with pytest.raises(ValueError, match="lacks natural-key columns"):
             SourceSpec.model_validate(self._minimal(natural_key=["missing_col"]))
 
+    def test_a_vendor_column_cannot_take_a_ledger_column_name(self):
+        """Every generated table carries ``created_at`` and the other ledger
+        columns; the first Azure migration failed on WeInfuse's ``Created
+        At`` mapped to ``created_at`` (2026-10-21)."""
+        spec = self._minimal()
+        spec["variants"][0]["columns"].append({"target": "created_at", "sources": ["Created At"]})
+        with pytest.raises(ValueError, match="ledger column names"):
+            SourceSpec.model_validate(spec)
+
     def test_a_constant_cannot_overwrite_a_mapped_column(self):
         """``constants`` injects fixed values (Pharmaforce uses it for the
         site); it must not shadow a column the file actually carries."""

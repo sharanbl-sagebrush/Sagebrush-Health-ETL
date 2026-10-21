@@ -12,3 +12,5 @@ htmlcov/
 /data/
 /out/
 .vs/
+*.env
+.env.*

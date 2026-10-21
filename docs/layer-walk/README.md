@@ -132,7 +132,7 @@ snapshot columns, named in the spec so the choice is reviewable.
 ### D7. A datetime type
 ANS: Implement recommended
 
-WeInfuse created_at, Curve Appointments timestamps, PRXP modified stamps and
+WeInfuse vendor_created_at, Curve Appointments timestamps, PRXP modified stamps and
 patients' last_updated are either typed text (so a format change becomes
 17,000 fake corrections) or typed date (so the time is silently dropped).
 Native xlsx datetime cells also bypass `date_formats` entirely.

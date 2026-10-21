@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/migrate.py:*)",
+      "Bash(python scripts/commit_file.py:*)"
+    ]
+  }
+}

@@ -65,7 +65,7 @@ from, and ``tests/unit/test_commit.py`` holds the two against each other.
 
 from __future__ import annotations
 
-from sbh_data_bank.registry.spec import FieldType, PiiClass, SourceSpec
+from sbh_data_bank.registry.spec import RESERVED_COLUMN_NAMES, FieldType, PiiClass, SourceSpec
 
 __all__ = [
     "CURATED_LEDGER_COLUMNS",
@@ -210,15 +210,10 @@ _IMMUTABLE_AUDIT_COLUMNS = [
 ]
 
 #: Every non-business column a generated table can carry, so a reader can
-#: separate the ledger from the vendor's columns without guessing.
-LEDGER_COLUMN_NAMES = frozenset(
-    {
-        "tenant_id", "source_file_id", "line_number", "extra_cells", "spec_sha256",
-        "row_hash", "batch_id", "dedup_rule", "identity_hash", "occurrence", "as_of",
-        "outcome", "superseded_by", "superseded_at", "supersede_reason",
-        "created_at", "created_by", "updated_at", "updated_by",
-    }
-)  # fmt: skip
+#: separate the ledger from the vendor's columns without guessing. The spec
+#: model owns the set, so it can refuse a vendor column with one of these
+#: names before any DDL is generated.
+LEDGER_COLUMN_NAMES = RESERVED_COLUMN_NAMES
 
 
 #: The metadata and staging DDL, as one script that meta_statements() splits

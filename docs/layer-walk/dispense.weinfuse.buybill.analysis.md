@@ -10,7 +10,7 @@ D1 = Jan012025-Feb052026 (as-of 2026-02-05), D2 = 01012023-03062026 (2026-03-06)
 Safe to load as-is, with one cosmetic defect that will mislead anyone reading the ledger: 17,086 of the
 17,088 D1-to-D2 "corrections" are not corrections. D1 ships `Date` as US `m/d/Y` and `Created At` as
 `m/d/Y H:MM`; D2 and D3 ship ISO. Both land as `text`, so every shared row hashes differently although only
-2 rows changed in any other column. Retyping `date` (and deciding what to do with `created_at`) removes the
+2 rows changed in any other column. Retyping `date` (and deciding what to do with `vendor_created_at`) removes the
 noise; nothing is lost or double counted today because D2 supersedes D1 either way. Everything else is
 clean: one variant, zero quarantine, header identical across deliveries, key unique in every file, no
 within-file duplicates, no conflicts, late replay changes nothing, presented total reconciles exactly.
@@ -60,10 +60,10 @@ stay current until the rule exists; and this feed is a strict subset of `dispens
 - Format drift that typing hides: `Expiration` is US in D1 and ISO in D2/D3 (both declared, parses).
   `Strength` is written without a decimal on 17,070 D1 rows and with one in D2; `Unit Price` likewise on
   1,695 rows. Decimal canonicalisation in the row hash absorbs both (verified: 0 hash differences from them).
-- Format drift that typing does not hide: `date` (US in D1, ISO in D2/D3) and `created_at` (`m/d/Y H:MM` in
+- Format drift that typing does not hide: `date` (US in D1, ISO in D2/D3) and `vendor_created_at` (`m/d/Y H:MM` in
   D1; ISO with seconds and a UTC offset in D2/D3, 2 distinct offsets = DST). Both are `type: text`, so the
   same value hashes differently. Would a spec change fix it: yes for `date` (retype to `date` with
-  `['%Y-%m-%d', '%m/%d/%Y']`; parsed dates agree on 17,088 of 17,088 shared rows). For `created_at`, a
+  `['%Y-%m-%d', '%m/%d/%Y']`; parsed dates agree on 17,088 of 17,088 shared rows). For `vendor_created_at`, a
   `date` type with `['%Y-%m-%d %H:%M:%S %z', '%m/%d/%Y %H:%M']` would truncate to the date and agree on
   17,087 of 17,088, at the cost of the clock and offset; there is no datetime type. Not changed here.
 - `time` is a datetime string whose date part is a single placeholder (1 distinct value per file, more than
@@ -73,7 +73,7 @@ stay current until the rule exists; and this feed is a strict subset of `dispens
 - Money and quantities: `unit_price` is a bare positive decimal on every row (0 negative, 0 zero, 0 blank).
   `billing_units` is a non-negative integer; zero on 453 / 1,292 / 104 rows, of which 453 / 1,283 / 104 also
   have a blank `Billing Code (HCPCS)` (the only blanks in that column). 9 D2 rows have a HCPCS and zero units.
-- `created_at` date part is later than `Date` on 759 / 3,861 / 75 rows and earlier on 3 / 3 / 0.
+- `vendor_created_at` date part is later than `Date` on 759 / 3,861 / 75 rows and earlier on 3 / 3 / 0.
   `expiration` precedes `Date` on 16 D2 rows (0 in D1, D3).
 - Control totals: no vendor footer; `billing_units` sums 818,485 / 2,346,719 / 188,011 (D1 / D2 / D3).
 
@@ -81,10 +81,10 @@ stay current until the rule exists; and this feed is a strict subset of `dispens
 
 - (order_id, inventory_item_id) is unique in every delivery: 17,089 / 45,013 / 4,198 distinct of as many
   rows; 0 within-file duplicate identities, max occurrence 1. Blank key cells: 0.
-- Corrections D1 to D2: 17,088, differing columns `date` (17,088), `created_at` (17,088), `billing_units` (1),
-  `lot` (1). Excluding `date` and `created_at`, 17,086 are hash-identical: format drift, not reorderings and
+- Corrections D1 to D2: 17,088, differing columns `date` (17,088), `vendor_created_at` (17,088), `billing_units` (1),
+  `lot` (1). Excluding `date` and `vendor_created_at`, 17,086 are hash-identical: format drift, not reorderings and
   not a wrong identity. The 2 real edits are one lot change (2025-10, same expiration) and one
-  `billing_units` decrease (2025-03). D2 to D3: 1 correction, `created_at` only (moved 12 days, all other
+  `billing_units` decrease (2025-03). D2 to D3: 1 correction, `vendor_created_at` only (moved 12 days, all other
   columns equal). 0 reorderings, 0 conflicts.
 - The one identity present only in D1: dated the day before D1's as-of, created on or before the as-of; its
   order_id (48 rows in D2) and appointment_id (4 rows) persist, but its inventory_item_id never appears in
@@ -109,7 +109,7 @@ stay current until the rule exists; and this feed is a strict subset of `dispens
 
 `date`. It is populated on every row, parses under two formats with 0 failures, never exceeds the delivery
 as-of, and the vendor's own range filter is evidently applied to it (with the previous day included). It is
-the same value as the Administered spec's `administration_date` on all 45,013 matched rows. `created_at`
+the same value as the Administered spec's `administration_date` on all 45,013 matched rows. `vendor_created_at`
 is not it: it trails `Date` on up to 3,861 rows and is a load time, not an event. For the vanish rule, treat
 a delivery's coverage as [filename start minus 1 day, as-of minus 1 day]: the first because the full
 previous day is always present, the second because the as-of day is extracted part way through.
@@ -119,7 +119,7 @@ previous day is always present, the second because the as-of day is extracted pa
 1. Declare `date` as the event-date column (field to be added to the spec model): yes/no?
 2. Retype `date` from `text` to `date` with `['%Y-%m-%d', '%m/%d/%Y']` so D1-to-D2 drift stops producing
    17,086 cosmetic corrections: yes/no?
-3. `created_at`: keep as text (cosmetic corrections continue), retype as `date` with datetime formats (loses
+3. `vendor_created_at`: keep as text (cosmetic corrections continue), retype as `date` with datetime formats (loses
    clock and offset), or add a datetime type to the model. Named decision.
 4. Should vanish coverage be [start minus 1 day, as-of minus 1 day] given the full previous day is included
    (19 of 19, 80 of 80) and the as-of day is partial (50 vs 74): yes/no?
@@ -140,10 +140,10 @@ previous day is always present, the second because the as-of day is extracted pa
 - Parsed each CSV from raw bytes: BOM, line endings, physical lines after header, csv record count, blank records, record widths, header name/order across deliveries and against the three Administered CSVs.
 - Classified raw `Date`, `Time`, `Created At`, `Expiration`, `Unit Price`, `Inner NDC`, `Outer NDC`, `Billing Units`, `Strength` cells by shape per file; counted blanks per column; counted distinct keys, orders, appointments, vendors, locations.
 - Applied both specs' filename patterns to all seven WeInfuse administered-type filenames; loaded every file under both specs to see which variant binds or which detector refuses it; compared SHA-256 of the April pair.
-- Loaded each file with the real loader; per file counted rows after as-of, before filename start, by month, by day at both boundaries, within 7 days of as-of, and Python types, negatives, zeros, HCPCS blanks, expiration-before-date, created_at-versus-date ordering.
+- Loaded each file with the real loader; per file counted rows after as-of, before filename start, by month, by day at both boundaries, within 7 days of as-of, and Python types, negatives, zeros, HCPCS blanks, expiration-before-date, vendor_created_at-versus-date ordering.
 - Keyed every file by (identity hash, occurrence); per pair counted shared identities, hash-identical ones, differing column names and sets, identities present on one side only inside the shared window with month and lag buckets, and whether their order or appointment ids exist on the other side.
-- Recomputed row hashes excluding chosen columns to isolate which columns drive the D1-to-D2 differences; compared Decimal string forms versus values; compared parsed `created_at` wall clocks and date parts, and counted distinct UTC offsets.
-- Counted `Time` distinct date parts and its lag from `Date`; for before-start rows checked day of month, shared order/series/appointment ids with in-window rows, and created_at lag.
+- Recomputed row hashes excluding chosen columns to isolate which columns drive the D1-to-D2 differences; compared Decimal string forms versus values; compared parsed `vendor_created_at` wall clocks and date parts, and counted distinct UTC offsets.
+- Counted `Time` distinct date parts and its lag from `Date`; for before-start rows checked day of month, shared order/series/appointment ids with in-window rows, and vendor_created_at lag.
 - Replicated the dedup rule in memory; reconciled current rows and `billing_units` as D2 plus D3-only plus the D1 orphan; tried a month-partitioned union; counted current rows by year and by delivery.
 - Compared BuyBill keys, order ids, appointment ids, item ids, `billing_units` and dates against the Administered file of the same drop; profiled the Administered-only rows by year, NDC and label-name overlap.
 - Listed every drop folder for the presence of a BuyBill file.

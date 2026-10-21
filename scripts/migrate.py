@@ -9,7 +9,8 @@ conversation rather than a script.
     python scripts/migrate.py --env-file <path>   apply
     python scripts/migrate.py --dry-run           print the DDL, touch nothing
 
-The env file holds a live credential and must live outside this repository.
+The env file holds a live credential. Development keeps it as ``.env`` in the
+repository root, which ``.gitignore`` excludes; it is never committed.
 
 How to run
     ``python scripts/migrate.py --dry-run``

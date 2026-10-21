@@ -22,11 +22,12 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
 - 19 source specs in `specs/`, every one verified by loading the real extract
 - `store/schema.py` generates the layered DDL from the specs: `landed`,
   `typed` and `curated` tables per source plus `meta` and `stg`
-  (`python scripts/migrate.py --dry-run` prints it, 153 statements). A first
-  schema is live in `sbh_data_bank` on Azure (24 tables); its `raw.*` tables
-  predate the layered decision, were never written to, and are left alone
-  until dropped explicitly. The layered migration has not been applied yet
-- 436 tests, no database required to run them
+  (`python scripts/migrate.py --dry-run` prints it, 153 statements).
+  **Applied to `sbh_data_bank` on Azure 2026-10-21**: 81 tables, the 57
+  layered ones plus `meta` and `stg`. The 19 `raw.*` tables predate the
+  layered decision, were never written to, and are left alone until dropped
+  explicitly. Re-running the migration is a no-op
+- 438 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -37,8 +38,13 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
 - Done 2026-10-20: the commit engine (`commit/`) writes a load through the
   layers in one transaction and persists what `curate.rule` decides; replayed
   in memory over the real McKesson files it reproduces the walk exactly
-  (7,124 and 6,415 current rows, 11 corrections each). It has not yet run
-  against Azure: the layered migration must be applied first
+  (7,124 and 6,415 current rows, 11 corrections each)
+- Done 2026-10-21: **first real load**. The five McKesson Purchasing Detail
+  files committed to `sbh_data_bank` in as-of order: four LOADED, the
+  byte-identical copy recorded as `DUPLICATE_FILE`. The database agrees with
+  the replay exactly: 7,124 current rows, 11 corrected, extended price
+  23,305,296.76, 15 duplicate findings, 0 quarantined, no identity with two
+  current rows
 - **Not yet built**: the historical backfill (every file, in as-of order),
   the acquire step, the quarantine-rate threshold, alerting
 
@@ -63,6 +69,12 @@ without a directory lookup, so it quarantines rather than guesses.
 
 **`required` means the column exists AND the row has a value.** An interior
 blank row otherwise lands as a record with null everything.
+
+**A vendor column may not be named like a ledger column.** Every generated
+table carries `created_at`, `batch_id`, `as_of` and the other names in
+`RESERVED_COLUMN_NAMES`. WeInfuse's `Created At` was mapped to `created_at`
+and the first Azure migration failed on it (2026-10-21). The spec model
+rejects the name; the convention is `vendor_<name>`.
 
 **A spec with no natural key must justify itself in `notes`.** Five sources
 genuinely have none — they are denormalised report extracts. That is a finding
@@ -180,7 +192,7 @@ scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
 ## Running things
 
 ```bash
-python -m pytest                    # 436 tests, no database
+python -m pytest                    # 438 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts
@@ -213,10 +225,12 @@ Sunday. So:
 
 ## Credentials
 
-Never in this repository. `SqlSettings` reads `SBH_SQL_*` from the
-environment, and `password` is excluded from `repr` so a settings object cannot
-leak into a log line. Target posture is managed identity — omit
-`SBH_SQL_USER` and the connection uses `ActiveDirectoryMsi`.
+Never committed. `SqlSettings` reads `SBH_SQL_*` from the environment, and
+`password` is excluded from `repr` so a settings object cannot leak into a
+log line. For development the five settings live in `.env` in the repository
+root, which `.gitignore` excludes (`*.env`, decided 2026-10-21); scripts take
+`--env-file .env`. Target posture is managed identity — omit `SBH_SQL_USER`
+and the connection uses `ActiveDirectoryMsi`.
 
 ## Open questions for the business
 
