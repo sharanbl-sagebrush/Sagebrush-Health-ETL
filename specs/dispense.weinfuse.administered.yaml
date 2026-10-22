@@ -423,3 +423,32 @@ variants:
       - target: vendor_created_at
         sources: ['Created At']
         type: text
+
+  # Variant 3: the BuyBill export arriving under this report's name. The
+  # Jan-Apr 2026 drop's `WeInfuse_AdministeredDrugsReport ...csv` is byte
+  # for byte the BuyBill export delivered beside it (established 2026-09-04;
+  # no administered data exists for that window). This spec's filename hint
+  # claims the misnamed copy, so it is recognised for what it is and handed
+  # to the BuyBill source, which loads the correctly named copy and records
+  # this one as the same bytes. Detector copied from the BuyBill spec.
+  - name: buybill_export
+    action: recognise_only
+    loaded_by: dispense.weinfuse.buybill
+    description: >
+      The 33-column BuyBill export (Vendor and Location Name where this
+      report carries Type and Location), misfiled under the administered
+      report's name. `dispense.weinfuse.buybill` loads it.
+    detect:
+      require_all: ['Vendor', 'Inner NDC', 'Billing Units']
+      require_none: ['Inventory Type', 'Type']
+    # columns: the natural-key columns only, because the model requires
+    # every variant to carry the key; nothing from this variant lands.
+    columns:
+      - target: order_id
+        sources: ['Order ID']
+        type: text
+        required: true
+      - target: inventory_item_id
+        sources: ['Inventory Item ID']
+        type: text
+        required: true
