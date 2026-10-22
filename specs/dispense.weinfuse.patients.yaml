@@ -176,9 +176,14 @@ variants:
         sources: ['Gender']
         type: text
         pii: quasi
+      # Free text a clinician typed. The first load failed on a 2,620-character
+      # note (2026-10-22); 4000 is the widest NVARCHAR(n) there is, and a
+      # longer note quarantines its row with TOO_LONG while the landed layer
+      # keeps it whole.
       - target: notes
         sources: ['Notes']
         type: text
+        max_length: 4000
         pii: direct
       - target: primary_insurance_plan
         sources: ['Primary Insurance Plan']

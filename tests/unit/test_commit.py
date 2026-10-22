@@ -462,6 +462,20 @@ class TestQuarantineAndFindings:
         assert (batch.rows_read, batch.rows_quarantined, batch.rows_inserted) == (2, 1, 1)
         assert batch.accounted == batch.rows_read
 
+    def test_a_text_value_wider_than_its_column_fails_the_row_not_the_file(self, tmp_path):
+        """The parser's limit is the typed column's width, so an over-long
+        value is a TOO_LONG quarantine on one row; before 2026-10-22 it
+        reached the insert and failed the whole file."""
+        spec = _spec(max_quarantine_rate=0.5)
+        store = MemoryStore()
+        path = _write(tmp_path, JAN, A_X, "B,X,2026-01-12,20.00," + "n" * 1001)
+        result = _commit(_engine(store), spec, path, tmp_path)
+
+        assert result.committed
+        (q,) = store.quarantine
+        assert (q["line_number"], q["reasons"]) == (3, "TOO_LONG")
+        assert len(store.typed[spec.key]) == 1
+
     def test_lines_sharing_an_identity_are_occurrences_and_a_finding(self, tmp_path, spec):
         store = MemoryStore()
         path = _write(tmp_path, JAN, A_X, "A,X,2026-01-10,12.00,second")

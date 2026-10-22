@@ -132,6 +132,26 @@ class TestPerSourceStatements:
                         continue
                     assert sql_type != "NVARCHAR(MAX)", (spec.key, column)
 
+    def test_a_declared_max_length_sets_the_width_and_widens_a_live_table(self, registry):
+        """WeInfuse patient notes: NVARCHAR(4000) in the create, and a
+        guarded ALTER COLUMN for a table built before the width was
+        declared (the first patients load failed on a 2,620-character
+        note). Widening is the one alteration the migration makes."""
+        spec = registry.require("dispense.weinfuse.patients")
+        for statements, table in (
+            (typed_statements(spec), "typed.dispense_weinfuse_patients"),
+            (curated_statements(spec), "curated.dispense_weinfuse_patients"),
+        ):
+            assert _columns(statements[0])["notes"] == "NVARCHAR(4000)"
+            (widen,) = [s for s in statements if "ALTER COLUMN" in s]
+            assert widen.startswith("IF EXISTS (SELECT 1 FROM sys.columns")
+            assert f"ALTER TABLE {table} ALTER COLUMN [notes] NVARCHAR(4000) NULL" in widen
+            assert "max_length BETWEEN 1 AND 7999" in widen
+        # The default width is the parser's limit, declared once.
+        from sbh_data_bank.transforms.values import TEXT_LENGTH
+
+        assert _columns(typed_statements(spec)[0])["first_name"] == f"NVARCHAR({TEXT_LENGTH})"
+
     def test_the_three_tables_share_the_file_line_key(self, registry):
         for spec in registry:
             for statement in table_statements(spec):

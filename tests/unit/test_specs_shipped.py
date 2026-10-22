@@ -242,6 +242,15 @@ class TestAllSpecsAreSound:
         assert by_name["invoice_detail"].loaded_by == detail.key
         assert detail.filename_patterns == summary.filename_patterns
 
+    def test_max_length_stays_within_what_nvarchar_allows(self):
+        from sbh_data_bank.registry.spec import ColumnSpec
+
+        assert ColumnSpec(target="n", sources=["N"], max_length=4000).max_length == 4000
+        with pytest.raises(ValueError, match="between 1 and 4000"):
+            ColumnSpec(target="n", sources=["N"], max_length=4001)
+        with pytest.raises(ValueError, match="between 1 and 4000"):
+            ColumnSpec(target="n", sources=["N"], max_length=0)
+
     def test_a_keyless_spec_is_rejected_without_notes(self):
         """The rule itself: an empty natural key must be justified."""
         from sbh_data_bank.registry.spec import SourceSpec

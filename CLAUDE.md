@@ -23,7 +23,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   (Cardinal's summary and detail reports are two sources since 2026-10-22, D16)
 - `store/schema.py` generates the layered DDL from the specs: `landed`,
   `typed` and `curated` tables per source plus `meta` and `stg`
-  (`python scripts/migrate.py --dry-run` prints it, 161 statements).
+  (`python scripts/migrate.py --dry-run` prints it, 163 statements).
   **Applied to `sbh_data_bank` on Azure 2026-10-21**, re-applied 2026-10-22
   after the fifteen empty tables of five changed specs were dropped by
   hand: 60 layered tables plus `meta` and `stg`. The 19 `raw.*` tables
@@ -31,7 +31,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   until dropped explicitly. Re-running the migration is a no-op; it only
   creates what is missing and never alters a column, so a spec change to a
   table with rows is a decision about those rows first
-- 460 tests, no database required to run them
+- 471 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -56,6 +56,13 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   engine counters identical to the dry runs. Results and the two decisions
   it forced (D14 creation stamps outside the hash, D15 declared scale) are
   in `docs/decision-record.md`
+- Done 2026-10-22, later: **every source is in Azure**. The five changed
+  specs had their empty tables recreated and loaded, the Cardinal summary
+  loaded as its own source (D16), and the two new upload folders (May to
+  September 2026) went in with them: six sources, zero quarantined, zero
+  conflicts, read back and balanced. Three decisions came out of the new
+  files: D16, D17 (a file past its quarantine rate is held) and the text
+  width rule below. Numbers in `docs/decision-record.md`, "The second load"
 - **Not yet built**: the acquire step, alerting, re-running typed from
   landed in the database
 
@@ -124,6 +131,14 @@ is a duplicate for one source.
 shape. Committed as `LOADED` with nothing behind them, their hashes would
 have been duplicates forever to the corrected spec. `max_quarantine_rate`
 (5% by default) holds the file with its hash still loadable (D17).
+
+**A text value wider than its column fails the row, never the file.** A
+2,620-character patient note failed the first patients load at insert,
+because the parser enforced a length only when the spec declared one. The
+default width (`transforms.values.TEXT_LENGTH`, 1000) is now the parser's
+limit as well as the DDL's, so an over-long value quarantines as `TOO_LONG`;
+a spec that needs more declares `max_length` up to 4000, and the migration
+widens a live column to it, the one alteration it makes.
 
 ## Storage layers
 
@@ -228,7 +243,7 @@ scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
 ## Running things
 
 ```bash
-python -m pytest                    # 460 tests, no database
+python -m pytest                    # 471 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts

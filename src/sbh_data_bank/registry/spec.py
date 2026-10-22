@@ -62,6 +62,8 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from sbh_data_bank.transforms.values import MAX_TEXT_LENGTH
+
 __all__ = [
     "EVENT_DATE_AS_OF",
     "RESERVED_COLUMN_NAMES",
@@ -391,7 +393,9 @@ class ColumnSpec(BaseModel):
     for every other type - there is no inference anywhere in this system."""
 
     max_length: int | None = None
-    """Over-length values fail rather than truncate."""
+    """The width of this text column in the typed and curated layers, up to
+    ``MAX_TEXT_LENGTH``; ``transforms.values.TEXT_LENGTH`` when omitted.
+    Over-length values fail their row rather than truncate."""
 
     pii: PiiClass = PiiClass.NONE
     on_error: OnError = OnError.QUARANTINE
@@ -428,6 +432,12 @@ class ColumnSpec(BaseModel):
         # a no-op that looks like a constraint.
         if self.max_length is not None and self.type is not FieldType.TEXT:
             raise ValueError(f"column {self.target!r} is {self.type} and cannot have max_length")
+        # NVARCHAR(n) tops out at 4000; a wider declaration would be invalid
+        # DDL. Text longer than that is kept in the landed layer only.
+        if self.max_length is not None and not 1 <= self.max_length <= MAX_TEXT_LENGTH:
+            raise ValueError(
+                f"column {self.target!r}: max_length must be between 1 and {MAX_TEXT_LENGTH}"
+            )
         return self
 
 

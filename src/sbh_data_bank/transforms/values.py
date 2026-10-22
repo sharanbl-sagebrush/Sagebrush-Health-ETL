@@ -58,7 +58,9 @@ from typing import Generic, TypeVar
 
 __all__ = [
     "CURRENCY_PLACES",
+    "MAX_TEXT_LENGTH",
     "QUANTITY_PLACES",
+    "TEXT_LENGTH",
     "ParseResult",
     "parse_bool",
     "parse_currency",
@@ -80,6 +82,18 @@ T = TypeVar("T")
 #: TPA); every other numeric column in the nineteen sources fits.
 CURRENCY_PLACES = 4
 QUANTITY_PLACES = 6
+
+#: The width, in characters, of a text column in the typed and curated
+#: layers when the spec declares no ``max_length``. The parser applies the
+#: same limit (2026-10-22), so a value that would not fit quarantines its
+#: own row as ``TOO_LONG`` instead of failing the whole file at insert,
+#: which is what a 2,620-character WeInfuse patient note did to the first
+#: patients load ("String data, right truncation"). A spec that needs more
+#: declares ``max_length`` up to ``MAX_TEXT_LENGTH``, the widest
+#: ``NVARCHAR(n)`` SQL Server allows; the landed layer keeps the full text
+#: either way.
+TEXT_LENGTH = 1000
+MAX_TEXT_LENGTH = 4000
 
 #: Strings that mean "no value". Includes the literal ``"nan"`` that a pandas
 #: ``dtype=str`` read produces for an empty cell - the previous wholesaler

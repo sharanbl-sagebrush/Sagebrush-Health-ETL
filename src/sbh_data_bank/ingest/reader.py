@@ -53,6 +53,7 @@ from sbh_data_bank.registry.headers import normalize_header
 from sbh_data_bank.registry.spec import FieldType, OnError, PiiClass, ReadSpec
 from sbh_data_bank.transforms.ndc import NdcDirectory, normalize_ndc
 from sbh_data_bank.transforms.values import (
+    TEXT_LENGTH,
     ParseResult,
     parse_bool,
     parse_currency,
@@ -448,9 +449,11 @@ def _parse_cell(value: Any, column, ndc_directory: NdcDirectory | None) -> Parse
     """
     kind = column.type
     if kind is FieldType.TEXT:
-        # max_length lets a spec cap a text column; longer values fail rather
-        # than truncate, because truncating an identifier corrupts it.
-        return parse_text(value, max_length=column.max_length)
+        # The limit is the width of the typed column: the spec's max_length,
+        # or TEXT_LENGTH when it declares none. Longer values fail the row
+        # rather than truncate (truncating an identifier corrupts it) and
+        # rather than the file (which is what the insert would do).
+        return parse_text(value, max_length=column.max_length or TEXT_LENGTH)
     if kind is FieldType.INTEGER:
         return parse_int(value)
     if kind is FieldType.DECIMAL:

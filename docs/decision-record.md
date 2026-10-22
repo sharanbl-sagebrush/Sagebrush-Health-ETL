@@ -515,3 +515,59 @@ On the root today the list has thirteen entries, all expected: the six
 zip copies of folders already loaded, the Excel-to-table mapping
 workbook, and `Pricing file (LIVE).xlsx`, which has no spec and may want
 one.
+
+## A text value wider than its column fails the row, never the file (2026-10-22, developer)
+
+The first patients load failed on its sixth delivery: "String data, right
+truncation: length 2620 buffer 2000", a clinician's note of 2,620
+characters meeting the `notes` column that the DDL had made
+`NVARCHAR(1000)`. The parser only enforced a length when the spec declared
+`max_length`, so an undeclared text column could accept what its table
+could not hold, and the batched insert then failed the whole file. The
+default width now lives once, as `transforms.values.TEXT_LENGTH` (1000):
+the DDL is built from it and the parser applies it, so an over-long
+value quarantines its own row as `TOO_LONG` and the rest of the file
+loads. A spec that needs more declares `max_length`, up to 4000, the
+widest `NVARCHAR(n)` SQL Server has; patient notes declare 4000. Widening
+a live column to a declared width is the one alteration the migration
+makes, guarded and lossless; the landed layer keeps the full text
+regardless. Every text column of the fourteen sources loaded before this
+fits in 1000, or their loads would have failed the same way.
+
+## The second load (2026-10-22, engine author)
+
+The fifteen empty tables of the five changed specs were dropped (by the
+developer, through the permission prompt) and recreated by the migration,
+the Cardinal summary got its three tables, and the six sources were
+committed on the batched path. The two new upload folders, `10212026`
+(May to July 2026) and `10222026` (July to September 2026), are in the
+same load; both were downloaded on 2026-10-22, and their as-of dates come
+from the folder names (D5). Zero quarantined and zero conflicts in every
+source; read back from the database, landed equals the batches' landed
+counts, typed equals landed less the summary's three footer lines,
+curated equals inserted plus corrected, current equals inserted, and no
+identity has two current rows.
+
+| Source | Files | Inserted | Unchanged | Corrected |
+|---|---|---|---|---|
+| wholesaler.cardinal.invoice_summary | 3 + 1 dup, 6 detail workbooks recognised | 15,484 | 517 | 0 |
+| dispense.weinfuse.administered | 5 + 1 dup, 1 misfiled BuyBill copy recognised | 62,831 | 23,501 | 482 |
+| dispense.weinfuse.patients | 6 + 1 dup | 2,177 | 1,099 | 571 |
+| tpa.prxp.transactions | 5 + 1 dup | 7,509 | 521 | 1,444 |
+| ehr.curve.appointments | 6 + 1 dup | 351,351 | 10,513 | 0 |
+| dispense.weinfuse.buybill | 3 + 1 dup | 46,323 | 19,975 | 2 |
+
+Two refusals are on the record from the first pass and are correct
+history: the patients run stopped at its sixth file on the text width
+above (the five files before it had committed, each in its own
+transaction; the last two loaded after the column was widened), and the
+administered run refused the misfiled BuyBill copy as `UNRECOGNISED`
+before the spec learned to name it. Curve appointments took 23 minutes
+for 561,455 rows read. The corrections are of the kinds already known:
+patients hash per variant (340 between modules, the rest address and
+insurance fields that move), PRxP's time column moved (517) and its
+referral and status fields (the rest), administered's D14 remainder.
+
+PRxP's 2026-10 files, which quarantined 100% in the probe, loaded with
+zero quarantined once the column was text, and the hold that would have
+caught them (D17) was not needed for any file in this load.

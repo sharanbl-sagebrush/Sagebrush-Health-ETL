@@ -66,7 +66,7 @@ from, and ``tests/unit/test_commit.py`` holds the two against each other.
 from __future__ import annotations
 
 from sbh_data_bank.registry.spec import RESERVED_COLUMN_NAMES, FieldType, PiiClass, SourceSpec
-from sbh_data_bank.transforms.values import CURRENCY_PLACES, QUANTITY_PLACES
+from sbh_data_bank.transforms.values import CURRENCY_PLACES, QUANTITY_PLACES, TEXT_LENGTH
 
 __all__ = [
     "CURATED_LEDGER_COLUMNS",
@@ -476,10 +476,12 @@ def meta_statements() -> list[str]:
 #:   ``CURRENCY_PLACES``: the parser rounds to them, so a value never reaches
 #:   the store with more places than its column holds (D15).
 #:   CHAR(11)       NDC is always exactly 11 digits once normalized
-#:   NVARCHAR(1000) text without a declared max_length; wide enough for the
-#:                  longest observed free-text cell, narrow enough to index
+#:   NVARCHAR(1000) text without a declared max_length (``TEXT_LENGTH``, which
+#:                  the parser enforces too, so an over-long value quarantines
+#:                  its row instead of failing the insert); a declared
+#:                  max_length sets the width, up to 4000
 _SQL_TYPES = {
-    FieldType.TEXT: "NVARCHAR(1000)",
+    FieldType.TEXT: f"NVARCHAR({TEXT_LENGTH})",
     FieldType.INTEGER: "BIGINT",
     FieldType.DECIMAL: f"DECIMAL(38,{QUANTITY_PLACES})",
     FieldType.CURRENCY: f"DECIMAL(38,{CURRENCY_PLACES})",
@@ -537,9 +539,9 @@ def typed_sql_types(spec: SourceSpec) -> list[str]:
     for _target, kind, max_length in _all_targets(spec):
         sql_type = _SQL_TYPES[kind]
         if kind is FieldType.TEXT and max_length:
-            # A declared max_length narrows the text column; max(…, 1) guards
-            # against a zero that would be invalid DDL.
-            sql_type = f"NVARCHAR({max(max_length, 1)})"
+            # A declared max_length sets the text column's width (the model
+            # keeps it between 1 and MAX_TEXT_LENGTH).
+            sql_type = f"NVARCHAR({max_length})"
         types.append(sql_type)
     return types
 
@@ -600,6 +602,24 @@ def landed_statements(spec: SourceSpec) -> list[str]:
     return [_create(name, body)]
 
 
+def _widen_text(spec: SourceSpec, name: str) -> list[str]:
+    """A guarded ``ALTER COLUMN`` for each text column whose declared
+    ``max_length`` is wider than the default, so a width declared after the
+    table went live reaches it. Widening cannot lose a value, which is why
+    it is the one alteration the migration makes; a column is never
+    narrowed or retyped here. The guard compares ``sys.columns.max_length``
+    (bytes, two per character, -1 for MAX) and is a no-op once applied."""
+    statements = []
+    for target, kind, max_length in _all_targets(spec):
+        if kind is FieldType.TEXT and max_length and max_length > TEXT_LENGTH:
+            statements.append(
+                f"IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('{name}') "
+                f"AND name = '{target}' AND max_length BETWEEN 1 AND {2 * max_length - 1})\n"
+                f"    ALTER TABLE {name} ALTER COLUMN [{target}] NVARCHAR({max_length}) NULL"
+            )
+    return statements
+
+
 def typed_statements(spec: SourceSpec) -> list[str]:
     """The typed table for one source: the landed row parsed per the spec.
 
@@ -631,6 +651,7 @@ def typed_statements(spec: SourceSpec) -> list[str]:
         _create(name, body),
         # "Has this exact content been typed before" - the re-delivery check.
         _index(f"ix_typed_{short}_hash", name, "(tenant_id, row_hash)"),
+        *_widen_text(spec, name),
     ]
 
 
@@ -692,6 +713,7 @@ def curated_statements(spec: SourceSpec) -> list[str]:
                 "INCLUDE (identity_hash, occurrence, superseded_by, as_of)",
             )
         )
+    statements.extend(_widen_text(spec, name))
     return statements
 
 

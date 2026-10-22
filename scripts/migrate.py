@@ -47,7 +47,9 @@ What it builds, in order
 Why idempotent
     Every statement is wrapped in ``IF OBJECT_ID(...) IS NULL`` or
     ``IF NOT EXISTS``, so the script can be re-run after a spec gains a
-    column and it creates only what is missing. It never drops or alters a
+    column and it creates only what is missing. Apart from widening a text
+    column to a declared ``max_length``, which cannot lose a value, it
+    never drops or alters a
     column that exists; that is a decision about rows on an append-only
     ledger, not a migration.
 
