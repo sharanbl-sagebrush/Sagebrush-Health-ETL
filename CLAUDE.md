@@ -59,8 +59,9 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
 - Done 2026-10-22, later: **every source is in Azure**. The five changed
   specs had their empty tables recreated and loaded, the Cardinal summary
   loaded as its own source (D16), and the two new upload folders (May to
-  September 2026) went in with them: six sources, zero quarantined, zero
-  conflicts, read back and balanced. Three decisions came out of the new
+  September 2026) went in with them, for all eighteen sources that had
+  them: zero refused, zero quarantined, zero conflicts, the six changed
+  sources read back and balanced. Three decisions came out of the new
   files: D16, D17 (a file past its quarantine rate is held) and the text
   width rule below. Numbers in `docs/decision-record.md`, "The second load"
 - **Not yet built**: the acquire step, alerting, re-running typed from

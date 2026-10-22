@@ -571,3 +571,33 @@ referral and status fields (the rest), administered's D14 remainder.
 PRxP's 2026-10 files, which quarantined 100% in the probe, loaded with
 zero quarantined once the column was text, and the hold that would have
 caught them (D17) was not needed for any file in this load.
+
+**The new folders for the other twelve sources** went in next, in the
+same way: two deliveries each (four for Pharmaforce, one per site), every
+earlier delivery recorded as `DUPLICATE_FILE`, the two new Cardinal
+summary workbooks recognised and handed to the summary source. Zero
+refused, zero quarantined, zero conflicts.
+
+| Source | New files | Inserted | Unchanged | Corrected |
+|---|---|---|---|---|
+| wholesaler.mckesson.invoice | 2 | 684 | 643 | 8 |
+| wholesaler.cardinal.invoice | 2 (+ 2 summaries recognised) | 1,546 | 1,132 | 0 |
+| wholesaler.abc.purchases | 2 | 572 | 184 | 130 |
+| tpa.wellpartner.invoices | 2 | 609 | 456 | 0 |
+| tpa.pharmaforce.claims | 4 | 11,986 | 6,152 | 139 |
+| ehr.athena.encounters | 2 | 3,465 | 1,975 | 0 |
+| ehr.athena.prescriptions | 2 | 10,619 | 5,235 | 0 |
+| ehr.athena.eligibility | 2 | 40 | 891 | 6 |
+| ehr.allscripts.erx | 2 | 17,574 | 11,063 | 0 |
+| ehr.curve.monthly_services | 2 | 23,833 | 6,582 | 8,625 |
+| tpa.wellpartner.claims | 2 | 1,904 | 934 | 558 |
+| wholesaler.mckesson.custom | 2 | 360 | 275 | 5 |
+
+One number to look at: the May-July Curve monthly services file corrected
+8,621 of its 20,121 rows against the March-June delivery, while the
+July-September file corrected 4 of 18,919 against May-July. That is the
+same shape as the February-to-March result above (columns that come and
+go between exports), and the same question for Curve. Monthly Payments
+and the wholesaler accounts register had no new files. Every spec's
+deliveries are now in `sbh_data_bank`, in as-of order, through the end of
+September 2026.
