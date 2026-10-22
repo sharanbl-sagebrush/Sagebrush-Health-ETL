@@ -48,7 +48,9 @@ of done, "Behaviour under replay").
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import zipfile
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -160,6 +162,10 @@ class CommitResult:
     outcomes: Outcomes | None = None
     """The rule's counters when it ran (LOADED or HELD_CONFLICT)."""
     warnings: list[str] = field(default_factory=list)
+    rows_read: int = 0
+    quarantined: int = 0
+    """Rows the loader read and rows it quarantined, from the batch, so a
+    caller can judge a quarantine rate without the store."""
 
     @property
     def committed(self) -> bool:
@@ -172,7 +178,8 @@ class CommitResult:
             o = self.outcomes
             parts.append(
                 f"inserted={o.inserted} unchanged={o.unchanged} corrected={o.corrected} "
-                f"late={o.late} conflict={o.conflict} vanished={o.vanished}"
+                f"late={o.late} conflict={o.conflict} vanished={o.vanished} "
+                f"quarantined={self.quarantined}/{self.rows_read}"
             )
         if self.warnings:
             parts.append("warnings: " + "; ".join(self.warnings))
@@ -278,34 +285,51 @@ class CommitEngine:
         root: Path | None = None,
         operator_date: date | None = None,
         delivery: str | None = None,
+        member: str | None = None,
     ) -> list[CommitResult]:
         """Load one file from disk and commit it: one result per CSV, or per
-        worksheet of a workbook.
+        worksheet of a workbook, or for one CSV ``member`` of a zip archive.
 
         The as-of is resolved by the D5 chain (``root`` bounds the folder
-        search); a file with none is recorded as ``AS_OF_UNAVAILABLE``.
-        ``delivery`` labels the drop or upload the file arrived in; it
-        defaults to the file's folder path below ``root`` when ``root`` is
-        given and the file is not directly under it.
+        search; a zip member's own name is what the filename step reads); a
+        file with none is recorded as ``AS_OF_UNAVAILABLE``. ``delivery``
+        labels the drop or upload the file arrived in; it defaults to the
+        file's folder path below ``root`` (the archive's path, for a
+        member) when ``root`` is given and the file is not directly under it.
         """
+        filename = Path(member).name if member else path.name
         as_of: AsOf | None = None
         problem = ""
         try:
-            as_of = resolve_as_of(path, spec, operator_date=operator_date, root=root)
+            as_of = resolve_as_of(
+                path, spec, filename=filename, operator_date=operator_date, root=root
+            )
         except AsOfUnavailableError as exc:
             problem = str(exc)
-        if delivery is None and root is not None and path.parent != root:
-            delivery = path.parent.relative_to(root).as_posix()
-        if path.suffix.lower() in _WORKBOOK_SUFFIXES:
+        if delivery is None and root is not None:
+            if member is not None:
+                delivery = path.relative_to(root).as_posix()
+            elif path.parent != root:
+                delivery = path.parent.relative_to(root).as_posix()
+        if member is not None:
+            with zipfile.ZipFile(path) as archive:
+                data = archive.read(member)
+            loads = [load_file(io.BytesIO(data), spec, filename=filename)]
+            size = len(data)
+            fallback_hash = hashlib.sha256(data).hexdigest()
+        elif path.suffix.lower() in _WORKBOOK_SUFFIXES:
             loads = load_workbook(path, spec)
+            size = path.stat().st_size
+            fallback_hash = None
         else:
             loads = [load_file(path, spec)]
-        size = path.stat().st_size
+            size = path.stat().st_size
+            fallback_hash = None
         for load in loads:
             if load.file_hash is None:
                 # An unrecognised file is not hashed by the loader; it is
                 # still registered, so the attempt is on the record.
-                load.file_hash = file_sha256(path)
+                load.file_hash = fallback_hash or file_sha256(path)
         return [
             self.commit_load(
                 spec,
@@ -656,6 +680,8 @@ class CommitEngine:
             source_file_id=batch.source_file_id,
             filename=load.filename if load.sheet is None else f"{load.filename} [{load.sheet}]",
             warnings=list(warnings or []),
+            rows_read=batch.rows_read,
+            quarantined=batch.rows_quarantined,
         )
 
 

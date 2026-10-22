@@ -45,9 +45,21 @@ expected_cadence_days: 7
 # Routing hint only: case-insensitive regexes tried against the filename. What
 # a file IS is decided by the header fingerprint in the variant detectors
 # below, so a renamed file still loads and a misnamed one does not load wrongly.
+# The first pattern refuses anything with "buybill" anywhere in the name:
+# the BuyBill report is named "WeInfuse_BuyBill-AdministeredDrugsReport" and
+# belongs to dispense.weinfuse.buybill. (Found by the backfill dry run,
+# 2026-10-21: a lookahead placed after "administereddrugs" let them through.)
 filename_patterns:
-  - 'weinfuse.*administereddrugs(?!.*buybill)'
-  - 'weinfuse_administered'
+  - '^(?!.*buybill).*weinfuse.*administereddrugs'
+  - '^(?!.*buybill).*weinfuse_administered'
+
+# D14 (2026-10-21): the vendor's creation stamp is landed but left out of the
+# row hash. It is text with no datetime type to normalise it, and the same
+# instant arrives as `m/d/Y H:M` from one export path and `Y-m-d H:M:S` (with
+# or without an offset) from another, so between the first two deliveries
+# 19,643 of 19,644 "corrections" were the stamp's format and nothing else
+# (layer walk). A row whose only change is this stamp is now `unchanged`.
+row_hash_exclude: [vendor_created_at, vendor_created_date]
 
 # Natural key: the target columns that identify one business row. Identity
 # is this key plus an occurrence number; a newer delivery with a different
@@ -241,9 +253,10 @@ variants:
       - target: administration_time
         sources: ['Appointment Time', 'Time']
         type: text
-      # System timestamp, landed as text rather than parsed; not used for period logic.
-      - target: vendor_created_at
-        sources: ['Created Date', 'Created At']
+      # Order creation stamp of the new module, landed as text; a different
+      # timestamp from the legacy `Created At`, so its own target.
+      - target: vendor_created_date
+        sources: ['Created Date']
         type: text
       - target: date_of_birth
         sources: ['Date of Birth Date']
@@ -405,7 +418,8 @@ variants:
       - target: administration_time
         sources: ['Time', 'Appointment Time']
         type: text
-      # System timestamp, landed as text rather than parsed; not used for period logic.
+      # Record creation stamp of the legacy export, landed as text rather
+      # than parsed; not used for period logic.
       - target: vendor_created_at
-        sources: ['Created At', 'Created Date']
+        sources: ['Created At']
         type: text

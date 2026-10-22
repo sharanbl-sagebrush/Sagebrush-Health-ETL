@@ -128,8 +128,10 @@ def filename_window(name: str) -> tuple[date | None, date | None]:
 
     Shapes seen on real files, all handled: ``01012026-04052026``,
     ``Jan012025-Feb042026``, ``Jan012025_Feb042026``, ``as of 03062026``,
-    ``upto 07212026``, ``2025-06`` (a month). The end date is also the as-of
-    fallback for CSV files, which carry no stamp of their own.
+    ``upto 07212026``, a lone ``Feb042026`` (a snapshot's extract date, the
+    end of its window; added 2026-10-21 for Athena eligibility), ``2025-06``
+    (a month). The end date is also the as-of fallback for CSV files, which
+    carry no stamp of their own.
     """
     m = re.search(r"(\d{8})-(\d{8})", name)
     if m:
@@ -147,6 +149,12 @@ def filename_window(name: str) -> tuple[date | None, date | None]:
     m = re.search(r"(?:as of|upto)\s*(\d{8})", name, re.IGNORECASE)
     if m:
         return None, _mdy(m.group(1))
+    m = re.search(r"(?<![A-Za-z])([A-Za-z]{3})(\d{2})(\d{4})(?!\d)", name)
+    if m and m.group(1).lower() in _MONTHS:
+        try:
+            return None, date(int(m.group(3)), _MONTHS[m.group(1).lower()], int(m.group(2)))
+        except ValueError:
+            pass
     m = re.search(r"(\d{4})-(\d{2})(?!\d)", name)
     if m:
         y, mo = int(m.group(1)), int(m.group(2))

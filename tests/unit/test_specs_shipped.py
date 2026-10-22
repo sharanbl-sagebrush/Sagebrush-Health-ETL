@@ -206,6 +206,27 @@ class TestAllSpecsAreSound:
                         )
         assert not accepted, chr(10).join(accepted)
 
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            ("WeInfuse AdministeredDrugsReport Jan012025-Feb052026.csv",
+             {"dispense.weinfuse.administered"}),
+            ("WeInfuse_AdministeredDrugsReport 03012026-06102026.xlsx",
+             {"dispense.weinfuse.administered"}),
+            ("WeInfuse_BuyBill-AdministeredDrugsReport 01012023-03062026.csv",
+             {"dispense.weinfuse.buybill"}),
+            ("WeInfuse_BuyBill-AdministeredDrugsReport Jan012025-Feb052026.csv",
+             {"dispense.weinfuse.buybill"}),
+            ("Athena_Patient Eligibility_Feb042026.csv", {"ehr.athena.eligibility"}),
+        ],
+    )  # fmt: skip
+    def test_real_filenames_route_to_exactly_one_spec(self, registry, filename, expected):
+        """The filename is a routing hint, but a hint that sends a file to two
+        specs costs a recorded UNRECOGNISED attempt on the wrong one every
+        time. The backfill dry run (2026-10-21) found every BuyBill file
+        routed to the administered spec as well."""
+        assert {s.key for s in registry if s.matches_filename(filename)} == expected
+
     def test_a_keyless_spec_documents_why(self, registry):
         """An empty natural key is legitimate - several of these feeds are
         denormalised report extracts where no subset of columns identifies a

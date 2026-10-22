@@ -16,6 +16,7 @@ tested without a server.
 from __future__ import annotations
 
 import re
+import zipfile
 from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from sbh_data_bank.commit.discover import Found, discover, in_as_of_order
 from sbh_data_bank.commit.engine import CommitEngine, CommitOutcome, CommitResult
 from sbh_data_bank.commit.memory import MemoryStore
 from sbh_data_bank.commit.records import CurrentQuery
@@ -321,6 +323,67 @@ class TestRefusals:
         assert result.outcome == LoadOutcome.UNRECOGNISED
         assert store.landed[spec.key] == []
         assert result.source_file_id in store.source_files
+
+
+class TestZipAndDiscovery:
+    """Monthly Payments ships forty months as CSV members of one zip; a
+    backfill must find them, order them and commit each as its own file."""
+
+    def _zip(self, folder: Path, name: str, members: dict[str, str]) -> Path:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / name
+        with zipfile.ZipFile(path, "w") as archive:
+            for member, body in members.items():
+                archive.writestr(member, body)
+        return path
+
+    def test_a_zip_member_commits_like_a_file(self, tmp_path, spec):
+        store = MemoryStore()
+        engine = _engine(store)
+        path = self._zip(tmp_path / "drop", "t.zip", {JAN: "\n".join([HEADER, A_X, B_X]) + "\n"})
+        (result,) = engine.commit_path(spec, path, run_id="run1", root=tmp_path, member=JAN)
+        assert result.outcome == CommitOutcome.LOADED
+        assert result.outcomes.inserted == 2
+        found = store.source_files[result.source_file_id]
+        assert found.file_name == JAN
+        assert found.delivery == "drop/t.zip"
+        assert found.as_of == date(2026, 1, 31)
+        assert found.file_bytes == len(HEADER) + len(A_X) + len(B_X) + 3
+
+    def test_two_members_with_the_same_bytes_are_one_file(self, tmp_path, spec):
+        engine = _engine(MemoryStore())
+        body = "\n".join([HEADER, A_X]) + "\n"
+        path = self._zip(tmp_path, "t.zip", {JAN: body, "copy/" + JAN: body})
+        (first,) = engine.commit_path(spec, path, run_id="run1", root=tmp_path, member=JAN)
+        (again,) = engine.commit_path(
+            spec, path, run_id="run1", root=tmp_path, member="copy/" + JAN
+        )
+        assert (first.outcome, again.outcome) == (
+            CommitOutcome.LOADED,
+            CommitOutcome.DUPLICATE_FILE,
+        )
+
+    def test_discover_finds_files_and_zip_members_and_skips_test_folders(self, tmp_path, spec):
+        _write(tmp_path / "2026-01-31", JAN, A_X)
+        _write(tmp_path / "Sagebrush ETL Test Files", JAN, A_X)
+        _write(tmp_path, "other.csv", A_X)
+        self._zip(tmp_path, "t.zip", {FEB: "", "readme.txt": ""})
+        self._zip(tmp_path, "unrelated.zip", {JAN: ""})
+        found = discover(_spec(filename_patterns=["^t"]), tmp_path)
+        assert [f.display for f in found] == [JAN, f"t.zip::{FEB}"]
+        assert found[1].filename == FEB
+
+    def test_in_as_of_order_puts_the_oldest_first_and_the_undated_last(self, tmp_path, spec):
+        late = _write(tmp_path, FEB, A_X)
+        early = _write(tmp_path, JAN, A_X)
+        undated = _write(tmp_path, "t_nodate.csv", A_X)
+        ordered = in_as_of_order(spec, [Found(undated), Found(late), Found(early)], tmp_path)
+        assert [f.path.name for _, f in ordered] == [JAN, FEB, "t_nodate.csv"]
+        assert [a.value if a else None for a, _ in ordered] == [
+            date(2026, 1, 31),
+            date(2026, 2, 28),
+            None,
+        ]
 
 
 class TestQuarantineAndFindings:

@@ -120,6 +120,13 @@ variants:
         sources: ['Patient Date Of Birth']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        pii: direct
+      # Arrived unannounced in the third delivery, populated on 1,071 of 1,183
+      # rows; declared so it never lands without a PII class.
+      - target: patient_email
+        sources: ['Patient Email']
+        type: text
+        pii: direct
       # type ndc: normalised to the 11-digit form; see transforms/ndc.py.
       - target: ndc
         sources: ['NDC']
@@ -161,9 +168,11 @@ variants:
       - target: patient_id
         sources: ['Patient ID']
         type: text
+        pii: join_key
       - target: patient_external_id
         sources: ['Patient External ID']
         type: text
+        pii: join_key
       - target: patient_delivery_address
         sources: ['Patient Delivery Address']
         type: text
@@ -240,6 +249,11 @@ variants:
         sources: ['Waiting for Check DateTime']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+      # The third delivery split `Waiting for Check DateTime` into the date
+      # above plus this time-of-day; landed as text (no time type).
+      - target: waiting_for_check_time
+        sources: ['Waiting for Check Time']
+        type: text
       - target: completed_date
         sources: ['Completed Date']
         type: date
@@ -313,8 +327,10 @@ variants:
       - target: patient_source_list
         sources: ['Patient Source List']
         type: text
+      # Renamed to `Referral Type List` in the third delivery; the values
+      # agree on 402 of 402 shared rows (layer walk).
       - target: referral_type
-        sources: ['Referral Type']
+        sources: ['Referral Type', 'Referral Type List']
         type: text
       - target: patient_category
         sources: ['Patient Category']
@@ -355,39 +371,45 @@ variants:
       - target: tertiary_payer_plan_group_code
         sources: ['Tertiary Payer Plan Group Code']
         type: text
-      # The paid-amount, cost and price columns below are landed as TEXT, not
-      # currency, so they are not control totals and carry no Decimal guarantee.
-      # Only `total_amount_collected` is parsed as money. Retype these after
-      # sampling the values (CLAUDE.md: type by sampling values, never by name).
+      # Money, typed by sampling (layer walk, 2026-10-15): native numeric cells
+      # in every delivery, no symbol text, no negatives, and patient + primary
+      # + secondary + tertiary paid equals Total Amount Collected on 7,327 of
+      # 7,327 rows. WAC and AWP are reference prices with 3-4 decimals, so
+      # currency without a control total.
       - target: patient_paid_amount
         sources: ['Patient Paid Amount']
-        type: text
+        type: currency
+        control_total: true
       - target: primary_paid_amount
         sources: ['Primary Paid Amount']
-        type: text
+        type: currency
+        control_total: true
       - target: secondary_paid_amount
         sources: ['Secondary Paid Amount']
-        type: text
+        type: currency
+        control_total: true
       - target: tertiary_paid_amount
         sources: ['Tertiary Paid Amount']
-        type: text
+        type: currency
+        control_total: true
       - target: ce_responsibility
         sources: ['CE Responsibility']
-        type: text
-      # The one money column parsed as currency, and the only money control total.
+        type: currency
+        control_total: true
       - target: total_amount_collected
         sources: ['Total Amount Collected']
         type: currency
         control_total: true
       - target: acquisition_cost
         sources: ['Acquisition Cost']
-        type: text
+        type: currency
+        control_total: true
       - target: wac
         sources: ['WAC']
-        type: text
+        type: currency
       - target: awp
         sources: ['AWP']
-        type: text
+        type: currency
       - target: total_rx_count
         sources: ['Total Rx Count']
         type: text

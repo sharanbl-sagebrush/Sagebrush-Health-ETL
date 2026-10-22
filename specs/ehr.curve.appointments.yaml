@@ -296,7 +296,8 @@ variants:
       - target: appointment_datetime
         sources: ['Appointment_DateTime']
         type: date
-        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
       - target: duration
         sources: ['Duration']
         type: text
@@ -306,21 +307,24 @@ variants:
       - target: datetime_scheduled
         sources: ['DateTime_Scheduled']
         type: date
-        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
       - target: scheduled_by
         sources: ['Scheduled_By']
         type: text
       - target: datetime_confirmed
         sources: ['DateTime_Confirmed']
         type: date
-        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
       - target: confirmed_by
         sources: ['Confirmed_By']
         type: text
       - target: datetime_cancelled
         sources: ['DateTime_Cancelled']
         type: date
-        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
       - target: cancellation_reason
         sources: ['Cancellation_Reason']
         type: text
@@ -330,7 +334,8 @@ variants:
       - target: datetime_acknowledged
         sources: ['DateTime_Acknowledged']
         type: date
-        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
       - target: acknowledged_by
         sources: ['Acknowledged_By']
         type: text
@@ -340,7 +345,8 @@ variants:
       - target: datetime_bumped
         sources: ['DateTime_Bumped']
         type: date
-        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y']
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
         description: >
           Unpopulated in all deliveries so far. Typed to match the
           other DateTime_ columns on the reasonable assumption Curve writes

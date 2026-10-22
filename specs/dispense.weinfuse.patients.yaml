@@ -123,10 +123,18 @@ variants:
       # carry a time part. Contrast `date_of_birth` below, which is a plain date.
       # Declaring the wrong shape quarantined all 1,918 rows on the spec's first run
       # (docs/data-findings.md, section 11).
+      # The new module carries no `Last Updated`; its `Created Date` is the
+      # record creation date and binding it here made every known patient
+      # look edited (layer walk). It lands under its own target below and
+      # `last_updated` stays null for this variant.
       - target: last_updated
-        sources: ['Created Date', 'Last Updated']
+        sources: ['Last Updated']
         type: date
         date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
+      - target: vendor_created_date
+        sources: ['Created Date']
+        type: date
+        date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']
       - target: patient_name
         sources: ['Patient Name']
         type: text
@@ -324,7 +332,7 @@ variants:
       # Declaring the wrong shape quarantined all 1,918 rows on the spec's first run
       # (docs/data-findings.md, section 11).
       - target: last_updated
-        sources: ['Last Updated', 'Created Date']
+        sources: ['Last Updated']
         type: date
         date_formats: ['%Y-%m-%d %H:%M:%S UTC', '%Y-%m-%d %H:%M:%S']
       - target: primary_insurance_id

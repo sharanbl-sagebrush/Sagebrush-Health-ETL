@@ -98,6 +98,7 @@ class TestFilenameWindow:
             ("Master COGS List as of 03062026.xlsx", (None, date(2026, 3, 6))),
             ("Monthly Payments 2026-07 upto 07212026.csv", (None, date(2026, 7, 21))),
             ("Monthly Payments 2025-06.csv", (date(2025, 6, 1), date(2025, 6, 30))),
+            ("Athena_Patient Eligibility_Feb042026.csv", (None, date(2026, 2, 4))),
             ("Athena_Patient Eligibility.csv", (None, None)),
         ],
     )  # fmt: skip

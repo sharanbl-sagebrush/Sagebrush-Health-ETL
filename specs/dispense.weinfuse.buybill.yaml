@@ -45,6 +45,14 @@ expected_cadence_days: null
 filename_patterns:
   - 'weinfuse.*buybill'
 
+# D14 (2026-10-21): the vendor's creation stamp is landed but left out of the
+# row hash. It is text with no datetime type to normalise it, and the same
+# instant arrives as `m/d/Y H:M` from one export path and `Y-m-d H:M:S` (with
+# or without an offset) from another, so between the first two deliveries
+# all 17,088 "corrections" were the stamp's format or the `date` column's format and nothing else
+# (layer walk). A row whose only change is this stamp is now `unchanged`.
+row_hash_exclude: [vendor_created_at]
+
 # Natural key: the target columns that identify one business row (same key,
 # same hash on a newer delivery = unchanged; new hash = correction).
 # Evidence: (Order ID, Inventory Item ID) was probed unique across all 45,013
@@ -231,9 +239,13 @@ variants:
       # Landed as text, not parsed to a date, unlike `administration_date` in the
       # Administered spec. Nothing downstream is built on it yet; retype after
       # sampling the values if period logic ever needs it.
+      # US m/d/Y in the first delivery, ISO in the later two: the same day
+      # hashed differently as text and produced 17,088 false corrections
+      # (layer walk). Typed as a date the deliveries agree on every shared row.
       - target: date
         sources: ['Date']
-        type: text
+        type: date
+        date_formats: ['%Y-%m-%d', '%m/%d/%Y']
       - target: time
         sources: ['Time']
         type: text
