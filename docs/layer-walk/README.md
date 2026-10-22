@@ -251,3 +251,25 @@ footer line, as the typed "read" column does not. Reports regenerated so
 far: both McKesson sources, after their specs were declared (see
 `docs/decision-record.md`, the two 2026-10-20 sections). The other
 seventeen reports are from 2026-10-15 and predate the tool change.
+
+## Status 2026-10-22
+
+The backfill has run: fourteen sources are in `sbh_data_bank`, every
+delivery in as-of order, zero quarantined, zero conflicts (the table and
+the decisions it forced are in `docs/decision-record.md`, "The backfill").
+The five sources whose specs changed after the first migration (Curve
+appointments, the three WeInfuse specs, PRxP) load as soon as their empty
+tables are recreated; their dry runs are clean.
+
+Of the spec fixes in the table above, done: the Curve appointments
+timestamp formats (317,804 rows typed, where three files had quarantined
+in full), every PRxP item, the BuyBill `date` type, the Administered
+filename pattern and the `Created Date` split, and the Patients rebind
+(as `vendor_created_date`; D13 forbids the ledger name). The Athena
+eligibility `Feb042026` file binds to the existing spec and now has an
+as-of (a lone date in a filename). Not done, and visible in the load as
+corrections that are not corrections: the WellPartner claims and Curve
+monthly services typing refinements, and the stale notes on Cardinal,
+ABC, Athena and Monthly Payments. Patients still hashes per variant (the
+new module carries far fewer columns), so 340 of its 3,405 rows show as
+corrected between modules.

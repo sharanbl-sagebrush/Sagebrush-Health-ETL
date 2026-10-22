@@ -320,3 +320,117 @@ rename costs nothing. The migration then applied cleanly: 153 statements,
 
 Also decided the same day: the development env file is `.env` in the
 repository root, git-ignored, rather than a file outside the repository.
+
+## D14. A vendor's creation stamp is stored but not hashed (2026-10-21, developer: implement)
+
+WeInfuse re-formats `Created At` on every export (a timezone suffix one
+month, none the next), so the second Administered delivery "corrected"
+19,643 of 19,644 rows that had not changed, and BuyBill 17,088. A spec now
+lists such columns under `row_hash_exclude`: the value lands and is typed
+and stored, and a difference in it alone is not a correction. Administered
+corrections fell to 414 and BuyBill to 2 in the dry runs. The same
+exclusion covers `vendor_created_date` in the new reporting module.
+
+## A lone date in a filename is its as-of (2026-10-21, developer)
+
+Athena's eligibility re-pull arrived as `..._Feb042026.xlsx`, one date and
+no window, and was refused for having no as-of. The D5 filename step now
+reads a lone `MonDDYYYY` as the file's end date, after the window and
+"as of"/"upto" forms. The file then loaded as its own delivery.
+
+## D15. A number is rounded to its column's declared scale before it is hashed (2026-10-21, developer)
+
+The batched insert path refused the first WellPartner claims workbook:
+"Converting decimal loses precision". `Est Wholesale Cost` carries up to
+seven decimal places in every WellPartner delivery (a unit cost times a
+quantity the TPA never rounds) and the ledger holds money as
+`DECIMAL(38,4)`. The row-at-a-time path would have let SQL Server round
+silently, with the row hash computed over the unrounded value, so a hash
+recomputed from the typed table could never have matched.
+
+The two scales live once in `transforms.values` (`CURRENCY_PLACES = 4`,
+`QUANTITY_PLACES = 6`), the DDL is built from them, and `parse_currency`
+and `parse_decimal` round half-up to them only when a value has more
+places. A value that fits is untouched, so no hash already in the ledger
+changes. `parse_int` keeps the unrounded number so `3.0000001` still
+fails. The delivered text stays in full in the landed layer. Surveyed
+before deciding: every numeric column of every loaded source (landed text
+in Azure) and of the five sources not yet loaded; only this one column
+exceeds its scale.
+
+## The backfill (2026-10-21 and 22, engine author; load order and outcomes reported to the developer)
+
+`scripts/backfill.py` commits every delivery of every source in the
+layer-walk load order, each source in as-of order, each file in its own
+transaction; `commit/discover.py` finds the files under the extract root,
+including the members of the Monthly Payments zip. `--dry-run` replays in
+memory, `--only`/`--skip` select sources, `--operator-date` supplies the
+last D5 fallback. A source whose only non-LOADED outcomes are
+`DUPLICATE_FILE` and `RECOGNISED_NOT_LOADED` counts as loaded.
+
+**The batched insert path** (`--fast`, `SqlStore(fast_executemany=True)`).
+The row-at-a-time path sent one round trip per row and took over ten
+minutes on 5,482 Cardinal rows. With `fast_executemany` pyodbc guesses
+parameter types from the data and has rounded DECIMAL scale and mis-sized
+NVARCHAR(MAX) before, so the store declares every parameter from the DDL
+through `setinputsizes` and clears the declaration after each batch.
+Proved on Azure against ABC purchases before anything else used it: 276
+checks (row counts per layer, sums and non-null counts of every numeric
+column, date ranges, maximum text lengths in landed and typed), 0
+mismatches. Rows go in slices of 5,000 inside the one transaction after
+Azure closed the connection partway through a single 200,000-row Curve
+batch; a transient fault gets one retry of the same file on a fresh
+connection, and a rollback that cannot be sent closes the handle instead
+of hiding the original error.
+
+**Loaded** to `sbh_data_bank`, zero quarantined and zero conflicts in
+every source; engine counters identical to the in-memory dry runs:
+
+| Source | Files | Inserted | Unchanged | Corrected |
+|---|---|---|---|---|
+| wholesaler.mckesson.invoice | 4 + 1 dup | 7,124 | 943 | 11 |
+| wholesaler.cardinal.invoice | 3 + 2 summary sheets | 21,469 | 7,396 | 0 |
+| wholesaler.abc.purchases | 4 | 5,076 | 970 | 934 |
+| tpa.wellpartner.invoices | 4 | 8,186 | 1,186 | 0 |
+| tpa.pharmaforce.claims | 4 | 205,245 | 29,470 | 624 |
+| ehr.athena.encounters | 4 | 21,351 | 13,489 | 0 |
+| ehr.athena.prescriptions | 4 | 35,671 | 11,665 | 0 |
+| ehr.athena.eligibility | 5 | 24,155 | 68,408 | 940 |
+| ehr.allscripts.erx | 4 | 149,601 | 72,728 | 0 |
+| reference.wholesaler_accounts | 6 sheets | 247 | 0 | 0 |
+| ehr.curve.monthly_services | 3 + 2 dup | 168,884 | 1,961 | 100,265 |
+| finance.monthly_payments | 40 | 1,287,742 | 0 | 0 |
+| wholesaler.mckesson.custom | 4 + 1 dup | 6,415 | 943 | 11 |
+| tpa.wellpartner.claims | 4 + 1 dup | 43,802 | 96 | 3,431 |
+
+Two `meta.run` rows are left unfinished by the runs that were stopped or
+crashed before the slicing fix (`run_1792634161180_000000_6fd75138`,
+`run_1792635718842_000000_bc591fad`); every batch under them is complete.
+
+**Corrections that are not corrections.** WellPartner's 3,431 corrected
+rows are mostly genuine (allocation quantity and last-modified stamp move
+as replenishment proceeds) but `qty_allocated`, `gpi` and
+`order_attempts` are typed as text and read differently from a CSV and a
+workbook, which the layer-walk README already lists as spec work. The
+Curve monthly services result is in the next section.
+
+## Curve monthly services: why the second delivery corrected every row (2026-10-22, engine author; a finding, not a change)
+
+The March extract superseded all 81,759 rows of the February extract as
+`corrected`. Compared in Python over the typed values the row hash sees:
+three patient address columns (`patstreet1`, `patcity`, `patstate`) are
+empty on every row of the February file and populated on every row of
+the March file; `patstreet2` on 17,176. Nothing else differs on more than
+7% of rows, and those are the changes one expects between two pulls of a
+billing report (`totpmt`, `totadj`, `billdate`, carrier assignments).
+The rule did what D6 says: a landed column changed, so the row is a new
+version and the old one is history. No engine or spec change. It is worth
+asking Curve whether the February pull was taken with addresses
+suppressed, because a report whose columns come and go per export will
+keep producing corrections that mean nothing for reconciliation.
+
+A note on method: a column-by-column comparison written in T-SQL
+undercounts null-against-value differences (three-valued logic turns the
+inequality into UNKNOWN), which is why the database check found no
+column and the Python one found three. Compare in Python, over the values
+the hash saw.

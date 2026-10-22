@@ -27,7 +27,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   layered ones plus `meta` and `stg`. The 19 `raw.*` tables predate the
   layered decision, were never written to, and are left alone until dropped
   explicitly. Re-running the migration is a no-op
-- 438 tests, no database required to run them
+- 460 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -45,8 +45,15 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   the replay exactly: 7,124 current rows, 11 corrected, extended price
   23,305,296.76, 15 duplicate findings, 0 quarantined, no identity with two
   current rows
-- **Not yet built**: the historical backfill (every file, in as-of order),
-  the acquire step, the quarantine-rate threshold, alerting
+- Done 2026-10-22: **the backfill**. `scripts/backfill.py` committed every
+  delivery of fourteen sources in as-of order on the batched insert path
+  (`--fast`, every parameter declared from the DDL, proved with 276
+  read-back checks and 0 mismatches). Zero quarantined, zero conflicts,
+  engine counters identical to the dry runs. Results and the two decisions
+  it forced (D14 creation stamps outside the hash, D15 declared scale) are
+  in `docs/decision-record.md`
+- **Not yet built**: the acquire step, the quarantine-rate threshold,
+  alerting, re-running typed from landed in the database
 
 ## Rules that came from real defects
 
@@ -89,6 +96,17 @@ have been strings.
 Payments and Curve Monthly Services. The column is located so drift checks see
 it, and no value reaches any layer, quarantine, or a log — including when
 another column on the same row fails.
+
+**A number is rounded to its column's declared scale before it is hashed.**
+WellPartner's estimated wholesale cost carries seven decimal places; the
+ledger holds money at four. The batched insert refused it (2026-10-21), where
+the row-at-a-time path would have let SQL Server round silently behind a hash
+of the unrounded value. The scales live once in `transforms.values`, the DDL
+is built from them, and a value that already fits is never touched (D15).
+
+**A vendor's creation stamp is stored but not hashed.** WeInfuse re-formats
+`Created At` on every export; without `row_hash_exclude` the second delivery
+corrected 19,643 of 19,644 unchanged rows (D14).
 
 ## Storage layers
 
@@ -186,13 +204,13 @@ src/sbh_data_bank/
 specs/        19 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
-              trace_file, commit_file
+              trace_file, commit_file, backfill
 ```
 
 ## Running things
 
 ```bash
-python -m pytest                    # 438 tests, no database
+python -m pytest                    # 460 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts
@@ -200,7 +218,13 @@ python scripts/audit_files.py       # structural audit of every file
 python scripts/migrate.py --env-file <path>   # apply schema (idempotent)
 python scripts/commit_file.py <spec key> "<file>" --dry-run   # the engine, in memory
 python scripts/commit_file.py <spec key> "<file>" --env-file <path>   # commit to Azure
+python scripts/backfill.py --dry-run --only <spec key>        # every delivery, in memory
+python scripts/backfill.py --env-file .env --actor <you> --fast [--only ...]   # to Azure
 ```
+
+Always pass `--fast` for a real load: the batched path is the proven one and
+the row-at-a-time path takes minutes per thousand rows. A dry run of every
+source at once holds every row in memory; run `--only` one source at a time.
 
 The vendor extracts are PHI and live outside this repository. Point at them
 with `SBH_SOURCE_ROOT`.
