@@ -31,7 +31,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   until dropped explicitly. Re-running the migration is a no-op; it only
   creates what is missing and never alters a column, so a spec change to a
   table with rows is a decision about those rows first
-- 471 tests, no database required to run them
+- 494 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -64,8 +64,20 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   sources read back and balanced. Three decisions came out of the new
   files: D16, D17 (a file past its quarantine rate is held) and the text
   width rule below. Numbers in `docs/decision-record.md`, "The second load"
-- **Not yet built**: the acquire step, alerting, re-running typed from
-  landed in the database
+- Done 2026-10-22, evening: **the freshness check and the landed-layer
+  replay**. `scripts/freshness.py` reads the metadata tables and reports
+  STALE, NEVER_LOADED, OPEN_REFUSAL, RUN_FAILED and RUN_UNFINISHED as
+  alerts (exit code 1) and open quarantine as a note; its first run found
+  one real alert, Monthly Payments with nothing since 2026-07-21.
+  `scripts/retype.py` types every loaded file again from `landed` plus the
+  recorded header, without the file, and compares line by line with
+  `typed` and `stg.quarantine`: over the whole database every line came
+  back with the same hash and every control total agreed, which is the
+  proof that the landed layer is complete. It reports only; writing the
+  rebuilt rows is D18, not yet decided. The two run rows the first
+  backfill left open are closed as INTERRUPTED (`scripts/close_runs.py`)
+- **Not yet built**: the acquire step, and the write side of the replay
+  (replacing typed rows and re-curating from them, D18)
 
 ## Rules that came from real defects
 
@@ -233,18 +245,20 @@ src/sbh_data_bank/
               rule with vanish, in memory
   commit/     the commit engine: one file per transaction through meta,
               landed, typed, curated and quarantine; a SQL store and an
-              in-memory store behind one interface
+              in-memory store behind one interface; retype, the replay
+              of typed from landed
+  observe/    source freshness and the open items in meta and stg
   store/      config, connection, ledger schema
 specs/        20 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
-              trace_file, commit_file, backfill
+              trace_file, commit_file, backfill, freshness, retype, close_runs
 ```
 
 ## Running things
 
 ```bash
-python -m pytest                    # 471 tests, no database
+python -m pytest                    # 494 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts
@@ -254,6 +268,9 @@ python scripts/commit_file.py <spec key> "<file>" --dry-run   # the engine, in m
 python scripts/commit_file.py <spec key> "<file>" --env-file <path>   # commit to Azure
 python scripts/backfill.py --dry-run --only <spec key>        # every delivery, in memory
 python scripts/backfill.py --env-file .env --actor <you> --fast [--only ...]   # to Azure
+python scripts/freshness.py --env-file .env          # is every source current; exit 1 on an alert
+python scripts/retype.py --env-file .env --only <spec key>   # what a spec edit does to loaded data
+python scripts/close_runs.py --env-file .env [--apply]       # runs a dead process left open
 ```
 
 Always pass `--fast` for a real load: the batched path is the proven one and
@@ -261,6 +278,11 @@ the row-at-a-time path takes minutes per thousand rows. A dry run of every
 source at once holds every row in memory; run `--only` one source at a time.
 Every run ends with the files under the root that no spec claims; a vendor
 file renamed past every pattern shows up there and nowhere else.
+
+After editing a spec, run `retype.py` on that source before loading any
+file: it says, line by line, what the edit does to the data already in
+`typed` (rehashed, newly quarantined, newly typed) without reading a file.
+It writes nothing (D18).
 
 The vendor extracts are PHI and live outside this repository. Point at them
 with `SBH_SOURCE_ROOT`.
@@ -275,8 +297,12 @@ Sunday. So:
 - The acquire step (not yet built) polls the blob container or reacts to
   blob-created events. It is never a Sunday cron.
 - `expected_cadence_days` is a staleness threshold ("alert if nothing seen in
-  N days"), not a schedule. Specs keep 7 for weekly sources; the alerting
-  engine adds grace so a Sunday-morning check does not fire before the upload.
+  N days"), not a schedule. Specs keep 7 for weekly sources; the freshness
+  check (`observe/freshness.py`, built 2026-10-22) adds two days' grace so
+  a Sunday-morning check does not fire before the upload, measures silence
+  from the as-of of the newest **loaded** delivery (a held file is an open
+  refusal, not a delivery), and never alerts on a discontinued source or
+  one with no cadence.
 - Overlapping deliveries are normal. Which delivery wins is decided by each
   delivery's **as-of date** (when the vendor extracted it), never by when it
   was uploaded. See "Duplicates" below for the rule and where as-of comes

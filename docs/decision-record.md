@@ -601,3 +601,105 @@ go between exports), and the same question for Curve. Monthly Payments
 and the wholesaler accounts register had no new files. Every spec's
 deliveries are now in `sbh_data_bank`, in as-of order, through the end of
 September 2026.
+
+## The freshness check (2026-10-22, engine author)
+
+`observe/freshness.py` and `scripts/freshness.py`. The plan's alert list
+("run failed, expected source missing for N days, quarantine rate spike,
+control-total mismatch") maps onto the metadata tables as five alerts and
+one note, all pure functions over counts and dates so the rules are
+tested without a server:
+
+- `STALE` and `NEVER_LOADED`: an active source with a cadence whose newest
+  **loaded** delivery is as of more than cadence + grace days ago, or has
+  none. Grace is 2 days: a weekly source uploaded on Sundays is stale on
+  the Tuesday after a missed Sunday, and a check run on Sunday morning or
+  Monday does not fire. Silence is measured from the as-of (the dated
+  upload folder, D5), not from when the pipeline registered the file: the
+  backfill registered everything on 2026-10-22, and only the as-of says
+  that Monthly Payments has had nothing since 2026-07-21.
+- `OPEN_REFUSAL`: a file whose latest attempt is neither LOADED nor
+  benign. A held file is not a delivery for staleness; it is this, until
+  a later attempt on the same file loads or recognises it. This is where
+  the quarantine-rate hold (D17) and a control-total mismatch surface.
+- `RUN_FAILED`: a run marked FAILED inside the last 7 days, unless a later
+  LOADED run reached every source the failed run had reached. The two
+  failures of 2026-10-22 (D15's decimal scale, the text width) were both
+  re-run within the hour and are closed by that rule.
+- `RUN_UNFINISHED`: a run with no outcome after 6 hours. Two from the
+  first backfill were open; each had every batch complete, because a file
+  commits in its own transaction, and the process had simply ended.
+  `scripts/close_runs.py` records such a run as `INTERRUPTED` with what
+  its batches did; both are closed.
+- `OPEN_QUARANTINE`, a note: rows nobody has resolved. Zero today.
+
+The first run against `sbh_data_bank` reported exactly one alert, Monthly
+Payments stale at 93 days, which is true: no file for it has been
+downloaded since July. The check writes nothing and its exit code is the
+alert, so it can run from a schedule as it is.
+
+## Typed from landed: the replay (2026-10-22, engine author)
+
+`ingest/replay.py`, `commit/retype.py` and `scripts/retype.py`. The
+landed layer holds every cell as delivered text by target, the unclaimed
+cells by vendor header, and `meta.source_file.header_json` the header row
+with the position each target bound to. That is enough to put the
+delivered row stream back together and run it through the same binder
+and typer the file went through; the result is a `FileLoad` like any
+other, compared line by line with what the original load wrote to
+`typed` and `stg.quarantine` and with the batch's control totals.
+
+One reversal was needed. openpyxl hands the reader `datetime` objects for
+date cells and the landed layer holds `str()` of them,
+`YYYY-MM-DD HH:MM:SS`; `parse_date` takes a `datetime` as-is but holds
+text to the spec's declared formats, and that rendering is none of them.
+For a worksheet load, text of exactly that shape is turned back into a
+`datetime`; nothing else is reinterpreted and a CSV cell is never
+touched. Numbers and booleans read back from their text to the same
+value already.
+
+Run over the whole database on 2026-10-22, every loaded file of every
+source came back `LOADED` with every line unchanged (same row hash),
+every quarantined line still quarantined, and every control total equal
+to the batch's: 151 files, 3,044,698 landed lines, 0 that would change.
+That is the proof the architecture claimed: a wrong key or format is a
+re-run in the database, never a re-read of files.
+
+| Source | Files | Lines | Time |
+|---|---|---|---|
+| finance.monthly_payments | 40 | 1,287,742 | 40 min |
+| ehr.curve.monthly_services | 6 | 391,909 | 12 min |
+| ehr.curve.appointments | 6 | 361,864 | 10 min |
+| tpa.pharmaforce.claims | 11 | 253,616 | 6 min |
+| ehr.allscripts.erx | 6 | 250,966 | 2 min |
+| ehr.athena.eligibility | 6 | 94,440 | 28 s |
+| dispense.weinfuse.administered | 5 | 86,814 | 59 s |
+| dispense.weinfuse.buybill | 3 | 66,300 | 43 s |
+| ehr.athena.prescriptions | 6 | 63,190 | 32 s |
+| tpa.wellpartner.claims | 6 | 50,725 | 114 s |
+| ehr.athena.encounters | 6 | 40,280 | 13 s |
+| wholesaler.cardinal.invoice | 6 | 31,549 | 15 s |
+| wholesaler.cardinal.invoice_summary | 3 | 16,004 | 5 s |
+| tpa.wellpartner.invoices | 6 | 10,437 | 4 s |
+| tpa.prxp.transactions | 5 | 9,474 | 16 s |
+| wholesaler.mckesson.invoice | 6 | 9,419 | 9 s |
+| wholesaler.mckesson.custom | 6 | 8,009 | 8 s |
+| wholesaler.abc.purchases | 6 | 7,866 | 7 s |
+| dispense.weinfuse.patients | 6 | 3,847 | 6 s |
+| reference.wholesaler_accounts | 6 | 247 | 1 s |
+
+The workbook sources (Cardinal, ABC, the accounts register) are the ones
+the date-cell reversal exists for, and they came back unchanged too. The
+time is dominated by reading landed rows over the network; a per-source
+check after a spec edit is seconds for most sources.
+
+**D18, open: what a re-run writes.** The replay reports only. Writing it
+means replacing a file's `typed` rows (that layer is rebuilt, by design)
+and then re-curating, and the curated ledger is append-only: the rows
+curated from the old typing cannot be deleted, so a rebuild has to say
+what becomes of them (superseded with a new reason, or kept under a rule
+version that names the spec digest, which `curated` does not carry
+today). Until that is decided, a spec edit is checked with `retype.py`
+first, and if it changes loaded data the files are re-committed under the
+corrected spec, which the engine already supports (D17: a held file's
+hash stays loadable).

@@ -29,9 +29,10 @@ and writes ``meta.source_file``, ``meta.batch``, the layered ``landed.*``,
 ``typed.*`` and ``curated.*`` rows and ``stg.quarantine`` inside one
 transaction, applying the dedup rule (``store.schema.DEDUP_RULE``). For that
 it needs every file line as delivered, so a load also keeps
-:class:`LandedRow`s (``keep_landed``), footer included. The quarantine-rate
-abort threshold the architecture plan calls for is still not wired;
-``FileLoad.quarantine_rate`` computes the number, but nothing acts on it.
+:class:`LandedRow`s (``keep_landed``), footer included, and the engine
+holds a file whose ``FileLoad.quarantine_rate`` exceeds the spec's
+``max_quarantine_rate`` (D17). ``ingest.replay`` builds the same
+``FileLoad`` from the landed layer instead of a file.
 """
 
 from __future__ import annotations
@@ -160,10 +161,10 @@ class FileLoad:
     def quarantine_rate(self) -> float:
         """Fraction of rows read that were quarantined, 0.0 for an empty file.
 
-        The architecture plan calls for a per-source threshold that aborts a
-        load when this is too high (a wrong date format quarantines 100% of a
-        file, and that should stop the load rather than fill the quarantine
-        table). Nothing consumes this yet.
+        The commit engine holds the file when this exceeds the spec's
+        ``max_quarantine_rate`` (D17): a wrong date format quarantines 100%
+        of a file, and that stops the load rather than filling the
+        quarantine table behind a hash that would then be a duplicate.
         """
         if not self.counters.rows_read:
             return 0.0

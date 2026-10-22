@@ -35,6 +35,7 @@ from sbh_data_bank.commit.records import (
     BatchRecord,
     CurrentQuery,
     FoundFile,
+    LoadedFile,
     RunRecord,
     SourceFileRecord,
     StoredCurrent,
@@ -43,6 +44,7 @@ from sbh_data_bank.commit.records import (
     iter_values,
 )
 from sbh_data_bank.curate.rule import CurrentRow
+from sbh_data_bank.ingest.replay import LandedLine
 from sbh_data_bank.registry.spec import SourceSpec
 from sbh_data_bank.store.schema import (
     CURATED_LEDGER_COLUMNS,
@@ -61,6 +63,7 @@ __all__ = [
     "insert_sql",
     "landed_columns",
     "landed_input_sizes",
+    "landed_select_sql",
     "supersede_sql",
     "typed_columns",
     "typed_input_sizes",
@@ -78,6 +81,7 @@ class _Cursor(Protocol):
     def setinputsizes(self, sizes: Any) -> Any: ...
     def fetchone(self) -> Any: ...
     def fetchall(self) -> list[Any]: ...
+    def fetchmany(self, size: int) -> list[Any]: ...
 
 
 class _Transactional(Protocol):
@@ -361,6 +365,32 @@ _FINDING_INSERT = insert_sql(
 )
 
 
+# ------------------------------------------------------------ reading back
+
+_LOADED_FILES = (
+    "SELECT sf.source_file_id, sf.file_name, sf.sheet_name, sf.header_json, b.batch_id, "
+    "b.control_totals, sf.as_of FROM meta.source_file AS sf "
+    "JOIN meta.batch AS b ON b.source_file_id = sf.source_file_id AND b.outcome = 'LOADED' "
+    "WHERE sf.tenant_id = ? AND sf.source_key = ? AND sf.header_json IS NOT NULL "
+    "ORDER BY sf.source_file_id"
+)
+_QUARANTINED_LINES = "SELECT line_number, reasons FROM stg.quarantine WHERE batch_id = ?"
+
+
+def landed_select_sql(spec: SourceSpec) -> str:
+    """The file's landed rows in line order: line number, every target in
+    ``spec.landed_targets`` order, then ``extra_cells``."""
+    names = ", ".join(_quote(c) for c in [*spec.landed_targets, "extra_cells"])
+    return (
+        f"SELECT line_number, {names} FROM {table_name(spec, 'landed')} "
+        "WHERE source_file_id = ? ORDER BY line_number"
+    )
+
+
+def _typed_hashes_sql(spec: SourceSpec) -> str:
+    return f"SELECT line_number, row_hash FROM {table_name(spec, 'typed')} WHERE source_file_id = ?"
+
+
 def _batch_values(batch: BatchRecord) -> dict[str, Any]:
     return {
         "batch_id": batch.batch_id,
@@ -491,6 +521,39 @@ class SqlStore:
     def finish_batch(self, batch: BatchRecord) -> None:
         values = _batch_values(batch)
         self.cursor.execute(_BATCH_FINISH, *(values[c] for c in _BATCH_UPDATED), batch.batch_id)
+
+    # ---------------------------------------------------------- reading back
+
+    def loaded_files(self, tenant_id: str, source_key: str) -> list[LoadedFile]:
+        with self.transaction():
+            self.cursor.execute(_LOADED_FILES, tenant_id, source_key)
+            return [LoadedFile(int(r[0]), *r[1:]) for r in self.cursor.fetchall()]
+
+    def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
+        """Streamed in slices of ``batch_rows`` inside one read transaction,
+        so a 560,000-line file is never held whole."""
+        targets = list(spec.landed_targets)
+        with self.transaction():
+            cursor = self.cursor
+            cursor.execute(landed_select_sql(spec), source_file_id)
+            while chunk := cursor.fetchmany(self._batch_rows):
+                for record in chunk:
+                    extra = record[-1]
+                    yield LandedLine(
+                        int(record[0]),
+                        dict(zip(targets, record[1:-1], strict=True)),
+                        json.loads(extra) if extra else {},
+                    )
+
+    def typed_hashes(self, spec: SourceSpec, source_file_id: int) -> dict[int, str]:
+        with self.transaction():
+            self.cursor.execute(_typed_hashes_sql(spec), source_file_id)
+            return {int(r[0]): r[1] for r in self.cursor.fetchall()}
+
+    def quarantined_lines(self, batch_id: str) -> dict[int, str]:
+        with self.transaction():
+            self.cursor.execute(_QUARANTINED_LINES, batch_id)
+            return {int(r[0]): r[1] for r in self.cursor.fetchall()}
 
     # ------------------------------------------------------------ curated
 

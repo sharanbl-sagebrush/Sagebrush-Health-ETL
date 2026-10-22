@@ -30,7 +30,7 @@ startup failure, not a setting that silently does nothing.
 | `on_new_column` | Drift policy when the vendor adds a column. Default `warn`. See `DriftPolicy`. |
 | `on_missing_column` | Drift policy when an expected column vanishes. Default `fail`. |
 | `max_quarantine_rate` | Fraction of a file's rows that may quarantine before the engine holds the whole file (`HELD_QUARANTINE_RATE`) instead of loading what parsed. Default `0.05`. Decision D17. |
-| `expected_cadence_days` | Staleness threshold for freshness alerting ("alert if nothing seen in N days"), not a schedule. `null` means irregular. Nothing consumes it yet. |
+| `expected_cadence_days` | Staleness threshold for freshness alerting ("alert if nothing seen in N days"), not a schedule. `null` means irregular and is never alerted on. `scripts/freshness.py` adds two days' grace and measures silence from the as-of of the newest loaded delivery. |
 | `coverage_start` | ISO date before which the source has no data, so absence before it is not a gap. |
 | `event_date` | The date column that says when the business event happened (invoice date, fill date), or `as_of` for a snapshot source whose rows carry no date. Must be a `date` column in every loading variant. Enables the as-of floor, coverage and vanish. Decision D1. |
 | `coverage` | Where a delivery's covered date window comes from: `filename` (default), `data` (min and max of the coverage column) or `as_of` (everything up to the as-of; mandatory for a snapshot). Decision D2. |

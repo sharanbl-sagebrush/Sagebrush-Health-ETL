@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from sbh_data_bank.curate.delivery import Coverage
 from sbh_data_bank.curate.rule import CurrentRow
+from sbh_data_bank.ingest.replay import LandedLine
 from sbh_data_bank.registry.spec import SourceSpec
 
 __all__ = [
@@ -34,6 +35,8 @@ __all__ = [
     "FindingWrite",
     "FoundFile",
     "LandedWrite",
+    "LayerReader",
+    "LoadedFile",
     "QuarantineWrite",
     "RunRecord",
     "SourceFileRecord",
@@ -302,6 +305,43 @@ class Store(Protocol):
     def write(self, spec: SourceSpec, ctx: WriteContext, batch: WriteBatch) -> None:
         """Write one committed load's rows: landed, typed, curated inserts,
         quarantine, findings, then the supersessions, under ``ctx``."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedFile:
+    """A file with a LOADED batch, as a :class:`LayerReader` lists it: what
+    the replay needs to type it again and to compare the result."""
+
+    source_file_id: int
+    file_name: str
+    sheet_name: str | None
+    header_json: str
+    batch_id: str
+    control_totals: str | None
+    as_of: date | None = None
+
+
+class LayerReader(Protocol):
+    """Reading the layers back, for ``commit.retype``: the loaded files of
+    a source, each file's landed rows, and what its load typed and
+    quarantined. Both stores implement it beside :class:`Store`."""
+
+    def loaded_files(self, tenant_id: str, source_key: str) -> list[LoadedFile]:
+        """Files with a LOADED batch, in registration order, one entry per
+        worksheet of a workbook."""
+        ...
+
+    def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
+        """The file's ``landed.*`` rows in line order."""
+        ...
+
+    def typed_hashes(self, spec: SourceSpec, source_file_id: int) -> dict[int, str]:
+        """``line_number -> row_hash`` for the file's ``typed.*`` rows."""
+        ...
+
+    def quarantined_lines(self, batch_id: str) -> dict[int, str]:
+        """``line_number -> reasons`` for the batch's ``stg.quarantine`` rows."""
         ...
 
 

@@ -15,6 +15,7 @@ columns (``store.schema``), so a test can read them like a query result.
 from __future__ import annotations
 
 import copy
+import json
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from sbh_data_bank.commit.records import (
     BatchRecord,
     CurrentQuery,
     FoundFile,
+    LoadedFile,
     RunRecord,
     SourceFileRecord,
     StoredCurrent,
@@ -33,6 +35,7 @@ from sbh_data_bank.commit.records import (
     WriteContext,
 )
 from sbh_data_bank.curate.rule import CurrentRow
+from sbh_data_bank.ingest.replay import LandedLine
 from sbh_data_bank.registry.spec import SourceSpec
 from sbh_data_bank.store.schema import DEDUP_RULE
 
@@ -270,6 +273,55 @@ class MemoryStore:
             row["supersede_reason"] = s.reason
             row["updated_at"] = ctx.created_at
             row["updated_by"] = ctx.created_by
+
+    # ---------------------------------------------------------- reading back
+
+    def loaded_files(self, tenant_id: str, source_key: str) -> list[LoadedFile]:
+        found = []
+        for file_id, record in sorted(self.source_files.items()):
+            if record.tenant_id != tenant_id or record.source_key != source_key:
+                continue
+            loaded = [
+                b
+                for b in self.batches.values()
+                if b.source_file_id == file_id and b.outcome == "LOADED"
+            ]
+            if not loaded or record.header_json is None:
+                continue
+            (batch,) = loaded
+            found.append(
+                LoadedFile(
+                    file_id,
+                    record.file_name,
+                    record.sheet_name,
+                    record.header_json,
+                    batch.batch_id,
+                    batch.control_totals,
+                    record.as_of,
+                )
+            )
+        return found
+
+    def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
+        rows = [r for r in self.landed[spec.key] if r["source_file_id"] == source_file_id]
+        for row in sorted(rows, key=lambda r: r["line_number"]):
+            yield LandedLine(
+                row["line_number"],
+                {t: row.get(t) for t in spec.landed_targets},
+                json.loads(row["extra_cells"]) if row["extra_cells"] else {},
+            )
+
+    def typed_hashes(self, spec: SourceSpec, source_file_id: int) -> dict[int, str]:
+        return {
+            r["line_number"]: r["row_hash"]
+            for r in self.typed[spec.key]
+            if r["source_file_id"] == source_file_id
+        }
+
+    def quarantined_lines(self, batch_id: str) -> dict[int, str]:
+        return {
+            q["line_number"]: q["reasons"] for q in self.quarantine if q["batch_id"] == batch_id
+        }
 
     # ------------------------------------------------------------ for tests
 
