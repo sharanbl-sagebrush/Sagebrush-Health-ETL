@@ -92,11 +92,12 @@ class MemoryStore:
         self.runs[run.run_id] = copy.copy(run)
 
     def find_source_file(
-        self, tenant_id: str, file_sha256: str, sheet_name: str | None
+        self, tenant_id: str, source_key: str, file_sha256: str, sheet_name: str | None
     ) -> FoundFile | None:
         for file_id, record in self.source_files.items():
             if (
                 record.tenant_id == tenant_id
+                and record.source_key == source_key
                 and record.file_sha256 == file_sha256
                 and record.sheet_name == sheet_name
             ):

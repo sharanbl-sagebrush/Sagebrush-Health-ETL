@@ -1,0 +1,135 @@
+# Cardinal Health invoice summary extract: the 9-column "Cardinal_Invoice"
+# report, as opposed to the 17-column "Cardinal_Invoice Review" detail that
+# `wholesaler.cardinal.invoice` loads.
+#
+# Decided 2026-10-22 (developer): every Cardinal report lands in its own
+# table. Until then the summary was recognised by the detail spec and never
+# loaded, on the 2026-09-04 instruction to use the latest file. Two facts
+# reopened it (docs/layer-walk/README.md, decisions D9):
+#
+#   - the 3-year history file `Cardinal_Invoice 01012023-03062026.xlsx` holds
+#     13,323 invoices ($35.9M), 5,326 of them from before the detail report's
+#     24-month window, which no detail pull can return;
+#   - the standing instruction that every source keeps its own table, so
+#     nothing is counted twice by landing, only by a query that sums both.
+#
+# Two grains, one shape. The history file is one row per invoice: (account,
+# invoice) is unique across all 13,323 rows. The 2026 pulls
+# (`Cardinal_Invoice 05012026-07312026.xlsx` onward) are one row per invoice
+# LINE under the same nine headers: 1,450 rows for 548 invoices, the same row
+# count, invoice count and purchase-dollar sum as the detail workbook of the
+# same period, minus the eight columns that identify the line. The dedup
+# rule's occurrence number absorbs this: lines of one invoice are (key, 1),
+# (key, 2) ... in file order, and all survive. Reconciliation must not treat
+# a row here as an invoice without checking its period.
+#
+# Both reports arrive under names that match `cardinal.*invoice`, so each
+# spec recognises the other's shape by header and hands it over with
+# `loaded_by`: nothing is dropped, nothing is loaded twice.
+
+# --- Identity: how this source is named and routed ------------------------
+key: wholesaler.cardinal.invoice_summary
+name: Cardinal Health - Invoice Summary
+vendor: Cardinal Health
+group: "1 Wholesalers"
+catalog_names: ["Cardinal"]
+lifecycle: active
+expected_cadence_days: 7
+
+# filename_patterns: a routing HINT only, and the same hint the detail spec
+# uses. The variant detectors below tell the two reports apart.
+filename_patterns:
+  - "cardinal.*invoice"
+
+# natural_key: unique at the invoice grain of the history file; at the line
+# grain of the 2026 pulls the occurrence number completes it (see above).
+natural_key: [account_number, invoice_number]
+
+on_new_column: warn
+on_missing_column: fail
+
+variants:
+  # Variant 1: the 9-column summary. The one this spec loads.
+  - name: invoice_summary
+    description: >
+      9-column report: account, PO, invoice, date, type, purchase/return and
+      purchase dollars. No NDC, no line number, no quantity.
+    # detect: the summary is the Cardinal file WITHOUT NDC or a line number.
+    # require_none keeps the detail report out, exactly as the detail spec's
+    # own summary detector does.
+    detect:
+      require_all: ["Invoice #", "Purchase/Return"]
+      require_none: ["NDC", "Invoice Line #"]
+    read:
+      skip_trailing_blank_rows: true
+      # Every summary workbook ends with a totals line: key columns blank,
+      # purchase dollars populated. Recognised, kept out of the data, and
+      # its figure checked against our own sum.
+      footer: totals_row
+    columns:
+      # Natural-key column 1 of 2.
+      - target: account_number
+        sources: ["Account #"]
+        type: text
+        required: true
+        description: >
+          Cardinal account. Maps to a site via the Master COGS List on
+          (payee, account, location).
+      - target: account_name
+        sources: ["Account Name"]
+        type: text
+      - target: account_alias
+        sources: ["Account Alias"]
+        type: text
+      - target: po_number
+        sources: ["PO #"]
+        type: text
+      # Natural-key column 2 of 2.
+      - target: invoice_number
+        sources: ["Invoice #"]
+        type: text
+        required: true
+      # Both observed Cardinal date formats, tried in order (ISO never
+      # matches %m/%d/%Y, so they cannot be confused).
+      - target: invoice_date
+        sources: ["Invoice Date"]
+        type: date
+        required: true
+        date_formats: ["%Y-%m-%d", "%m/%d/%Y"]
+      - target: invoice_type
+        sources: ["Invoice Type"]
+        type: text
+      - target: purchase_or_return
+        sources: ["Purchase/Return"]
+        type: text
+        required: true
+        description: A return must not be summed as a purchase.
+      # The one figure the totals footer declares, so the one control total.
+      - target: purchase_amount
+        sources: ["Purchase Dollars (Exclude Taxes, Fees & Surcharges)"]
+        type: currency
+        required: true
+        control_total: true
+
+  # Variant 2: the 17-column detail report. Recognised here, loaded by the
+  # detail spec. Declared so a detail workbook that matches this spec's
+  # filename hint is identified rather than refused as UNRECOGNISED.
+  - name: invoice_detail
+    action: recognise_only
+    loaded_by: wholesaler.cardinal.invoice
+    description: >
+      The line-level report with NDC, line number and quantities.
+      `wholesaler.cardinal.invoice` loads it; this spec only names it.
+    detect:
+      require_all: ["NDC", "Invoice Line #", "Ship Qty"]
+    # columns: the natural-key columns only, because the model requires
+    # every variant to carry the key; nothing from this variant lands.
+    columns:
+      - target: account_number
+        sources: ["Account #"]
+        type: text
+        required: true
+      - target: invoice_number
+        sources: ["Invoice #"]
+        type: text
+        required: true

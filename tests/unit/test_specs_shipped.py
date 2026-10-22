@@ -11,8 +11,10 @@ integration run is the evidence it still holds.
 
 How to read this file:
 
-- TestAllSpecsAreSound  rules every one of the 19 specs must satisfy, found by
+- TestAllSpecsAreSound  rules every one of the 20 specs must satisfy, found by
                         iterating the registry rather than naming specs
+- TestHandOff           a recognise_only variant names its reason, and the
+                        two Cardinal specs hand each other's report over
 - TestMasterCogsList    the account register: two variants in one workbook
 - TestMonthlyPayments   the 116-column PM ledger: PII classes, SSN, period
 - TestInjectedColumns   ``source_sheet``, a column the loader supplies
@@ -158,6 +160,88 @@ class TestAllSpecsAreSound:
         for spec in registry:
             assert any(v.loads for v in spec.variants), spec.key
 
+    def test_a_recognise_only_variant_names_exactly_one_reason(self):
+        """``superseded_by`` (a sibling) or ``loaded_by`` (another source),
+        never both and never neither; a loading variant has neither."""
+        from sbh_data_bank.registry.spec import SourceSpec
+
+        def build(**other):
+            return SourceSpec.model_validate(
+                {
+                    "key": "a.b",
+                    "name": "n",
+                    "vendor": "v",
+                    "natural_key": ["id"],
+                    "variants": [
+                        {
+                            "name": "main",
+                            "detect": {"require_all": ["ID"]},
+                            "columns": [{"target": "id", "sources": ["ID"], "required": True}],
+                        },
+                        {
+                            "name": "other",
+                            "detect": {"require_all": ["X"]},
+                            "columns": [{"target": "id", "sources": ["ID"]}],
+                            **other,
+                        },
+                    ],
+                }
+            )
+
+        assert build(action="recognise_only", loaded_by="c.d").variants[1].loaded_by == "c.d"
+        assert build(action="recognise_only", superseded_by="main").variants[1].loads is False
+        with pytest.raises(ValueError, match="must name either"):
+            build(action="recognise_only")
+        with pytest.raises(ValueError, match="must name either"):
+            build(action="recognise_only", superseded_by="main", loaded_by="c.d")
+        with pytest.raises(ValueError, match="cannot be superseded or loaded elsewhere"):
+            build(loaded_by="c.d")
+        with pytest.raises(ValueError, match="loaded by this very source"):
+            build(action="recognise_only", loaded_by="a.b")
+
+    def test_a_hand_off_to_a_source_that_does_not_exist_is_refused(self, tmp_path):
+        """The registry, not the spec, knows which keys exist."""
+        import yaml
+
+        from sbh_data_bank.registry.loader import SpecLoadError, load_spec_dir
+
+        (tmp_path / "a.b.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "key": "a.b",
+                    "name": "n",
+                    "vendor": "v",
+                    "natural_key": ["id"],
+                    "variants": [
+                        {
+                            "name": "main",
+                            "detect": {"require_all": ["ID"]},
+                            "columns": [{"target": "id", "sources": ["ID"], "required": True}],
+                        },
+                        {
+                            "name": "other",
+                            "detect": {"require_all": ["X"]},
+                            "action": "recognise_only",
+                            "loaded_by": "nobody.home",
+                            "columns": [{"target": "id", "sources": ["ID"]}],
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(SpecLoadError, match="'nobody.home', which is not a spec"):
+            load_spec_dir(tmp_path)
+
+    def test_the_two_cardinal_specs_hand_each_other_over(self, registry):
+        detail = registry.require("wholesaler.cardinal.invoice")
+        summary = registry.require("wholesaler.cardinal.invoice_summary")
+        by_name = {v.name: v for v in detail.variants}
+        assert by_name["invoice_summary"].loaded_by == summary.key
+        by_name = {v.name: v for v in summary.variants}
+        assert by_name["invoice_detail"].loaded_by == detail.key
+        assert detail.filename_patterns == summary.filename_patterns
+
     def test_a_keyless_spec_is_rejected_without_notes(self):
         """The rule itself: an empty natural key must be justified."""
         from sbh_data_bank.registry.spec import SourceSpec
@@ -186,6 +270,10 @@ class TestAllSpecsAreSound:
         detector is satisfied by those headers, a renamed or misdropped file
         would bind as the wrong source. The two McKesson reports share 15 of
         their headers and are the case that motivated this check.
+
+        The one sanctioned exception is a declared hand-off: a recognise_only
+        variant whose ``loaded_by`` names the owner accepts the owner's shape
+        on purpose (the two Cardinal specs, each naming the other).
         """
         shapes = []
         for spec in registry:
@@ -198,6 +286,8 @@ class TestAllSpecsAreSound:
                 if other.key == owner_key:
                     continue
                 for candidate in other.variants:
+                    if candidate.loaded_by == owner_key:
+                        continue
                     missing = [h for h in candidate.detect.require_all if h not in headers]
                     forbidden = [h for h in candidate.detect.require_none if h in headers]
                     if not missing and not forbidden:

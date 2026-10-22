@@ -18,6 +18,10 @@ The whole thing is idempotent: a file already committed is recorded as
 ``DUPLICATE_FILE`` and writes nothing, so re-running after adding files to
 the root commits only what is new.
 
+The run ends with the files under the root that no spec claims. Discovery
+is by filename pattern, so a vendor file renamed past every pattern is
+never visited; this list is the only place such a file shows up.
+
 Options
     --dry-run           run everything against an in-memory store; prints
                         the same report, touches nothing
@@ -55,6 +59,7 @@ from sbh_data_bank.commit import (  # noqa: E402
     SqlStore,
     discover,
     in_as_of_order,
+    unclaimed,
 )
 from sbh_data_bank.commit.records import Store  # noqa: E402
 from sbh_data_bank.registry.loader import SpecRegistry  # noqa: E402
@@ -75,6 +80,7 @@ DEFAULT_ROOT = Path(
 LOAD_ORDER = [
     "wholesaler.mckesson.invoice",
     "wholesaler.cardinal.invoice",
+    "wholesaler.cardinal.invoice_summary",
     "wholesaler.abc.purchases",
     "tpa.wellpartner.invoices",
     "tpa.pharmaforce.claims",
@@ -199,6 +205,13 @@ def backfill(
     return report
 
 
+def _print_unclaimed(registry: SpecRegistry, root: Path) -> None:
+    orphans = unclaimed(registry, root)
+    print(f"\nfiles under the root that no spec claims: {len(orphans)}")
+    for rel in orphans:
+        print(f"  {rel.as_posix()}")
+
+
 def _print_report(report: dict[str, Counter]) -> None:
     print("\n" + "=" * 100)
     head = f"{'source':<34}{'LOADED':>7}{'dup':>5}{'refused':>8}{'inserted':>10}{'unchg':>7}"
@@ -248,6 +261,7 @@ def main() -> int:
             operator_date=args.operator_date,
         )
         _print_report(report)
+        _print_unclaimed(registry, root)
         return 0
 
     if args.env_file:
@@ -267,6 +281,7 @@ def main() -> int:
             reconnect=database.close,
         )
     _print_report(report)
+    _print_unclaimed(registry, root)
     return 0 if not any("FAILED" in c for c in report.values()) else 1
 
 

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from sbh_data_bank.commit.discover import Found, discover, in_as_of_order
+from sbh_data_bank.commit.discover import Found, discover, in_as_of_order, unclaimed
 from sbh_data_bank.commit.engine import CommitEngine, CommitOutcome, CommitResult
 from sbh_data_bank.commit.memory import MemoryStore
 from sbh_data_bank.commit.records import CurrentQuery
@@ -232,6 +232,24 @@ class TestOutcomes:
             assert after[table] == before[table]
         assert len(store.batches) == 2
 
+    def test_the_same_bytes_under_another_source_are_that_sources_own_file(self, tmp_path, spec):
+        """A file's identity is (source, content hash, sheet): the Cardinal
+        summary and detail specs both see the summary workbook, and each
+        registers and decides it for itself."""
+        store = MemoryStore()
+        engine = _engine(store)
+        path = _write(tmp_path, JAN, A_X, B_X)
+        first = _commit(engine, spec, path, tmp_path)
+        other = _spec(key="t.vendor.other")
+        second = _commit(engine, other, path, tmp_path)
+
+        assert first.committed and second.committed
+        assert second.source_file_id != first.source_file_id
+        assert store.source_files[second.source_file_id].source_key == other.key
+        assert len(store.landed[other.key]) == 2
+        # And for the same source it is still the same file.
+        assert _commit(engine, other, path, tmp_path).outcome == CommitOutcome.DUPLICATE_FILE
+
     def test_a_refused_file_is_not_a_duplicate_when_it_comes_back_renamed(self, tmp_path, spec):
         """Only a LOADED batch makes a hash a duplicate: an operator who
         fixes the name of a refused file must be able to load it."""
@@ -321,6 +339,27 @@ class TestRefusals:
         assert "no as-of date" in result.detail
         assert store.source_files[result.source_file_id].as_of is None
 
+    def test_too_many_quarantined_rows_hold_the_file(self, tmp_path):
+        """D16: past the spec's quarantine rate nothing is committed, the
+        file is on record, and - because only LOADED makes a hash a
+        duplicate - the same bytes load once the spec is fixed."""
+        store = MemoryStore()
+        engine = _engine(store)
+        strict = _spec(max_quarantine_rate=0.5)
+        path = _write(tmp_path, JAN, A_X, "B,X,not-a-date,20.00,b", "C,Y,nor-this,30.00,c")
+        held = _commit(engine, strict, path, tmp_path)
+
+        assert held.outcome == CommitOutcome.HELD_QUARANTINE_RATE
+        assert "2 of 3 rows quarantined (66.7%); the spec allows 50%" in held.detail
+        assert store.landed[strict.key] == [] and store.quarantine == []
+        assert held.source_file_id in store.source_files
+        assert store.batches[held.batch_id].rows_quarantined == 2
+
+        fixed = _spec(max_quarantine_rate=1.0)
+        again = _commit(engine, fixed, path, tmp_path)
+        assert again.committed and again.source_file_id == held.source_file_id
+        assert len(store.landed[fixed.key]) == 3 and len(store.quarantine) == 2
+
     def test_a_load_that_is_not_ok_is_recorded_and_nothing_lands(self, tmp_path, spec):
         store = MemoryStore()
         path = _write(tmp_path, JAN, "x,y", header="Foo,Bar")
@@ -378,6 +417,19 @@ class TestZipAndDiscovery:
         assert [f.display for f in found] == [JAN, f"t.zip::{FEB}"]
         assert found[1].filename == FEB
 
+    def test_unclaimed_lists_the_files_no_spec_claims(self, tmp_path):
+        """The other half of discovery: a data file or zip whose name no spec
+        accepts is reported, so a renamed delivery cannot vanish silently.
+        Non-data files and the skipped folders stay out of it."""
+        _write(tmp_path / "2026-01-31", JAN, A_X)
+        _write(tmp_path, "Reports for Download.csv", A_X)
+        _write(tmp_path / "Sagebrush ETL Test Files", "ignored.csv", A_X)
+        (tmp_path / "notes.txt").write_text("not data", encoding="utf-8")
+        self._zip(tmp_path, "t.zip", {FEB: ""})
+        self._zip(tmp_path, "unrelated.zip", {JAN: ""})
+        orphans = unclaimed([_spec(filename_patterns=["^t"])], tmp_path)
+        assert [p.as_posix() for p in orphans] == ["Reports for Download.csv", "unrelated.zip"]
+
     def test_in_as_of_order_puts_the_oldest_first_and_the_undated_last(self, tmp_path, spec):
         late = _write(tmp_path, FEB, A_X)
         early = _write(tmp_path, JAN, A_X)
@@ -392,7 +444,10 @@ class TestZipAndDiscovery:
 
 
 class TestQuarantineAndFindings:
-    def test_a_bad_row_is_quarantined_and_still_lands(self, tmp_path, spec):
+    def test_a_bad_row_is_quarantined_and_still_lands(self, tmp_path):
+        # Half the file is bad; the spec here tolerates that (D16 holds a
+        # file only past its max_quarantine_rate, 5% by default).
+        spec = _spec(max_quarantine_rate=0.5)
         store = MemoryStore()
         path = _write(tmp_path, JAN, A_X, "B,X,not-a-date,20.00,b")
         result = _commit(_engine(store), spec, path, tmp_path)
@@ -473,7 +528,8 @@ class TestSqlStore:
         assert params == [date(2026, 1, 1), date(2026, 1, 31)]
         assert sql.split(" FROM ")[0].endswith("c.as_of, c.[event], c.[account], c.[amount]")
 
-    def test_one_commit_runs_the_expected_statements(self, tmp_path, spec):
+    def test_one_commit_runs_the_expected_statements(self, tmp_path):
+        spec = _spec(max_quarantine_rate=0.5)  # one of the three rows below is bad
         cursor = _FakeCursor()
         engine = CommitEngine(
             SqlStore(_FakeDatabase(cursor)),

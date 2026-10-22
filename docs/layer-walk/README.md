@@ -258,8 +258,14 @@ The backfill has run: fourteen sources are in `sbh_data_bank`, every
 delivery in as-of order, zero quarantined, zero conflicts (the table and
 the decisions it forced are in `docs/decision-record.md`, "The backfill").
 The five sources whose specs changed after the first migration (Curve
-appointments, the three WeInfuse specs, PRxP) load as soon as their empty
-tables are recreated; their dry runs are clean.
+appointments, the three WeInfuse specs, PRxP) had their empty tables
+dropped and recreated later the same day and are loaded, together with
+the Cardinal summary as its own source (D16, reopening the D9 line
+above). Two new files of every source arrived in the `10212026` and
+`10222026` folders (May to September 2026) and are in the same load.
+PRxP's `Waiting for Check DateTime` is text now, and a file that
+quarantines past its spec's rate is held (D17); both came out of those
+new files. Numbers in `docs/decision-record.md`, "The second load".
 
 Of the spec fixes in the table above, done: the Curve appointments
 timestamp formats (317,804 rows typed, where three files had quarantined

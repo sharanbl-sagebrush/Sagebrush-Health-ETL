@@ -31,8 +31,8 @@ Inputs
 
 What it builds, in order
     1. ``meta_statements()`` from ``store/schema.py``: the ``meta`` and ``stg``
-       schemas - ``meta.source_file`` (one row per physical file, keyed on
-       content hash), ``meta.batch`` (one row per load attempt with the
+       schemas - ``meta.source_file`` (one row per physical file per
+       source, keyed on content hash), ``meta.batch`` (one row per load attempt with the
        inserted / superseded / unchanged / quarantined counts),
        ``meta.run``, ``stg.quarantine`` and ``stg.duplicate_finding``.
     2. ``table_statements(spec)`` for every spec: three tables per source,

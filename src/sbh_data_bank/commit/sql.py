@@ -312,8 +312,8 @@ _SOURCE_FILE_FIND = (
     "(SELECT COUNT(*) FROM meta.batch AS b WHERE b.source_file_id = sf.source_file_id "
     "AND b.outcome = 'LOADED'), "
     "(SELECT COUNT(*) FROM meta.batch AS b WHERE b.source_file_id = sf.source_file_id) "
-    "FROM meta.source_file AS sf WHERE sf.tenant_id = ? AND sf.file_sha256 = ? "
-    "AND COALESCE(sf.sheet_name, '') = ?"
+    "FROM meta.source_file AS sf WHERE sf.tenant_id = ? AND sf.source_key = ? "
+    "AND sf.file_sha256 = ? AND COALESCE(sf.sheet_name, '') = ?"
 )
 _DELIVERY_RANK = (
     "SELECT COUNT(*) + 1 FROM meta.source_file WHERE tenant_id = ? AND source_key = ? "
@@ -459,9 +459,9 @@ class SqlStore:
         self.cursor.execute(_RUN_FINISH, run.finished_at, run.outcome, run.detail, run.run_id)
 
     def find_source_file(
-        self, tenant_id: str, file_sha256: str, sheet_name: str | None
+        self, tenant_id: str, source_key: str, file_sha256: str, sheet_name: str | None
     ) -> FoundFile | None:
-        self.cursor.execute(_SOURCE_FILE_FIND, tenant_id, file_sha256, sheet_name or "")
+        self.cursor.execute(_SOURCE_FILE_FIND, tenant_id, source_key, file_sha256, sheet_name or "")
         row = self.cursor.fetchone()
         if row is None:
             return None

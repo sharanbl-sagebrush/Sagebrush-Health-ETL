@@ -67,6 +67,15 @@ class TestMetaStatements:
         for statement in meta_statements():
             assert _sql(statement).startswith("IF "), statement[:60]
 
+    def test_a_file_is_identified_by_its_source_as_well_as_its_hash(self):
+        """Two specs can see one workbook (Cardinal summary and detail), so
+        the unique constraint carries the source key, and a database built
+        before 2026-10-22 gets its constraint swapped, once."""
+        text = "\n".join(meta_statements())
+        assert "UNIQUE (tenant_id, source_key, file_sha256, sheet_name)" in text
+        repair = next(s for s in meta_statements() if "DROP CONSTRAINT uq_source_file" in s)
+        assert "c.name = 'source_key'" in repair and repair.startswith("IF EXISTS")
+
     def test_all_six_schemas_are_created(self):
         text = "\n".join(meta_statements())
         for schema in ("meta", "stg", *LAYERS, "pres"):

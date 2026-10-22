@@ -13,8 +13,12 @@
 # 20,602 of them. So no re-request to Cardinal is needed - but the two must not
 # be confused, which is why the summary detector requires NDC to be *absent*.
 #
-# Only the detail report is loaded. The summary is recognised and skipped, so
-# the same purchases are not counted twice.
+# This spec loads the detail report. The summary is recognised here and
+# loaded by its own spec, `wholesaler.cardinal.invoice_summary` (decided
+# 2026-10-22: every report in its own table, and the summary's history
+# reaches back to 2023, before the detail report's 24-month window). The two
+# land in different tables, so nothing is counted twice by loading; a query
+# that sums both would be, and reconciliation picks one.
 #
 # Two date formats are in circulation for the same detail report: ISO in the
 # April pull, US in the February pull. Both are declared and tried in order.
@@ -216,25 +220,24 @@ variants:
         control_total: true
         description: Ships as "$3,767.71 " with a trailing space.
 
-  # Variant 2: the 9-column summary report. Recognised, never loaded.
+  # Variant 2: the 9-column summary report. Recognised here, loaded by the
+  # summary spec.
   - name: invoice_summary
     # action: recognise_only means the file is identified and then nothing
-    # lands. superseded_by names the variant that covers the same ground, so
-    # the reason sits next to the decision. The model rejects recognise_only
-    # without a superseded_by.
+    # lands here. loaded_by names the source whose spec does load it, so the
+    # reason sits next to the decision; the registry checks the key exists.
+    # (Until 2026-10-22 this said superseded_by: invoice_detail, per the
+    # instruction of 2026-09-04 to use the latest Cardinal file; the summary
+    # now has its own table, see that spec's header.)
     action: recognise_only
-    superseded_by: invoice_detail
+    loaded_by: wholesaler.cardinal.invoice_summary
     description: >
-      9-column invoice-level report with no NDC, no line number and no
-      quantity. Recognised but not loaded, per the instruction of 2026-09-04 to
-      use the latest Cardinal file rather than the old one.
-
-      The invoices it contains are the same invoices the detail report carries,
-      and the April 2026 detail pull covers 2024 to 2026 in full, so loading
-      both would double-count every Cardinal purchase. It stays declared
-      because an unrecognised file is either an alert somebody has to chase or,
-      if a detector were ever loosened to accommodate it, a summary silently
-      read as detail.
+      9-column report with no NDC, no line number and no quantity.
+      `wholesaler.cardinal.invoice_summary` loads it. It stays declared here
+      because both reports match this spec's filename hint, and an
+      unrecognised file is either an alert somebody has to chase or, if a
+      detector were ever loosened to accommodate it, a summary silently read
+      as detail.
     # detect: require_none is what separates this from the detail report -
     # the summary is the Cardinal file WITHOUT NDC or a line number. Without
     # it both detectors would match a detail file and the load would stop

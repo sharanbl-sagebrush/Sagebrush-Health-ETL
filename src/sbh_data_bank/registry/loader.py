@@ -85,6 +85,15 @@ def load_spec_dir(directory: str | Path) -> list[SourceSpec]:
     duplicates = {k for k in keys if keys.count(k) > 1}
     if duplicates:
         raise SpecLoadError(f"{directory}: duplicate source keys {sorted(duplicates)}")
+    # A variant handed to another source (``loaded_by``) must name a source
+    # that is actually here, or the hand-off is a file nobody loads.
+    for spec in specs:
+        for variant in spec.variants:
+            if variant.loaded_by and variant.loaded_by not in keys:
+                raise SpecLoadError(
+                    f"{directory}: {spec.key} variant {variant.name!r} is loaded by "
+                    f"{variant.loaded_by!r}, which is not a spec in this directory"
+                )
     # Sorted by key rather than file name, so callers get a stable order that
     # does not depend on how files happen to be named.
     return sorted(specs, key=lambda s: s.key)

@@ -242,13 +242,18 @@ variants:
         sources: ['Waiting for Check Date']
         type: date
         date_formats: ['%m/%d/%Y', '%Y-%m-%d']
-      # Typed date with date-only formats. If the vendor writes a time component in
-      # these `*DateTime` columns the value will not parse and the row quarantines,
-      # which is the intended "stop rather than reinterpret" behaviour.
+      # Text, not date, since 2026-10-22. This vendor column has carried four
+      # shapes: a full timestamp (2023-2026 history), a "-" placeholder
+      # (Jan-Apr 2026), absent with `Waiting for Check Time` in its place
+      # (Mar-Jun 2026), and a bare time of day with the date beside it in
+      # `Waiting for Check Date` (the 2026-10 pulls, which quarantined 100%
+      # of rows as BAD_DATE while this was typed date). The headers are the
+      # same in the first and last shapes, so no variant detector can tell
+      # them apart; the value is kept as delivered. The workflow date itself
+      # is `waiting_for_check_date`, and reconciliation reads neither.
       - target: waiting_for_check_datetime
         sources: ['Waiting for Check DateTime']
-        type: date
-        date_formats: ['%m/%d/%Y', '%Y-%m-%d']
+        type: text
       # The third delivery split `Waiting for Check DateTime` into the date
       # above plus this time-of-day; landed as text (no time type).
       - target: waiting_for_check_time

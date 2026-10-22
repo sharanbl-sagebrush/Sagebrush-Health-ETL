@@ -243,6 +243,12 @@ class VariantAction(StrEnum):
     summary read as though it were detail. This says "we know exactly what this
     is, and we are deliberately not loading it", which is a different and much
     safer statement.
+
+    The same action also hands a shape to another source. Since 2026-10-22
+    the Cardinal summary is loaded by its own spec, so the detail spec
+    recognises the summary with ``loaded_by`` naming that source, and the
+    summary spec recognises the detail the same way. Nothing is dropped and
+    nothing is loaded twice.
     """
 
 
@@ -590,9 +596,13 @@ class SchemaVariant(BaseModel):
     columns: list[ColumnSpec] = Field(min_length=1)
     action: VariantAction = VariantAction.LOAD
     superseded_by: str | None = None
-    """Name of the variant that replaces this one. Required when the action is
-    recognise_only, so the reason is recorded next to the decision rather than
-    in a commit message."""
+    """Name of the variant that replaces this one. One of this and
+    ``loaded_by`` is required when the action is recognise_only, so the
+    reason is recorded next to the decision rather than in a commit message."""
+    loaded_by: SourceKey | None = None
+    """Key of the source whose spec loads this shape. The other way a
+    recognise_only variant states its reason: the file is somebody else's.
+    The registry checks the key exists."""
     description: str = ""
 
     @property
@@ -600,20 +610,24 @@ class SchemaVariant(BaseModel):
         # Convenience for "will rows from this variant be written".
         return self.action is VariantAction.LOAD
 
-    # Rejects a mismatch between ``action`` and ``superseded_by``: the two
-    # fields describe one decision and must agree.
+    # Rejects a mismatch between ``action`` and its reason fields: the three
+    # describe one decision and must agree.
     @model_validator(mode="after")
     def _check_action(self) -> Self:
-        # Not loading needs a stated reason, in the form of the variant that
-        # covers the same data.
-        if self.action is VariantAction.RECOGNISE_ONLY and not self.superseded_by:
+        reasons = [r for r in (self.superseded_by, self.loaded_by) if r]
+        # Not loading needs exactly one stated reason: the sibling variant
+        # that covers the same data, or the source that loads this shape.
+        if self.action is VariantAction.RECOGNISE_ONLY and len(reasons) != 1:
             raise ValueError(
-                f"variant {self.name!r} is recognise_only and must name the variant "
-                "that supersedes it"
+                f"variant {self.name!r} is recognise_only and must name either the variant "
+                "that supersedes it (superseded_by) or the source that loads it (loaded_by)"
             )
-        # A loading variant that also claims to be superseded is contradictory.
-        if self.action is VariantAction.LOAD and self.superseded_by:
-            raise ValueError(f"variant {self.name!r} loads, so it cannot be superseded")
+        # A loading variant that also claims to be superseded, or to belong to
+        # another source, is contradictory.
+        if self.action is VariantAction.LOAD and reasons:
+            raise ValueError(
+                f"variant {self.name!r} loads, so it cannot be superseded or loaded elsewhere"
+            )
         return self
 
     # Rejects two columns writing to the same destination, which would make
@@ -700,6 +714,15 @@ class SourceSpec(BaseModel):
     # Asymmetric defaults on purpose: a vendor adding a column is usually
     # harmless and worth a warning, while a required column going missing
     # means the file is not what the spec describes.
+
+    max_quarantine_rate: float = Field(default=0.05, ge=0.0, le=1.0)
+    """The fraction of a file's rows that may quarantine before the engine
+    holds the whole file instead of loading what parsed (D16). A wrong date
+    format or a column that changed type quarantines every row; loading that
+    file commits its hash with nothing behind it, and the corrected spec can
+    never load it again. Every source loaded so far quarantined nothing; 5%
+    is the line between a few bad rows and a file that is not what the spec
+    describes."""
     expected_cadence_days: int | None = None
     """Used by freshness alerting. None means irregular."""
     # A staleness threshold ("alert if nothing seen in N days"), not a
@@ -785,6 +808,13 @@ class SourceSpec(BaseModel):
                 raise ValueError(
                     f"{self.key}: variant {variant.name!r} is superseded by "
                     f"{variant.superseded_by!r}, which does not exist"
+                )
+        # A shape handed to another source must not be handed to this one.
+        for variant in self.variants:
+            if variant.loaded_by == self.key:
+                raise ValueError(
+                    f"{self.key}: variant {variant.name!r} says it is loaded by this very "
+                    "source; use action: load or name another source"
                 )
         # A spec made only of recognise_only variants would never land a row.
         if not any(v.loads for v in self.variants):

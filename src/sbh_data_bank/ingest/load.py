@@ -367,14 +367,17 @@ def _load_stream(
         spec.key, filename, LoadOutcome.LOADED, binding=binding, sheet=sheet, header=header
     )
 
-    # Gate 1: a recognise_only variant (the Cardinal 9-column summary). We
-    # know what the file is, and we deliberately do not load it.
+    # Gate 1: a recognise_only variant (the Cardinal detail spec meeting the
+    # summary workbook, and vice versa). We know what the file is, and this
+    # spec deliberately does not load it: a sibling variant supersedes it,
+    # or another source's spec is the one that loads it.
     if not binding.variant.loads:
         load.outcome = LoadOutcome.RECOGNISED_NOT_LOADED
-        load.detail = (
-            f"variant {binding.variant.name!r} is superseded by "
-            f"{binding.variant.superseded_by!r}; nothing loaded"
-        )
+        if binding.variant.loaded_by:
+            reason = f"is loaded by source {binding.variant.loaded_by!r}"
+        else:
+            reason = f"is superseded by {binding.variant.superseded_by!r}"
+        load.detail = f"variant {binding.variant.name!r} {reason}; nothing loaded"
         return load
 
     # Gate 2: schema drift the spec's policy says must block. The binder has

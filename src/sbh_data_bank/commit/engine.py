@@ -11,11 +11,16 @@ delivery touches, lets it decide, and writes exactly what it decided.
 What can stop a load, in the order it is checked, and what is written then:
 
 ===========================  ===================================================
-``DUPLICATE_FILE``           the content hash already has a committed batch;
-                             the attempt is recorded, nothing else
+``DUPLICATE_FILE``           this source already has a committed batch for
+                             the content hash; the attempt is recorded,
+                             nothing else
 the load's own outcome       ``UNRECOGNISED``, ``BLOCKED_BY_DRIFT``,
                              ``CONTROL_TOTAL_MISMATCH``, ... (``LoadOutcome``):
                              the file is registered, the batch says why
+``HELD_QUARANTINE_RATE``     more of the rows quarantined than the spec's
+                             ``max_quarantine_rate`` allows (D16): the file
+                             is not what the spec describes, so none of it
+                             is committed and its hash stays loadable
 ``AS_OF_UNAVAILABLE``        no dated folder, stamp, filename date or operator
                              date (D5): refused, not guessed
 ``HELD_AS_OF_FLOOR``         a row is dated after the as-of (D4)
@@ -122,6 +127,7 @@ class CommitOutcome:
     HELD_AS_OF_FLOOR = "HELD_AS_OF_FLOOR"
     HELD_FILENAME_WINDOW = "HELD_FILENAME_WINDOW"
     HELD_COVERAGE_UNKNOWN = "HELD_COVERAGE_UNKNOWN"
+    HELD_QUARANTINE_RATE = "HELD_QUARANTINE_RATE"
 
 
 #: D12: a filename window wider than the data by more than this, at either
@@ -382,7 +388,9 @@ class CommitEngine:
             )
 
         with self._store.transaction():
-            found = self._store.find_source_file(self.tenant_id, load.file_hash, load.sheet)
+            found = self._store.find_source_file(
+                self.tenant_id, spec.key, load.file_hash, load.sheet
+            )
             batch.batch_id = self._batch_id(spec, load, found.attempts if found else 0)
             if found is not None and found.committed:
                 # Already committed under this content hash: record the
@@ -479,6 +487,15 @@ class CommitEngine:
         or ``None`` when the rule may run."""
         if not load.ok:
             return load.outcome, load.detail
+        rate = load.quarantine_rate()
+        if rate > spec.max_quarantine_rate:
+            c = load.counters
+            return (
+                CommitOutcome.HELD_QUARANTINE_RATE,
+                f"{c.rows_quarantined} of {c.rows_read} rows quarantined ({rate:.1%}); the "
+                f"spec allows {spec.max_quarantine_rate:.0%}. Nothing committed: fix the spec "
+                "or the file and run it again",
+            )
         if as_of is None:
             return CommitOutcome.AS_OF_UNAVAILABLE, as_of_problem or "no as-of date"
         event_column = spec.event_date_column

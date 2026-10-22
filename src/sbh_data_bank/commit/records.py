@@ -271,11 +271,13 @@ class Store(Protocol):
     def finish_run(self, run: RunRecord) -> None: ...
 
     def find_source_file(
-        self, tenant_id: str, file_sha256: str, sheet_name: str | None
+        self, tenant_id: str, source_key: str, file_sha256: str, sheet_name: str | None
     ) -> FoundFile | None:
-        """The file already registered under this content hash, or ``None``.
-        A committed batch is one with outcome LOADED; a file refused or held
-        before is not a duplicate."""
+        """The file this source already registered under this content hash,
+        or ``None``. A committed batch is one with outcome LOADED; a file
+        refused or held before is not a duplicate. The same bytes seen by
+        another source are that source's own file: two specs can share one
+        workbook (Cardinal's summary and detail) and each decides for itself."""
         ...
 
     def insert_source_file(self, record: SourceFileRecord) -> int:

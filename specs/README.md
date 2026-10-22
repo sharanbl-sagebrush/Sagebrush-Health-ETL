@@ -29,6 +29,7 @@ startup failure, not a setting that silently does nothing.
 | `constants` | Values injected into every row. One Pharmaforce spec serves two sites this way. |
 | `on_new_column` | Drift policy when the vendor adds a column. Default `warn`. See `DriftPolicy`. |
 | `on_missing_column` | Drift policy when an expected column vanishes. Default `fail`. |
+| `max_quarantine_rate` | Fraction of a file's rows that may quarantine before the engine holds the whole file (`HELD_QUARANTINE_RATE`) instead of loading what parsed. Default `0.05`. Decision D17. |
 | `expected_cadence_days` | Staleness threshold for freshness alerting ("alert if nothing seen in N days"), not a schedule. `null` means irregular. Nothing consumes it yet. |
 | `coverage_start` | ISO date before which the source has no data, so absence before it is not a gap. |
 | `event_date` | The date column that says when the business event happened (invoice date, fill date), or `as_of` for a snapshot source whose rows carry no date. Must be a `date` column in every loading variant. Enables the as-of floor, coverage and vanish. Decision D1. |
@@ -50,7 +51,8 @@ startup failure, not a setting that silently does nothing.
 | `read` | How to find the header and data rows. See `ReadSpec`. Omit for a plain CSV with the header on row 0. |
 | `columns` | One `ColumnSpec` per target column. At least one; targets must be unique. |
 | `action` | `load` (default) or `recognise_only`. See `VariantAction`. |
-| `superseded_by` | Name of the variant that replaces this one. Required with `recognise_only`, forbidden with `load`. |
+| `superseded_by` | Name of the sibling variant that replaces this one. A `recognise_only` variant needs exactly one of this and `loaded_by`; a `load` variant has neither. |
+| `loaded_by` | Key of the source whose spec loads this shape, when two sources match the same filename hint (the two Cardinal specs). The registry checks the key exists. Decision D16. |
 | `description` | Why this variant exists. |
 
 Every variant must declare every natural-key column, so a file of the wrong

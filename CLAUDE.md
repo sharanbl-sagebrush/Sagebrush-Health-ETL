@@ -19,14 +19,18 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
 
 ## The state of things
 
-- 19 source specs in `specs/`, every one verified by loading the real extract
+- 20 source specs in `specs/`, every one verified by loading the real extract
+  (Cardinal's summary and detail reports are two sources since 2026-10-22, D16)
 - `store/schema.py` generates the layered DDL from the specs: `landed`,
   `typed` and `curated` tables per source plus `meta` and `stg`
-  (`python scripts/migrate.py --dry-run` prints it, 153 statements).
-  **Applied to `sbh_data_bank` on Azure 2026-10-21**: 81 tables, the 57
-  layered ones plus `meta` and `stg`. The 19 `raw.*` tables predate the
-  layered decision, were never written to, and are left alone until dropped
-  explicitly. Re-running the migration is a no-op
+  (`python scripts/migrate.py --dry-run` prints it, 161 statements).
+  **Applied to `sbh_data_bank` on Azure 2026-10-21**, re-applied 2026-10-22
+  after the fifteen empty tables of five changed specs were dropped by
+  hand: 60 layered tables plus `meta` and `stg`. The 19 `raw.*` tables
+  predate the layered decision, were never written to, and are left alone
+  until dropped explicitly. Re-running the migration is a no-op; it only
+  creates what is missing and never alters a column, so a spec change to a
+  table with rows is a decision about those rows first
 - 460 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
@@ -52,8 +56,8 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   engine counters identical to the dry runs. Results and the two decisions
   it forced (D14 creation stamps outside the hash, D15 declared scale) are
   in `docs/decision-record.md`
-- **Not yet built**: the acquire step, the quarantine-rate threshold,
-  alerting, re-running typed from landed in the database
+- **Not yet built**: the acquire step, alerting, re-running typed from
+  landed in the database
 
 ## Rules that came from real defects
 
@@ -108,6 +112,19 @@ is built from them, and a value that already fits is never touched (D15).
 `Created At` on every export; without `row_hash_exclude` the second delivery
 corrected 19,643 of 19,644 unchanged rows (D14).
 
+**A file's identity is its source plus its bytes.** Two specs can see one
+workbook: Cardinal's summary and detail both match `cardinal.*invoice`, and
+each recognises the other's shape with `loaded_by` (D16). Keyed on content
+hash alone, the second spec would have reused the first's file record under
+the wrong source key. `uq_source_file` carries `source_key`, and a duplicate
+is a duplicate for one source.
+
+**A file past its quarantine rate is held, not loaded empty.** PRxP's
+2026-10 pulls quarantined 100% of their rows when a vendor column changed
+shape. Committed as `LOADED` with nothing behind them, their hashes would
+have been duplicates forever to the corrected spec. `max_quarantine_rate`
+(5% by default) holds the file with its hash still loadable (D17).
+
 ## Storage layers
 
 Decided 2026-10-07; reasoning in `docs/architecture-and-plan.md`, "Storage
@@ -160,7 +177,8 @@ Vanish stays on for McKesson and is applied, not merely reported (decided
 file whose rows contradict the window its name claims.
 
 **What the commit engine refuses or holds** (`commit/engine.py`): a
-duplicate content hash, a load that is not ok, no as-of, an as-of floor
+content hash this source already committed, a load that is not ok, a
+quarantine rate past the spec's limit, no as-of, an as-of floor
 violation, an unknowable coverage window on a source that vanishes, a
 filename window the data contradicts, and a conflict. Every one leaves a
 `meta.source_file` and a `meta.batch` row and nothing else. A late file is
@@ -201,7 +219,7 @@ src/sbh_data_bank/
               landed, typed, curated and quarantine; a SQL store and an
               in-memory store behind one interface
   store/      config, connection, ledger schema
-specs/        19 source specs (YAML) — generated once, hand-edited since
+specs/        20 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
               trace_file, commit_file, backfill
@@ -225,6 +243,8 @@ python scripts/backfill.py --env-file .env --actor <you> --fast [--only ...]   #
 Always pass `--fast` for a real load: the batched path is the proven one and
 the row-at-a-time path takes minutes per thousand rows. A dry run of every
 source at once holds every row in memory; run `--only` one source at a time.
+Every run ends with the files under the root that no spec claims; a vendor
+file renamed past every pattern shows up there and nowhere else.
 
 The vendor extracts are PHI and live outside this repository. Point at them
 with `SBH_SOURCE_ROOT`.

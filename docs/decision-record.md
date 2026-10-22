@@ -434,3 +434,84 @@ undercounts null-against-value differences (three-valued logic turns the
 inequality into UNKNOWN), which is why the database check found no
 column and the Python one found three. Compare in Python, over the values
 the hash saw.
+
+## D16. Cardinal's summary report loads as its own source (2026-10-22, developer)
+
+The standing instruction is that every report keeps its own table (D9:
+"keep all the source files in separate tables"), and the developer
+confirmed it for Cardinal on 2026-10-22. The summary workbook also holds
+5,326 invoices ($16.2M) from before the detail report's 24-month window,
+which no detail pull can return. `wholesaler.cardinal.invoice_summary`
+now loads the 9-column "Cardinal_Invoice" report; `wholesaler.cardinal.
+invoice` goes on loading the 17-column "Cardinal_Invoice Review" detail.
+The 2026-09-04 instruction to prefer the latest file is withdrawn for
+Cardinal; the summary variant's `superseded_by: invoice_detail` is gone.
+
+Both reports match the same filename hint, so each spec recognises the
+other's shape by header and declares it `recognise_only` with a new
+field, `loaded_by`, naming the source that does load it. A recognise-only
+variant must give exactly one reason, `superseded_by` (a sibling) or
+`loaded_by` (another source); the registry refuses a `loaded_by` that
+names no spec; the shipped-spec rule that no detector accepts another
+spec's file exempts a declared hand-off and nothing else.
+
+A finding on the way: the report has two grains under one header. The
+history file is one row per invoice ((account, invoice) unique across all
+13,323 rows); the 2026 pulls are one row per invoice line under the same
+nine headers (1,450 rows for 548 invoices, the same row count, invoice
+count and purchase-dollar sum as the detail workbook of the period). The
+occurrence number absorbs this, as it does for McKesson's split
+shipments, and the spec header records it. Reconciliation must not treat
+a summary row as an invoice without checking its period, and must sum
+one Cardinal table, not both.
+
+**A file's identity is its source plus its bytes.** `uq_source_file` was
+(tenant, hash, sheet), so the summary spec would have found the detail
+spec's `meta.source_file` row for the same workbook and written its
+batches and rows against a file record carrying the wrong source key.
+The constraint is now (tenant, source, hash, sheet), `find_source_file`
+takes the source key, and `DUPLICATE_FILE` is a duplicate for one
+source. The migration swaps the constraint once, guarded on whether
+`source_key` is already in it, and is a no-op after.
+
+## D17. A file past its quarantine rate is held (2026-10-22, developer)
+
+The PRxP 2026-10 pulls quarantined 100% of their rows (1,091 and 1,056)
+because the vendor's `Waiting for Check DateTime` column now carries a
+time of day where the spec expected a date. As the engine stood, each
+would have committed as `LOADED` with zero typed rows and every row in
+quarantine; and since only a LOADED batch makes a hash a duplicate, the
+corrected spec could never have loaded the same file again. That is the
+case the architecture plan's quarantine threshold was for, and it is now
+built: a spec's `max_quarantine_rate` (default 0.05) holds the file as
+`HELD_QUARANTINE_RATE` with nothing committed, the attempt on record and
+the hash still loadable. Every source loaded so far quarantined nothing,
+so the default sits above every real file; two engine tests that make
+half of a three-row file bad on purpose raise it explicitly.
+
+## PRxP: `Waiting for Check DateTime` is text (2026-10-22, developer)
+
+Across the five PRxP deliveries this one vendor column has carried a full
+timestamp (the 2023-2026 history), a "-" placeholder (Jan-Apr 2026),
+nothing, with `Waiting for Check Time` in its place (Mar-Jun 2026), and a
+bare time of day beside a separate date column (the 2026-10 pulls). The
+first and last shapes have identical headers, so no variant detector can
+tell them apart, and typing it as a date meant dropping the time part in
+one shape and quarantining the whole file in another. It is text now,
+kept as delivered; `waiting_for_check_date` is the typed date;
+reconciliation reads neither. Consequence, visible in the load: 517 of the
+May-July rows correct their Mar-Jun versions because the time moved
+columns between the two exports.
+
+## Files no spec claims are listed (2026-10-22, developer)
+
+`discover` visits only files a spec's filename patterns accept, so a
+vendor file renamed past every pattern was never visited and never
+reported: the one way a delivery could go missing without a record.
+`commit.discover.unclaimed` lists every data file or zip under the root
+that no spec claims, and the backfill prints it at the end of every run.
+On the root today the list has thirteen entries, all expected: the six
+"Reports for Download" workbooks (the portal's index, one per drop), four
+zip copies of folders already loaded, the Excel-to-table mapping
+workbook, and `Pricing file (LIVE).xlsx`, which has no spec and may want
+one.

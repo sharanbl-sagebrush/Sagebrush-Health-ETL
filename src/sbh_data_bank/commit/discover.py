@@ -16,11 +16,18 @@ delivery with no as-of sorts last; the engine will refuse it with
 
 Folders that hold things other than vendor deliveries (the consultant's
 copies, the hand-cut test subsets, the validation pack) are skipped by name.
+
+``unclaimed`` is the other half of discovery: every data file under the root
+that no spec's patterns accept. A renamed vendor file would otherwise fall
+through discovery silently, which is the one way a delivery could go
+missing without a record; the backfill prints this list at the end of
+every run.
 """
 
 from __future__ import annotations
 
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -28,7 +35,14 @@ from pathlib import Path
 from sbh_data_bank.curate.delivery import AsOf, AsOfUnavailableError, resolve_as_of
 from sbh_data_bank.registry.spec import SourceSpec
 
-__all__ = ["DATA_SUFFIXES", "DEFAULT_SKIP_DIRS", "Found", "discover", "in_as_of_order"]
+__all__ = [
+    "DATA_SUFFIXES",
+    "DEFAULT_SKIP_DIRS",
+    "Found",
+    "discover",
+    "in_as_of_order",
+    "unclaimed",
+]
 
 #: Folders under a root that are never vendor deliveries, matched on any
 #: path component.
@@ -80,6 +94,29 @@ def discover(
         if suffix in DATA_SUFFIXES and spec.matches_filename(path.name):
             found.append(Found(path))
     return found
+
+
+def unclaimed(
+    specs: Iterable[SourceSpec], root: Path, *, skip_dirs: frozenset[str] = DEFAULT_SKIP_DIRS
+) -> list[Path]:
+    """Every data file or zip under ``root`` that no spec's patterns accept,
+    as paths relative to the root, in path order. The skipped folders are
+    the same ones ``discover`` skips."""
+    specs = list(specs)
+    orphans: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or any(part in skip_dirs for part in path.parts):
+            continue
+        suffix = path.suffix.lower()
+        if suffix == ".zip":
+            name = path.stem
+        elif suffix in DATA_SUFFIXES:
+            name = path.name
+        else:
+            continue
+        if not any(spec.matches_filename(name) for spec in specs):
+            orphans.append(path.relative_to(root))
+    return orphans
 
 
 def in_as_of_order(

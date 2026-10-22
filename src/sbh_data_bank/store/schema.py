@@ -273,7 +273,7 @@ CREATE TABLE meta.source_file (
     coverage_from    DATE           NULL,
     coverage_to      DATE           NULL,
     header_json      NVARCHAR(MAX)  NULL,
-    CONSTRAINT uq_source_file UNIQUE (tenant_id, file_sha256, sheet_name)
+    CONSTRAINT uq_source_file UNIQUE (tenant_id, source_key, file_sha256, sheet_name)
 );
 
 -- One row per attempt to load one file (or one worksheet of one file).
@@ -412,6 +412,27 @@ _META_COLUMNS_ADDED: tuple[tuple[str, str, str], ...] = (
 )
 
 
+#: A file's identity became (source, content hash, sheet) on 2026-10-22,
+#: when the Cardinal summary got its own spec and two sources began to see
+#: the same workbook. A database whose constraint predates that still has
+#: it on (tenant, hash, sheet); this swaps it, once, and is a no-op after.
+_SOURCE_FILE_IDENTITY_REPAIR = """
+IF EXISTS (
+    SELECT 1 FROM sys.key_constraints AS kc
+    WHERE kc.name = 'uq_source_file' AND kc.parent_object_id = OBJECT_ID('meta.source_file')
+    AND NOT EXISTS (
+        SELECT 1 FROM sys.index_columns AS ic
+        JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        WHERE ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id
+        AND c.name = 'source_key'))
+BEGIN
+    ALTER TABLE meta.source_file DROP CONSTRAINT uq_source_file
+    ALTER TABLE meta.source_file ADD CONSTRAINT uq_source_file
+        UNIQUE (tenant_id, source_key, file_sha256, sheet_name)
+END
+""".strip()
+
+
 def meta_statements() -> list[str]:
     """Every statement needed for the metadata and staging schema.
 
@@ -421,12 +442,13 @@ def meta_statements() -> list[str]:
 
     Returns the six ``CREATE SCHEMA`` guards, the five tables, the guarded
     column additions for tables that were live before those columns existed,
-    and two indexes, in dependency order.
+    the file-identity constraint repair, and two indexes, in dependency order.
     """
     # Split the script on ';' and drop empty fragments. This is why no ';'
     # may appear inside a SQL comment in _META_TABLES.
     statements = [s.strip() for s in _META_TABLES.split(";") if s.strip()]
     statements += [_add_column(t, c, d) for t, c, d in _META_COLUMNS_ADDED]
+    statements.append(_SOURCE_FILE_IDENTITY_REPAIR)
     # "What has source X delivered lately" - the freshness-alerting query.
     statements.append(
         _index("ix_batch_source", "meta.batch", "(tenant_id, source_key, started_at)")

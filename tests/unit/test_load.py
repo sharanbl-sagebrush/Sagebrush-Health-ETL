@@ -282,9 +282,9 @@ class TestSupersededVariant:
     it does not raise an unknown-file alert, but nothing is loaded."""
 
     def test_the_cardinal_summary_is_recognised_and_not_loaded(self, tmp_path, cardinal):
-        """Per the instruction to use the latest Cardinal file: the summary
-        carries the same invoices as the detail report, so loading both would
-        double-count every purchase."""
+        """The detail spec identifies the summary and loads nothing: since
+        2026-10-22 the summary has its own spec and table, and the detail
+        says so with ``loaded_by`` rather than dropping the file."""
         # The 9-column summary header: no NDC, no line number, no quantities.
         header = (
             "Account #,Account Name,Account Alias,PO #,Invoice #,Invoice Date,"
@@ -300,7 +300,38 @@ class TestSupersededVariant:
         assert load.variant_name == "invoice_summary"
         assert load.rows == []
         assert not load.ok
-        assert "superseded by 'invoice_detail'" in load.detail
+        assert "loaded by source 'wholesaler.cardinal.invoice_summary'" in load.detail
+
+    def test_the_summary_spec_loads_the_summary_and_names_the_detail(self, tmp_path, registry):
+        """The reciprocal hand-off: the summary spec loads the 9-column file,
+        footer and all, and recognises the 17-column detail as the detail
+        spec's file."""
+        summary = registry.require("wholesaler.cardinal.invoice_summary")
+        header = (
+            "Account #,Account Name,Account Alias,PO #,Invoice #,Invoice Date,"
+            'Invoice Type,Purchase/Return,"Purchase Dollars (Exclude Taxes, Fees & Surcharges)"'
+        )
+        row = '2150438824,PHARMA BUDIES,alias,,7403554602,2025-01-01,Invoice,Purchase,"$3,767.71 "'
+        totals = ',,,,,,,,"$3,767.71 "'
+        load = load_file(_write(tmp_path, "Cardinal_Invoice old.csv", header, row, totals), summary)
+        assert load.outcome == LoadOutcome.LOADED
+        assert load.variant_name == "invoice_summary"
+        assert (load.counters.rows_read, load.counters.rows_ok) == (1, 1)
+        assert load.footer is not None and load.footer.agrees
+
+        detail_header = (
+            "Account #,Account Name,Account Alias,PO #,Invoice #,Invoice Line #,Invoice Date,"
+            "Invoice Type,Purchase/Return,CIN,NDC,Trade Name,Generic Name,"
+            "Unit price (Current Invoice),Original Ordered Qty,Ship Qty,"
+            '"Purchase Dollars (Exclude Taxes, Fees & Surcharges)"'
+        )
+        detail = _write(
+            tmp_path, "Cardinal_Invoice Review.csv", detail_header, "a,,,,1,000010,,,,,,,,,,,"
+        )
+        other = load_file(detail, summary)
+        assert other.outcome == LoadOutcome.RECOGNISED_NOT_LOADED
+        assert other.variant_name == "invoice_detail"
+        assert "loaded by source 'wholesaler.cardinal.invoice'" in other.detail
 
 
 class TestUnrecognisedAndDrift:
