@@ -31,13 +31,18 @@ from sbh_data_bank.commit.records import CurrentQuery
 from sbh_data_bank.commit.sql import (
     SqlStore,
     curated_columns,
+    curated_input_sizes,
     current_rows_sql,
+    input_size,
     landed_columns,
+    landed_input_sizes,
     supersede_sql,
     typed_columns,
+    typed_input_sizes,
 )
 from sbh_data_bank.curate.delivery import Coverage
 from sbh_data_bank.ingest.load import LoadOutcome
+from sbh_data_bank.registry.loader import SpecRegistry
 from sbh_data_bank.registry.spec import CoverageSource, SourceSpec
 from sbh_data_bank.store.schema import curated_statements, landed_statements, typed_statements
 
@@ -540,6 +545,9 @@ class _FakeCursor:
         self.calls.append((sql, ("<many>",)))
         self.many.append((sql, list(rows)))
 
+    def setinputsizes(self, sizes):
+        self.calls.append(("<setinputsizes>", (list(sizes),)))
+
     def fetchone(self):
         return self._next[0] if self._next else None
 
@@ -556,3 +564,69 @@ class _FakeDatabase:
     def transaction(self):
         yield self.cursor
         self.cursor.commits += 1
+
+
+class TestFastPathDeclaresEveryParameter:
+    """With fast_executemany on, pyodbc guesses parameter types from the data
+    and has rounded DECIMAL scale and mis-sized NVARCHAR(MAX) before. The
+    store therefore declares every parameter from the DDL, and this is the
+    check that the declaration and the INSERT column list agree, column for
+    column, for every shipped spec."""
+
+    @pytest.fixture
+    def registry(self):
+        return SpecRegistry.from_dir(Path(__file__).resolve().parents[2] / "specs")
+
+    def test_one_declared_type_per_insert_column_for_every_spec(self, registry):
+        for spec in registry:
+            assert len(landed_input_sizes(spec)) == len(landed_columns(spec)), spec.key
+            assert len(typed_input_sizes(spec)) == len(typed_columns(spec)), spec.key
+            assert len(curated_input_sizes(spec)) == len(curated_columns(spec)), spec.key
+
+    def test_the_ddl_tokens_map_to_odbc_declarations(self):
+        assert input_size("NVARCHAR(MAX)") == (-9, 0, 0)
+        assert input_size("NVARCHAR(64)") == (-9, 64, 0)
+        assert input_size("CHAR(64)") == (1, 64, 0)
+        assert input_size("DECIMAL(38,4)") == (3, 38, 4)
+        for inferred in ("BIGINT", "INT", "DATE", "BIT", "DATETIME2(3)"):
+            assert input_size(inferred) is None
+
+    def test_money_columns_declare_their_scale(self, registry):
+        spec = registry.get("wholesaler.mckesson.invoice")
+        sizes = dict(zip(typed_columns(spec), typed_input_sizes(spec), strict=True))
+        assert sizes["extended_price"] == (3, 38, 4)
+        assert sizes["row_hash"] == (1, 64, 0)
+
+    def _run(self, tmp_path, fast: bool) -> tuple[_FakeCursor, CommitResult]:
+        spec = _spec()
+        cursor = _FakeCursor()
+        engine = CommitEngine(
+            SqlStore(_FakeDatabase(cursor), fast_executemany=fast),
+            tenant_id="t1",
+            actor="tester",
+            clock=lambda: CLOCK,
+            deterministic_ids=True,
+        )
+        path = _write(tmp_path, JAN, A_X, B_X)
+        (result,) = engine.commit_path(spec, path, run_id="run1", root=tmp_path)
+        return cursor, result
+
+    def test_a_fast_store_declares_before_each_batch_and_clears_after(self, tmp_path):
+        cursor, result = self._run(tmp_path, fast=True)
+        assert result.committed
+        assert cursor.fast_executemany is True
+        shapes = [params[0] for sql, params in cursor.calls if sql == "<setinputsizes>"]
+        inserts = [sql for sql, params in cursor.calls if params == ("<many>",)]
+        assert inserts
+        # Every batch insert is preceded by a declaration and followed by a reset.
+        assert len([s for s in shapes if s]) == len(inserts)
+        assert len([s for s in shapes if not s]) == len(inserts)
+        spec = _spec()
+        landed = next(s for s in shapes if s and len(s) == len(landed_columns(spec)))
+        # Every landed cell, plus extra_cells, is declared NVARCHAR(MAX).
+        assert landed.count((-9, 0, 0)) == len(spec.landed_targets) + 1
+
+    def test_a_slow_store_never_declares(self, tmp_path):
+        cursor, result = self._run(tmp_path, fast=False)
+        assert result.committed
+        assert not [1 for sql, _ in cursor.calls if sql == "<setinputsizes>"]

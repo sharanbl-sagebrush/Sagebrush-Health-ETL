@@ -27,6 +27,9 @@ Options
     --only <key>...     these specs only; --skip <key>... all but these
     --operator-date     an as-of for files that have no other source of one
     --actor <name>      ``created_by`` on every row
+    --fast              batched inserts (pyodbc fast_executemany with every
+                        parameter declared from the DDL); one round trip per
+                        batch instead of one per row
 
 PHI: prints filenames, counts, outcomes and reason text. Never a cell value.
 """
@@ -197,6 +200,7 @@ def main() -> int:
     parser.add_argument("--skip", nargs="*", default=[])
     parser.add_argument("--operator-date", type=date.fromisoformat)
     parser.add_argument("--actor")
+    parser.add_argument("--fast", action="store_true")
     parser.add_argument("--specs", type=Path, default=REPO / "specs")
     args = parser.parse_args()
 
@@ -227,7 +231,7 @@ def main() -> int:
     print(f"backfilling {settings.describe()} from {root}")
     with Database(settings) as database:
         report = backfill(
-            SqlStore(database),
+            SqlStore(database, fast_executemany=args.fast),
             registry,
             root,
             tenant_id=settings.tenant,

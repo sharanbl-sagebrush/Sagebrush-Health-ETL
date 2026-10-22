@@ -50,6 +50,7 @@ def main() -> int:
     parser.add_argument("--operator-date", type=date.fromisoformat)
     parser.add_argument("--actor")
     parser.add_argument("--replay", action="store_true")
+    parser.add_argument("--fast", action="store_true", help="batched inserts (fast_executemany)")
     parser.add_argument("--specs", type=Path, default=REPO / "specs")
     args = parser.parse_args()
 
@@ -89,7 +90,7 @@ def main() -> int:
     print(f"committing to {settings.describe()}")
     with Database(settings) as database:
         engine = CommitEngine(
-            SqlStore(database),
+            SqlStore(database, fast_executemany=args.fast),
             tenant_id=settings.tenant,
             actor=actor,
             deterministic_ids=args.replay,

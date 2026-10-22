@@ -9,10 +9,13 @@ only for the duration of one transaction.
 Two deliberate choices. Every row is written with a parameterised INSERT,
 never by formatting values into SQL: the only text pasted into a statement
 is a column name from a spec, in square brackets. And bulk inserts use
-``executemany`` with ``fast_executemany`` off by default: the fast path
-guesses parameter types from the first row and has a history of truncating
-``DECIMAL`` scale and mis-sizing ``NVARCHAR(MAX)``; it is a flag to turn on
-once it has been proved against the real tables.
+``executemany``, one network round trip per row unless ``fast_executemany``
+is on. The fast path sends the whole batch in one go but guesses parameter
+types from the data and has a history of truncating ``DECIMAL`` scale and
+mis-sizing ``NVARCHAR(MAX)``, so when it is on the store declares every
+parameter's type from the table's own DDL before each batch
+(``setinputsizes``; see ``input_sizes``). Nothing is guessed. Proved against
+the real tables on 2026-10-21 (decision record, "The backfill").
 
 The live-row query for one delivery stages the incoming identities in a
 temp table and joins, rather than building an ``IN`` list: a McKesson
@@ -41,17 +44,26 @@ from sbh_data_bank.commit.records import (
 )
 from sbh_data_bank.curate.rule import CurrentRow
 from sbh_data_bank.registry.spec import SourceSpec
-from sbh_data_bank.store.schema import CURATED_LEDGER_COLUMNS, DEDUP_RULE, table_name
+from sbh_data_bank.store.schema import (
+    CURATED_LEDGER_COLUMNS,
+    DEDUP_RULE,
+    table_name,
+    typed_sql_types,
+)
 
 __all__ = [
     "SqlStore",
     "curated_columns",
+    "curated_input_sizes",
     "curated_ledger_columns",
     "current_rows_sql",
+    "input_sizes",
     "insert_sql",
     "landed_columns",
+    "landed_input_sizes",
     "supersede_sql",
     "typed_columns",
+    "typed_input_sizes",
 ]
 
 
@@ -63,6 +75,7 @@ class _Cursor(Protocol):
 
     def execute(self, sql: str, *params: Any) -> Any: ...
     def executemany(self, sql: str, rows: Sequence[Sequence[Any]]) -> Any: ...
+    def setinputsizes(self, sizes: Any) -> Any: ...
     def fetchone(self) -> Any: ...
     def fetchall(self) -> list[Any]: ...
 
@@ -108,6 +121,82 @@ def curated_columns(spec: SourceSpec) -> list[str]:
 
 def _quote(column: str) -> str:
     return f"[{column}]"
+
+
+# ------------------------------------------------------ parameter types
+
+# ODBC type codes, spelled out so this module does not import pyodbc and the
+# tests stay driver-free. They are the standard values pyodbc exposes as
+# SQL_WVARCHAR, SQL_CHAR and SQL_DECIMAL.
+_SQL_WVARCHAR = -9
+_SQL_CHAR = 1
+_SQL_DECIMAL = 3
+
+#: What ``setinputsizes`` takes: ``None`` to let pyodbc infer, or a
+#: ``(type, size, decimal_digits)`` triple.
+InputSize = tuple[int, int, int] | None
+
+
+def input_size(sql_type: str) -> InputSize:
+    """The ``setinputsizes`` entry for one DDL type token.
+
+    Only the types the fast path gets wrong on its own are declared: text
+    (its width, or 0 for ``MAX``), ``CHAR`` and ``DECIMAL`` (precision and
+    scale, which pyodbc otherwise takes from the first row and then rounds
+    every later value to). Integers, bits, dates and datetimes are left to
+    inference, which is exact for those Python types.
+    """
+    token = sql_type.strip().upper()
+    if token.startswith("NVARCHAR("):
+        inner = token[len("NVARCHAR(") : -1]
+        return (_SQL_WVARCHAR, 0 if inner == "MAX" else int(inner), 0)
+    if token.startswith("CHAR("):
+        return (_SQL_CHAR, int(token[len("CHAR(") : -1]), 0)
+    if token.startswith("DECIMAL("):
+        precision, scale = token[len("DECIMAL(") : -1].split(",")
+        return (_SQL_DECIMAL, int(precision), int(scale))
+    return None
+
+
+def input_sizes(sql_types: Sequence[str]) -> list[InputSize]:
+    return [input_size(t) for t in sql_types]
+
+
+_AUDIT_TYPES = ["DATETIME2(3)", "NVARCHAR(128)", "DATETIME2(3)", "NVARCHAR(128)"]
+
+
+def _ledger_types() -> list[str]:
+    return [line.split()[1] for line in CURATED_LEDGER_COLUMNS.splitlines() if line.strip()]
+
+
+def landed_input_sizes(spec: SourceSpec) -> list[InputSize]:
+    """One entry per ``landed_columns`` entry: every cell is ``NVARCHAR(MAX)``."""
+    cells = ["NVARCHAR(MAX)"] * len(spec.landed_targets)
+    return input_sizes(["NVARCHAR(64)", "BIGINT", "INT", *_AUDIT_TYPES, *cells, "NVARCHAR(MAX)"])
+
+
+def typed_input_sizes(spec: SourceSpec) -> list[InputSize]:
+    """One entry per ``typed_columns`` entry, business columns as the DDL types them."""
+    return input_sizes(
+        ["NVARCHAR(64)", "BIGINT", "INT", "CHAR(64)", "CHAR(64)", *_AUDIT_TYPES]
+        + typed_sql_types(spec)
+    )
+
+
+def curated_input_sizes(spec: SourceSpec) -> list[InputSize]:
+    """One entry per ``curated_columns`` entry: the ledger, then the business columns."""
+    return input_sizes([*_ledger_types(), *typed_sql_types(spec)])
+
+
+_INCOMING_INPUT_SIZES = input_sizes(["CHAR(64)", "INT"])
+_QUARANTINE_INPUT_SIZES = input_sizes(
+    ["NVARCHAR(64)", "NVARCHAR(64)", "NVARCHAR(128)", "BIGINT", "INT",
+     "NVARCHAR(400)", "NVARCHAR(MAX)", "NVARCHAR(MAX)", "DATETIME2(3)"]
+)  # fmt: skip
+_FINDING_INPUT_SIZES = input_sizes(
+    ["NVARCHAR(64)", "NVARCHAR(64)", "NVARCHAR(128)", "BIGINT",
+     "NVARCHAR(900)", "NVARCHAR(400)", "BIT", "DATETIME2(3)"]
+)  # fmt: skip
 
 
 def insert_sql(table: str, columns: Sequence[str]) -> str:
@@ -322,6 +411,24 @@ class SqlStore:
             raise RuntimeError("SqlStore is used outside a transaction")
         return self._cursor
 
+    def _executemany(self, sql: str, sizes: Sequence[InputSize], rows: list[tuple]) -> None:
+        """A batch insert. On the fast path every parameter is declared from
+        the DDL first and the declaration is cleared afterwards, so the next
+        statement on the cursor is not bound to this one's shape."""
+        cursor = self.cursor
+        if not self._fast:
+            cursor.executemany(sql, rows)
+            return
+        if len(sizes) != len(rows[0]):
+            raise RuntimeError(
+                f"{len(sizes)} parameter types declared for {len(rows[0])} parameters: {sql[:60]}"
+            )
+        cursor.setinputsizes(list(sizes))
+        try:
+            cursor.executemany(sql, rows)
+        finally:
+            cursor.setinputsizes([])
+
     # --------------------------------------------------------------- meta
 
     def insert_run(self, run: RunRecord) -> None:
@@ -378,7 +485,7 @@ class SqlStore:
         cursor.execute(_INCOMING_CREATE)
         try:
             if query.keys:
-                cursor.executemany(_INCOMING_INSERT, sorted(query.keys))
+                self._executemany(_INCOMING_INSERT, _INCOMING_INPUT_SIZES, sorted(query.keys))
             cursor.execute(sql, tenant_id, *params)
             return [_current_row(tuple(r), query) for r in cursor.fetchall()]
         finally:
@@ -392,8 +499,9 @@ class SqlStore:
         targets = list(spec.landed_targets)
 
         if batch.landed:
-            cursor.executemany(
+            self._executemany(
                 insert_sql(table_name(spec, "landed"), landed_columns(spec)),
+                landed_input_sizes(spec),
                 [
                     (
                         ctx.tenant_id,
@@ -407,8 +515,9 @@ class SqlStore:
                 ],
             )
         if batch.typed:
-            cursor.executemany(
+            self._executemany(
                 insert_sql(table_name(spec, "typed"), typed_columns(spec)),
+                typed_input_sizes(spec),
                 [
                     (
                         ctx.tenant_id,
@@ -423,8 +532,9 @@ class SqlStore:
                 ],
             )
         if batch.curated:
-            cursor.executemany(
+            self._executemany(
                 insert_sql(table_name(spec, "curated"), curated_columns(spec)),
+                curated_input_sizes(spec),
                 [
                     (
                         ctx.tenant_id,
@@ -450,8 +560,9 @@ class SqlStore:
                 ],
             )
         if batch.quarantine:
-            cursor.executemany(
+            self._executemany(
                 _QUARANTINE_INSERT,
+                _QUARANTINE_INPUT_SIZES,
                 [
                     (
                         ctx.tenant_id,
@@ -468,8 +579,9 @@ class SqlStore:
                 ],
             )
         if batch.findings:
-            cursor.executemany(
+            self._executemany(
                 _FINDING_INSERT,
+                _FINDING_INPUT_SIZES,
                 [
                     (
                         ctx.tenant_id,

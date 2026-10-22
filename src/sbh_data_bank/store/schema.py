@@ -503,6 +503,21 @@ def _all_targets(spec: SourceSpec) -> list[tuple[str, FieldType, int | None]]:
     return [(t, seen[t][0], seen[t][1]) for t in spec.landed_targets]
 
 
+def typed_sql_types(spec: SourceSpec) -> list[str]:
+    """The SQL type of every business column of ``typed`` and ``curated``, in
+    ``spec.landed_targets`` order: the same tokens the DDL carries, so the
+    commit engine can declare its parameters exactly as the columns are."""
+    types = []
+    for _target, kind, max_length in _all_targets(spec):
+        sql_type = _SQL_TYPES[kind]
+        if kind is FieldType.TEXT and max_length:
+            # A declared max_length narrows the text column; max(…, 1) guards
+            # against a zero that would be invalid DDL.
+            sql_type = f"NVARCHAR({max(max_length, 1)})"
+        types.append(sql_type)
+    return types
+
+
 def _typed_column_lines(spec: SourceSpec) -> list[str]:
     """One typed, nullable column definition per target, for typed and curated.
 
@@ -511,15 +526,12 @@ def _typed_column_lines(spec: SourceSpec) -> list[str]:
     table passed. Square brackets quote the name, so a target that is also a
     T-SQL keyword (e.g. "transaction") is still valid.
     """
-    lines = []
-    for target, kind, max_length in _all_targets(spec):
-        sql_type = _SQL_TYPES[kind]
-        if kind is FieldType.TEXT and max_length:
-            # A declared max_length narrows the text column; max(…, 1) guards
-            # against a zero that would be invalid DDL.
-            sql_type = f"NVARCHAR({max(max_length, 1)})"
-        lines.append(f"    [{target}] {sql_type} NULL,")
-    return lines
+    return [
+        f"    [{target}] {sql_type} NULL,"
+        for (target, _kind, _max), sql_type in zip(
+            _all_targets(spec), typed_sql_types(spec), strict=True
+        )
+    ]
 
 
 def _create(name: str, body: list[str]) -> str:
