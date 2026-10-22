@@ -28,8 +28,9 @@ monetary is :class:`~decimal.Decimal` end to end.
 The parsers, and what each returns on success:
 
 ``parse_text``       ``str``, trimmed; null-ish placeholders become empty
-``parse_decimal``    ``Decimal``; handles ``$``, commas, ``(neg)``, ``neg-``
-``parse_currency``   same as ``parse_decimal``, kept distinct on purpose
+``parse_decimal``    ``Decimal``; handles ``$``, commas, ``(neg)``, ``neg-``;
+                     at most ``QUANTITY_PLACES`` decimal places
+``parse_currency``   same cleaning, at most ``CURRENCY_PLACES`` decimal places
 ``parse_int``        ``int``; rejects a fractional part
 ``parse_bool``       ``bool`` from the spellings vendors actually use
 ``parse_date``       ``date`` from an explicit, ordered list of formats
@@ -52,10 +53,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, DecimalException
+from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from typing import Generic, TypeVar
 
 __all__ = [
+    "CURRENCY_PLACES",
+    "QUANTITY_PLACES",
     "ParseResult",
     "parse_bool",
     "parse_currency",
@@ -66,6 +69,17 @@ __all__ = [
 ]
 
 T = TypeVar("T")
+
+#: The decimal places the typed layer keeps (D15, 2026-10-21). These are the
+#: scales of the ledger's ``DECIMAL`` columns - ``store.schema`` builds its
+#: DDL from them - and a parsed value is rounded to them here, so the value
+#: the row hash sees is the value the database stores. Nothing is lost that
+#: a person can recover: the landed layer keeps the cell as delivered.
+#: Evidence: WellPartner's ``Est Wholesale Cost`` carries up to seven places
+#: in every delivery (a unit cost times a quantity, never rounded by the
+#: TPA); every other numeric column in the nineteen sources fits.
+CURRENCY_PLACES = 4
+QUANTITY_PLACES = 6
 
 #: Strings that mean "no value". Includes the literal ``"nan"`` that a pandas
 #: ``dtype=str`` read produces for an empty cell - the previous wholesaler
@@ -232,8 +246,19 @@ def _clean_numeric(text: str) -> tuple[str, bool]:
     return body, negative
 
 
+def _fit(result: ParseResult[Decimal], places: int) -> ParseResult[Decimal]:
+    """Round a parsed number to ``places`` decimal places, only if it has
+    more. A value that already fits is returned untouched, exponent and all,
+    so ``1.50`` stays ``1.50`` and a doctest that prints it stays true."""
+    value = result.value
+    if value is None or not result.ok or -value.as_tuple().exponent <= places:
+        return result
+    return ParseResult(result.raw, value.quantize(Decimal(1).scaleb(-places), ROUND_HALF_UP))
+
+
 def parse_decimal(value: object) -> ParseResult[Decimal]:
-    """Parse a number to :class:`~decimal.Decimal`, never via ``float``.
+    """Parse a quantity to :class:`~decimal.Decimal`, never via ``float``,
+    rounded half-up to :data:`QUANTITY_PLACES` only when it has more.
 
     >>> parse_decimal("1,234.56").value
     Decimal('1234.56')
@@ -241,6 +266,8 @@ def parse_decimal(value: object) -> ParseResult[Decimal]:
     Decimal('-40.00')
     >>> parse_decimal("40.00-").value
     Decimal('-40.00')
+    >>> parse_decimal("0.12345675").value
+    Decimal('0.123457')
     >>> parse_decimal("not a number").reason
     'NOT_NUMERIC'
 
@@ -249,6 +276,11 @@ def parse_decimal(value: object) -> ParseResult[Decimal]:
     >>> parse_decimal("(40.00").reason
     'NOT_NUMERIC'
     """
+    return _fit(_parse_number(value), QUANTITY_PLACES)
+
+
+def _parse_number(value: object) -> ParseResult[Decimal]:
+    """The shared cleaning and parsing, at the precision the cell carries."""
     # Typed values from an Excel read are handled before any text parsing, so
     # a number stays a number and does not round-trip through str().
     if isinstance(value, Decimal):
@@ -297,14 +329,23 @@ def parse_currency(value: object) -> ParseResult[Decimal]:
     currency cleaner for quantities, strengths and billing units, which is how
     a unit count came to be cleaned by a function that also strips ``$``.
 
+    The one rounding money acquires: a value with more than
+    :data:`CURRENCY_PLACES` decimal places is rounded half-up to that many,
+    because that is what the ledger's ``DECIMAL(38,4)`` column holds and the
+    row hash must see what the database stores (D15). A cent is never touched.
+
     >>> parse_currency("$56,142.93").value
     Decimal('56142.93')
     >>> parse_currency("($40.00)").value
     Decimal('-40.00')
     >>> parse_currency("$3,767.71 ").value
     Decimal('3767.71')
+    >>> parse_currency("12.3456789").value
+    Decimal('12.3457')
+    >>> parse_currency("(0.00005)").value
+    Decimal('-0.0001')
     """
-    return parse_decimal(value)
+    return _fit(_parse_number(value), CURRENCY_PLACES)
 
 
 def parse_int(value: object) -> ParseResult[int]:
@@ -317,9 +358,10 @@ def parse_int(value: object) -> ParseResult[int]:
     >>> parse_int("3.5").reason
     'NOT_INTEGER'
     """
-    # Reuse the decimal parser so "1,000" and "(3)" work the same way here,
-    # then add the one extra rule: no fractional part.
-    result = parse_decimal(value)
+    # Reuse the number parser so "1,000" and "(3)" work the same way here,
+    # then add the one extra rule: no fractional part. Unrounded on purpose:
+    # "3.0000001" must fail, not round to 3.
+    result = _parse_number(value)
     if not result.ok:
         return ParseResult.failed(result.raw, result.reason or "NOT_NUMERIC")
     if result.value is None:

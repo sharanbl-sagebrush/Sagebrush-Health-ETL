@@ -317,3 +317,38 @@ class TestReaderTypeVariation:
     def test_a_boolean_in_a_numeric_column_is_an_error(self):
         """bool is a subclass of int in Python; True must not become 1."""
         assert parse_decimal(True).reason == "NOT_NUMERIC"
+
+
+class TestDeclaredScale:
+    """D15 (2026-10-21). WellPartner's Est Wholesale Cost carries up to seven
+    decimal places; the ledger's money column holds four. The batched insert
+    path refused to send it ("Converting decimal loses precision"), which is
+    the right instinct, so the rounding is now explicit and happens before
+    the row hash: the hash sees what the database stores."""
+
+    def test_money_rounds_half_up_to_four_places_only_when_it_has_more(self):
+        assert parse_currency("12.3456789").value == Decimal("12.3457")
+        assert parse_currency("12.34565").value == Decimal("12.3457")
+        assert parse_currency("12.34564").value == Decimal("12.3456")
+        assert parse_currency("(0.00005)").value == Decimal("-0.0001")
+        untouched = parse_currency("3767.71").value
+        assert untouched == Decimal("3767.71") and untouched.as_tuple().exponent == -2
+
+    def test_quantities_round_to_six_places(self):
+        assert parse_decimal("0.12345675").value == Decimal("0.123457")
+        assert parse_decimal("0.123456").value == Decimal("0.123456")
+
+    def test_the_cell_as_delivered_is_kept_as_raw(self):
+        assert parse_currency("12.3456789").raw == "12.3456789"
+
+    def test_an_integer_column_does_not_round_a_fraction_away(self):
+        assert parse_int("3.0000001").reason == "NOT_INTEGER"
+
+    def test_the_ddl_scales_are_the_parser_scales(self):
+        from sbh_data_bank.registry.spec import FieldType
+        from sbh_data_bank.store.schema import _SQL_TYPES
+        from sbh_data_bank.transforms.values import CURRENCY_PLACES, QUANTITY_PLACES
+
+        assert _SQL_TYPES[FieldType.CURRENCY] == f"DECIMAL(38,{CURRENCY_PLACES})"
+        assert _SQL_TYPES[FieldType.DECIMAL] == f"DECIMAL(38,{QUANTITY_PLACES})"
+        assert (CURRENCY_PLACES, QUANTITY_PLACES) == (4, 6)

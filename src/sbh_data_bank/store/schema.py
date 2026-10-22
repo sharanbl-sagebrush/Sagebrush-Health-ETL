@@ -66,6 +66,7 @@ from, and ``tests/unit/test_commit.py`` holds the two against each other.
 from __future__ import annotations
 
 from sbh_data_bank.registry.spec import RESERVED_COLUMN_NAMES, FieldType, PiiClass, SourceSpec
+from sbh_data_bank.transforms.values import CURRENCY_PLACES, QUANTITY_PLACES
 
 __all__ = [
     "CURATED_LEDGER_COLUMNS",
@@ -449,14 +450,17 @@ def meta_statements() -> list[str]:
 #:   DECIMAL(38,6)  quantities, which can be fractional (dose units)
 #:   DECIMAL(38,4)  money, four places so intermediate arithmetic in SQL does
 #:                  not round cents
+#:   The two scales are ``transforms.values.QUANTITY_PLACES`` and
+#:   ``CURRENCY_PLACES``: the parser rounds to them, so a value never reaches
+#:   the store with more places than its column holds (D15).
 #:   CHAR(11)       NDC is always exactly 11 digits once normalized
 #:   NVARCHAR(1000) text without a declared max_length; wide enough for the
 #:                  longest observed free-text cell, narrow enough to index
 _SQL_TYPES = {
     FieldType.TEXT: "NVARCHAR(1000)",
     FieldType.INTEGER: "BIGINT",
-    FieldType.DECIMAL: "DECIMAL(38,6)",
-    FieldType.CURRENCY: "DECIMAL(38,4)",
+    FieldType.DECIMAL: f"DECIMAL(38,{QUANTITY_PLACES})",
+    FieldType.CURRENCY: f"DECIMAL(38,{CURRENCY_PLACES})",
     FieldType.DATE: "DATE",
     FieldType.BOOLEAN: "BIT",
     FieldType.NDC: "CHAR(11)",
