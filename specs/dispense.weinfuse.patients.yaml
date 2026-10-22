@@ -168,6 +168,18 @@ variants:
         sources: ['Email']
         type: text
         pii: direct
+      # Added by WeInfuse in the 2026-10 exports (seen first in the
+      # 05012026-07312026 pull). Decided 2026-10-22, developer: load both.
+      # Gender is a quasi-identifier; Notes is free text a clinician typed and
+      # can hold anything, so it is classed direct.
+      - target: gender
+        sources: ['Gender']
+        type: text
+        pii: quasi
+      - target: notes
+        sources: ['Notes']
+        type: text
+        pii: direct
       - target: primary_insurance_plan
         sources: ['Primary Insurance Plan']
         type: text
