@@ -42,6 +42,7 @@ import os
 import sys
 import time
 from collections import Counter
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -58,7 +59,7 @@ from sbh_data_bank.commit import (  # noqa: E402
 from sbh_data_bank.commit.records import Store  # noqa: E402
 from sbh_data_bank.registry.loader import SpecRegistry  # noqa: E402
 from sbh_data_bank.store.config import SqlSettings, load_env_file  # noqa: E402
-from sbh_data_bank.store.connection import Database  # noqa: E402
+from sbh_data_bank.store.connection import Database, is_transient  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = Path(
@@ -132,8 +133,15 @@ def backfill(
     only: list[str],
     skip: list[str],
     operator_date: date | None,
+    reconnect: Callable[[], None] | None = None,
 ) -> dict[str, Counter]:
-    """Commit every source's deliveries in order; returns a counter per spec."""
+    """Commit every source's deliveries in order; returns a counter per spec.
+
+    A transient store fault (the link dropped, a deadlock, a timeout) gets
+    one retry of the same file after ``reconnect`` is called; the file's
+    transaction rolled back, so the retry starts clean. Anything else, or a
+    second fault, marks the run FAILED and moves to the next source.
+    """
     engine = CommitEngine(store, tenant_id=tenant_id, actor=actor)
     report: dict[str, Counter] = {}
     for spec in _ordered_specs(registry, only, skip):
@@ -143,22 +151,39 @@ def backfill(
         run = engine.begin_run("backfill")
         results: list[CommitResult] = []
         started = time.monotonic()
-        try:
-            for as_of, item in ordered:
-                when = as_of.value.isoformat() if as_of else "no as-of "
-                for r in engine.commit_path(
-                    spec,
-                    item.path,
-                    run_id=run.run_id,
-                    root=root,
-                    operator_date=operator_date,
-                    member=item.member,
-                ):
-                    results.append(r)
-                    print(f"  {when}  {r.summary()}")
-        except Exception as exc:  # noqa: BLE001 - the run record must say it failed
-            engine.finish_run(run, "FAILED", f"{type(exc).__name__}: {exc}"[:2000])
-            print(f"  FAILED after {len(results)} files: {type(exc).__name__}: {exc}")
+        failed: Exception | None = None
+        for as_of, item in ordered:
+            when = as_of.value.isoformat() if as_of else "no as-of "
+            for attempt in (1, 2):
+                try:
+                    for r in engine.commit_path(
+                        spec,
+                        item.path,
+                        run_id=run.run_id,
+                        root=root,
+                        operator_date=operator_date,
+                        member=item.member,
+                    ):
+                        results.append(r)
+                        print(f"  {when}  {r.summary()}")
+                    break
+                except Exception as exc:  # noqa: BLE001 - decide retry or record
+                    if attempt == 1 and reconnect is not None and is_transient(exc):
+                        print(
+                            f"  {when}  {item.display}: transient fault, reconnecting and retrying"
+                        )
+                        reconnect()
+                        continue
+                    failed = exc
+                    break
+            if failed is not None:
+                break
+        if failed is not None:
+            print(f"  FAILED after {len(results)} files: {type(failed).__name__}: {failed}")
+            try:
+                engine.finish_run(run, "FAILED", f"{type(failed).__name__}: {failed}"[:2000])
+            except Exception as exc:  # noqa: BLE001 - the store is what failed
+                print(f"  (could not record the failed run: {type(exc).__name__}: {exc})")
             report[spec.key] = _counters(results) + Counter(FAILED=1)
             continue
         counters = _counters(results)
@@ -239,6 +264,7 @@ def main() -> int:
             only=args.only,
             skip=args.skip,
             operator_date=args.operator_date,
+            reconnect=database.close,
         )
     _print_report(report)
     return 0 if not any("FAILED" in c for c in report.values()) else 1

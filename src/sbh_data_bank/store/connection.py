@@ -26,6 +26,7 @@ described as the lineage, and what survives here is one connection per
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Iterator
@@ -68,7 +69,7 @@ class TransientSqlError(RuntimeError):
     """
 
 
-def _is_transient(exc: Exception) -> bool:
+def is_transient(exc: Exception) -> bool:
     """Whether a pyodbc error is one of the retryable kinds.
 
     pyodbc puts the SQLSTATE in ``exc.args[0]``; check that first, then fall
@@ -110,7 +111,7 @@ def connect(settings: SqlSettings, *, attempts: int = 4) -> pyodbc.Connection:
             last = exc
             # Give up immediately on a permanent fault, or on the last try.
             # settings.describe() names the target without the credential.
-            if not _is_transient(exc) or attempt == attempts:
+            if not is_transient(exc) or attempt == attempts:
                 raise TransientSqlError(
                     f"could not connect to {settings.describe()}: {exc}"
                 ) from exc
@@ -191,10 +192,22 @@ class Database:
             # Rollback-on-failure is the property the old pool got right and
             # this keeps: the connection is never left with a dangling open
             # transaction that the next unit of work would silently join.
-            self.connection.rollback()
+            try:
+                self.connection.rollback()
+            except Exception:  # noqa: BLE001 - the link is gone; the server rolled back
+                # Azure closed the connection mid-statement (2026-10-21, a
+                # 200,000-row batch): the rollback cannot be sent, the server
+                # has already discarded the transaction, and what matters is
+                # that the next unit of work gets a fresh connection rather
+                # than this dead one. The original error is the one to raise,
+                # and closing a dead handle may itself fail, so that is
+                # suppressed too; close() clears the handle regardless.
+                with contextlib.suppress(Exception):
+                    self.close()
             raise
         finally:
-            cursor.close()
+            with contextlib.suppress(Exception):  # a cursor on a dead connection
+                cursor.close()
 
     def execute(self, sql: str, *params: Any) -> list[tuple]:
         """Run a statement and return all rows. For small reads and DDL.

@@ -164,6 +164,12 @@ def input_sizes(sql_types: Sequence[str]) -> list[InputSize]:
 
 _AUDIT_TYPES = ["DATETIME2(3)", "NVARCHAR(128)", "DATETIME2(3)", "NVARCHAR(128)"]
 
+#: Rows per ``executemany`` call. One call per layer per file was the first
+#: design; Azure closed the connection partway through streaming a
+#: 200,000-row, 120-column file (2026-10-21), so a file now goes in slices
+#: of this many rows, still inside its one transaction.
+BATCH_ROWS = 5000
+
 
 def _ledger_types() -> list[str]:
     return [line.split()[1] for line in CURATED_LEDGER_COLUMNS.splitlines() if line.strip()]
@@ -387,9 +393,16 @@ def _batch_values(batch: BatchRecord) -> dict[str, Any]:
 class SqlStore:
     """Implements ``records.Store`` over a ``Database``-like object."""
 
-    def __init__(self, database: _Transactional, *, fast_executemany: bool = False) -> None:
+    def __init__(
+        self,
+        database: _Transactional,
+        *,
+        fast_executemany: bool = False,
+        batch_rows: int = BATCH_ROWS,
+    ) -> None:
         self._db = database
         self._fast = fast_executemany
+        self._batch_rows = max(batch_rows, 1)
         self._cursor: _Cursor | None = None
 
     @contextmanager
@@ -412,12 +425,15 @@ class SqlStore:
         return self._cursor
 
     def _executemany(self, sql: str, sizes: Sequence[InputSize], rows: list[tuple]) -> None:
-        """A batch insert. On the fast path every parameter is declared from
-        the DDL first and the declaration is cleared afterwards, so the next
+        """A batch insert, sent ``batch_rows`` rows at a time inside the one
+        transaction. On the fast path every parameter is declared from the
+        DDL first and the declaration is cleared afterwards, so the next
         statement on the cursor is not bound to this one's shape."""
         cursor = self.cursor
+        chunks = [rows[i : i + self._batch_rows] for i in range(0, len(rows), self._batch_rows)]
         if not self._fast:
-            cursor.executemany(sql, rows)
+            for chunk in chunks:
+                cursor.executemany(sql, chunk)
             return
         if len(sizes) != len(rows[0]):
             raise RuntimeError(
@@ -425,7 +441,8 @@ class SqlStore:
             )
         cursor.setinputsizes(list(sizes))
         try:
-            cursor.executemany(sql, rows)
+            for chunk in chunks:
+                cursor.executemany(sql, chunk)
         finally:
             cursor.setinputsizes([])
 

@@ -630,3 +630,65 @@ class TestFastPathDeclaresEveryParameter:
         cursor, result = self._run(tmp_path, fast=False)
         assert result.committed
         assert not [1 for sql, _ in cursor.calls if sql == "<setinputsizes>"]
+
+
+class TestBatchesAndDeadConnections:
+    """Azure closed the connection partway through one 200,000-row insert
+    (2026-10-21). Two consequences: a file now goes to the server in slices,
+    and a rollback that cannot be sent must not hide the original error or
+    leave a dead connection for the next file."""
+
+    def test_rows_go_to_the_server_in_slices_inside_one_transaction(self, tmp_path):
+        spec = _spec()
+        cursor = _FakeCursor()
+        engine = CommitEngine(
+            SqlStore(_FakeDatabase(cursor), batch_rows=2),
+            tenant_id="t1",
+            actor="tester",
+            clock=lambda: CLOCK,
+            deterministic_ids=True,
+        )
+        path = _write(
+            tmp_path, JAN, A_X, B_X, C_Y, "D,Y,2026-01-16,40.00,d", "E,Y,2026-01-17,50.00,e"
+        )
+        (result,) = engine.commit_path(spec, path, run_id="run1", root=tmp_path)
+        assert result.committed
+        landed = [rows for sql, rows in cursor.many if "INTO landed." in sql]
+        assert [len(rows) for rows in landed] == [2, 2, 1]
+        assert cursor.commits == 1  # the slices went in one transaction
+
+    def test_a_rollback_that_cannot_be_sent_drops_the_connection(self):
+        from sbh_data_bank.store.config import SqlSettings
+        from sbh_data_bank.store.connection import Database
+
+        class DeadLinkError(Exception):
+            pass
+
+        class _Conn:
+            def __init__(self):
+                self.rolled_back = False
+
+            def cursor(self):
+                class _C:
+                    def close(self):
+                        raise DeadLinkError("cursor close on a dead link")
+
+                return _C()
+
+            def commit(self):
+                raise AssertionError("never reached")
+
+            def rollback(self):
+                self.rolled_back = True
+                raise DeadLinkError("rollback on a dead link")
+
+            def close(self):
+                raise DeadLinkError("close on a dead link")
+
+        db = Database(SqlSettings(server="s", database="d"))
+        conn = _Conn()
+        db._connection = conn
+        with pytest.raises(ValueError, match="the real fault"), db.transaction():
+            raise ValueError("the real fault")
+        assert conn.rolled_back
+        assert db._connection is None  # the next unit of work reconnects
