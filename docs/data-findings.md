@@ -520,6 +520,124 @@ parenthesised negatives, 70 of them). They should be currency. That is a
 typing change on a loaded source, which is the D18 case the decision record
 describes, so it waits for D18; the comparison above cast them in SQL.
 
+## 18. WeInfuse administrations line up with Curve service lines on patient number, date and HCPCS
+
+Asked 2026-10-23 by the developer: can Curve Monthly Services be used for
+accounting reconciliation against the WeInfuse dispenses. Measured on the
+current rows in `sbh_data_bank`, counts only.
+
+**The patient identifier is shared.** WeInfuse's `patient_identifier` is
+Curve's `patient_number`: 1,908 of 1,940 distinct WeInfuse patients (98.4%)
+appear under that number in Services. It is not Curve's `mrn` (3 of 1,940).
+Name plus date of birth matches only 1,081 of 2,801, so the number is the
+join, not the demographics.
+
+**The drug code is shared.** 70 of the 79 HCPCS codes WeInfuse bills appear
+as `proccode` in Services, whose J and Q codes are 39,382 lines.
+
+**Line level, January 2025 to July 2026** (the window both cover; Curve
+runs through September, WeInfuse through September, Payments through July):
+
+| | count |
+|---|---|
+| WeInfuse administration rows | 29,291 |
+| with a Services line on the same patient and date, any code | 29,066 (99.2%) |
+| with a Services line on the same patient, date and HCPCS | 23,594 (80.5%) |
+| Services J/Q lines (not voided) | 15,932 |
+| with a WeInfuse row on the same patient, date and HCPCS | 10,248 (64.3%) |
+
+**Grouped by patient, day and HCPCS** (the unit a claim line is billed at),
+Buy & Bill inventory only, with WeInfuse's `billing_units` summed per group
+against Services' `units` summed per group (voids netted):
+
+| | count |
+|---|---|
+| administered groups | 11,909 |
+| billed J/Q groups | 14,250 |
+| matched on patient, day and HCPCS | 7,247 |
+| of those, units equal | 7,036 (97.1%) |
+| administered, not billed under that code that day | 4,662 |
+| billed, not administered under that code that day | 7,003 |
+| administered and billed under that code one day either side | 1 |
+
+Specialty Pharmacy inventory (drugs the pharmacy ships for the patient)
+is billed too: 1,486 of its 1,594 groups have a J/Q line.
+
+What this says. The join exists and is clean: where an administration
+and a claim line meet on patient, day and code, the units agree 97% of
+the time. The gaps are not dates (one adjacent-day match in 4,662) and
+not patients (99% of administrations have a Curve line that day); they
+are codes. WeInfuse's HCPCS and Curve's `proccode` disagree for the same
+administration often enough that 4,662 administered groups and 7,003
+billed groups find no partner, and the billed side also carries drugs
+WeInfuse never sees (office stock, vaccines, infusions recorded
+elsewhere). So reconciliation is possible and worth doing, and its
+first rule is a code crosswalk: which `proccode` Curve bills for which
+WeInfuse HCPCS, learned from the pairs that do match on patient and day
+with different codes. That is a curated-layer rule for the reconciliation
+phase, after the ETL is signed off, not an ingestion change.
+
+## 19. The database against the raw files: complete, and what the duplicates are
+
+Run 2026-10-23 with `scripts/verify_load.py`, at the developer's request,
+before any automation is deployed. Three checks, all read-only.
+
+**Every file is accounted for.** Every data file under the root (zip
+members included) was hashed and looked up: 208 loaded, 14 byte-identical
+copies or sheets a spec recognises and deliberately hands to another
+source, 9 unclaimed by any spec (the six "Reports for Download" index
+workbooks, the two zip copies of the backlog, the spec-mapping workbook),
+0 not in the database. **Every loaded file's lines are in `landed`**: an
+independent count with the plain CSV and workbook readers matched
+`rows_landed` on all 208, so no load dropped or invented a line. **No
+source has an identity with two current rows, every source's deliveries
+were committed in as-of order, quarantine is empty and no batch holds.**
+
+**What deduplication did**, current rows against rows landed:
+
+| Source | Landed | Current | Superseded | Why the difference |
+|---|---|---|---|---|
+| ehr.curve.monthly_services | 391,909 | 274,476 | 108,890 | overlapping monthly windows; corrections from columns that come and go |
+| tpa.pharmaforce.claims | 253,616 | 217,231 | 763 | overlapping windows, unchanged rows |
+| ehr.allscripts.erx | 250,966 | 167,175 | 0 | overlapping windows, unchanged rows |
+| ehr.athena.eligibility | 94,440 | 24,195 | 946 | snapshot re-pulled each delivery |
+| dispense.weinfuse.administered | 86,814 | 62,831 | 482 | overlapping windows; D14 stamp excluded |
+| finance.monthly_payments | 1,287,742 | 1,287,742 | 0 | forty monthly files, no overlap |
+
+**In-file duplicates: what the vendor sent twice under one key.** The
+rule keeps every row as an occurrence (CLAUDE.md, "Duplicates"), so
+nothing was lost; the question is whether the key is right. The columns
+that differ between the rows were compared in memory (names only):
+
+- **finance.monthly_payments, 181,422 keys.** Every one is an `I`/`O`
+  transfer pair: the same voucher, service, sequence and void sign, one
+  row transferring responsibility out and one in, differing in
+  `transtype` and the remittance columns. Adding `transtype` to the key
+  makes it unique across all 1,287,742 rows (checked). The key should
+  change; it is a curated-layer rule on a loaded source, so it waits for
+  D18 and is the first item in that queue.
+- **wholesaler.cardinal.invoice_summary, 424 keys.** The 2026 pulls are
+  one row per line while the key is per invoice (D16), so the lines of
+  one invoice differ only in `purchase_amount`. Correct as occurrences;
+  a line number from Cardinal would make it a key.
+- **tpa.wellpartner.invoices, 10 keys**, differing only in
+  `entity_name`: the same wholesaler invoice attributed to two entities.
+  A question for Wellpartner, or `entity_name` joins the key.
+- **wholesaler.abc.purchases, 3 keys**, differing in the ABC item
+  number, description and cost: two items with one NDC on one invoice.
+  The ABC item number would complete the key.
+- **wholesaler.mckesson.invoice, 9 keys; wholesaler.mckesson.custom, 3
+  keys**: the split shipments of finding 16, differing in quantities and
+  the original invoice number. Both lines are real.
+- **ehr.allscripts.erx 8,970, ehr.curve.appointments 418,
+  ehr.athena.prescriptions 47 keys**: byte-identical rows (the vendor
+  sent the record twice); kept as occurrences, flagged as findings.
+
+**Typing.** The replay of every source from the landed layer under the
+current specs changes nothing (0 of 3,044,698 lines). One typing defect
+is known and waits for D18: Curve Monthly Services' `totpmt`, `totadj`
+and `totref` are text and should be currency (finding 17).
+
 ## Open questions
 
 1. **When did `Class` → `Class_New` take effect?** 28 of 121 accounts were

@@ -775,3 +775,59 @@ Two findings were added for "when the spec changes":
   loaded file that no spec column claims, as the vendor wrote them. They
   are kept in `extra_cells` and nothing types them until the spec names
   them.
+
+## Hosting: built, paused (2026-10-23, developer)
+
+"I want to host a function app or similar on Azure so that the computation
+is handed there, not on my computer." The design is two scheduled Container
+Apps jobs from one image (`Dockerfile`, `deploy/`): `sbh-acquire` every
+half hour (fetch uploads, load them, mail the report) and `sbh-freshness`
+daily (the check, mailed), each with a managed identity that can only read
+the upload container, secrets held by Container Apps. Not a Function App:
+the consumption plan stops a run at ten minutes and the Monthly Payments
+load takes forty, and the image carries the ODBC driver the function
+runtime does not promise.
+
+The assistant started creating the resources without showing the plan
+first; the developer stopped it. What exists, in `sbh-data-bank-rg`: the
+registry `sbhdatabankacr` with the image built from `2c25993`, and the
+environment `sbh-data-bank-env` with its Log Analytics workspace. No job
+was created, no role was assigned, no secret was stored. Decision: keep
+what exists, verify the loaded data against the raw files first
+(`scripts/verify_load.py`), and deploy the jobs when the developer says
+so. Nothing in Azure changes without that.
+
+The acquire step changed one rule for an ephemeral landing root: a
+fetched blob counts as seen once a batch exists for its content, or for a
+day after the fetch, so a load that died before writing a batch is
+fetched again on the next pass.
+
+## The verification, and the D18 queue (2026-10-23, developer: "test it against raw data first")
+
+`scripts/verify_load.py` holds the database against the raw files: every
+file hashed and looked up, every loaded file's lines counted again with
+the plain readers, every source's current rows, occurrences, findings,
+quarantine, refusals and as-of order. Result, `docs/data-findings.md`
+19: 208 files loaded and every one's line count matched; 0 files
+missing; 0 identities with two current rows; 0 quarantined; nothing
+held. The load is complete and consistent with the files.
+
+What it changes is the D18 queue. Three rules are now known to be wrong
+or incomplete on loaded sources, and each is a re-run from typed (or
+from landed) that the append-only ledger has to be taught to accept:
+
+1. `finance.monthly_payments`: the natural key lacks `transtype`; with
+   it the key is unique across 1,287,742 rows. A key change re-derives
+   every identity hash.
+2. `ehr.curve.monthly_services`: `totpmt`, `totadj`, `totref` are text,
+   should be currency. A type change re-derives every row hash.
+3. `tpa.wellpartner.invoices` and `wholesaler.abc.purchases`: a column
+   that would complete the key (`entity_name`; the ABC item number),
+   pending the vendor's answer.
+
+D18 is therefore the next design decision, and the one the developer
+takes: whether a rebuilt curated layer supersedes the old rows (a new
+`supersede_reason`, history kept) or is written under a new rule
+version beside them. Until then the rows stand as loaded, which is
+correct for reconciliation as long as the occurrences are read as the
+rows they are.

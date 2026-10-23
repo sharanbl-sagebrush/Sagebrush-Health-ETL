@@ -149,4 +149,7 @@ class TestSqlLedger:
         assert ledger.seen("t1", "acct", "box") == {("n", "e")}
         ledger.record(BlobRecord("t1", "acct", "box", "n", "e", 1, T0, "0" * 64, T0, "n"))
         assert db.calls[0] == (SEEN_SQL, ("t1", "acct", "box"))
+        # Seen means "reached the engine" or "fetched today", so an
+        # ephemeral landing root never loses a file whose load died.
+        assert "JOIN meta.batch" in SEEN_SQL and "DATEADD(hour, -24" in SEEN_SQL
         assert db.calls[1][0] == INSERT_SQL and len(db.calls[1][1]) == 10

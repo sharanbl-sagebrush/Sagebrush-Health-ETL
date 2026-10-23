@@ -14,6 +14,8 @@ dependencies = [
     "pyodbc>=5.1",
     "PyYAML>=6.0",
     "python-dateutil>=2.9",
+    "azure-storage-blob>=12.20",
+    "azure-identity>=1.17",
 ]
 
 [project.optional-dependencies]

@@ -34,7 +34,6 @@ import getpass
 import os
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -54,6 +53,7 @@ from sbh_data_bank.commit.backfill import (  # noqa: E402
     print_report,
     print_unclaimed,
 )
+from sbh_data_bank.commit.engine import utc_now  # noqa: E402
 from sbh_data_bank.observe.notify import (  # noqa: E402
     PrintSender,
     Sender,
@@ -101,7 +101,7 @@ def one_pass(
                 content_length=item.remote.size,
                 last_modified=item.remote.last_modified.replace(tzinfo=None),
                 file_sha256=item.file_sha256,
-                fetched_at=datetime.now(),
+                fetched_at=utc_now(),
                 local_path=str(item.local_path.relative_to(landing)),
             )
         )

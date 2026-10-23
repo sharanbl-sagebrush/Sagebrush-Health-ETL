@@ -91,9 +91,25 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   `retype.py` verdict recorded in `meta.spec_check`) and `NEW_COLUMNS`
   (vendor columns no spec column claims, as a note). The payments versus
   services question is answered (`docs/data-findings.md`, 17)
+- 2026-10-23, later: **hosting built and paused**. `Dockerfile` and
+  `deploy/deploy.sh` make two scheduled Container Apps jobs (acquire every
+  half hour, freshness daily); the registry and environment exist in
+  `sbh-data-bank-rg`, the jobs do not. The developer wants the loaded data
+  verified against the raw files first (`scripts/verify_load.py`); nothing
+  in Azure changes until they say so. The reconciliation question (can
+  Curve Monthly Services be reconciled with WeInfuse dispenses) is
+  answered with numbers in `docs/data-findings.md`, 18: yes, on patient
+  number, day and HCPCS, with a code crosswalk as the first rule
+- 2026-10-23, verified: **the database matches the raw files**
+  (`scripts/verify_load.py`, `docs/data-findings.md` 19): 208 files
+  loaded, every line count matched, 0 missing, 0 double-current
+  identities, 0 quarantined. The in-file duplicates are explained, and
+  three of them are rule fixes waiting for D18, led by Monthly Payments'
+  key, which needs `transtype`
 - **Not yet built**: the write side of the replay (replacing typed rows
-  and re-curating from them, D18), which now has a concrete case waiting:
-  Curve Monthly Services types `totpmt`, `totadj` and `totref` as text
+  and re-curating from them, D18). Its queue: the Monthly Payments key,
+  the three Curve money columns typed as text, two keys pending vendor
+  answers (`docs/decision-record.md`, "The verification")
 
 ## Rules that came from real defects
 
@@ -294,6 +310,7 @@ python scripts/commit_file.py <spec key> "<file>" --env-file <path>   # commit t
 python scripts/backfill.py --dry-run --only <spec key>        # every delivery, in memory
 python scripts/backfill.py --env-file .env --actor <you> --fast [--only ...]   # to Azure
 python scripts/acquire.py --env-file .env --actor <you> [--poll 300]   # fetch uploads, then load them
+python scripts/verify_load.py --env-file .env         # the database against the raw files; exit 1 on a gap
 python scripts/freshness.py --env-file .env [--email]   # is every source current; exit 1 on an alert
 python scripts/retype.py --env-file .env --only <spec key>   # what a spec edit does to loaded data
 python scripts/close_runs.py --env-file .env [--apply]       # runs a dead process left open

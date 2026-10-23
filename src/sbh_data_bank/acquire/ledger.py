@@ -48,9 +48,22 @@ _COLUMNS = [
     "tenant_id", "account_name", "container_name", "blob_name", "etag", "content_length",
     "last_modified", "file_sha256", "fetched_at", "local_path",
 ]  # fmt: skip
+#: A blob version is seen once a batch exists for its content (loaded,
+#: duplicate, recognised or refused: the file reached the engine), or for a
+#: day after it was fetched. So a fetch whose load died before writing a
+#: batch is fetched again on the next pass, which is what makes an ephemeral
+#: landing root (the container job's /tmp) safe; and a file no spec claims,
+#: which never gets a batch, comes back once a day and is listed as
+#: unclaimed each time until a spec is written for it. A zip is identified
+#: by its own bytes while its members get the batches, so it too returns
+#: daily; zips are the backlog's shape, not the uploads'.
 SEEN_SQL = (
-    "SELECT blob_name, etag FROM meta.blob "
-    "WHERE tenant_id = ? AND account_name = ? AND container_name = ?"
+    "SELECT b.blob_name, b.etag FROM meta.blob AS b "
+    "WHERE b.tenant_id = ? AND b.account_name = ? AND b.container_name = ? "
+    "AND (b.fetched_at > DATEADD(hour, -24, SYSUTCDATETIME()) OR EXISTS ("
+    "SELECT 1 FROM meta.source_file AS sf JOIN meta.batch AS bt "
+    "ON bt.source_file_id = sf.source_file_id "
+    "WHERE sf.tenant_id = b.tenant_id AND sf.file_sha256 = b.file_sha256))"
 )
 INSERT_SQL = (
     f"INSERT INTO meta.blob ({', '.join(_COLUMNS)}) VALUES ({', '.join('?' for _ in _COLUMNS)})"
@@ -76,6 +89,8 @@ class SqlBlobLedger:
 
 
 class MemoryBlobLedger:
+    """For tests: every fetched version is seen, with no batch to consult."""
+
     def __init__(self) -> None:
         self.records: list[BlobRecord] = []
 
