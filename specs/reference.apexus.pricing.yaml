@@ -1,0 +1,198 @@
+# reference.apexus.pricing - the Apexus 340B price list, as the pricing
+# workbook carries it
+#
+# Added 2026-10-23. The developer's instruction: the pricing workbook is the
+# source of truth for drug pricing and is updated every quarter, when Apexus
+# publishes. The workbook is an analyst's file with eleven sheets; this spec
+# loads the `apexus` sheet, which is the price list itself with the
+# analysts' matching, grouping and margin columns beside it, one row per
+# NDC and contract. The `ASP`, `internal`, `external` and `mapping` sheets
+# are working sheets of different grains and are not selected, so they are
+# neither loaded nor refused.
+#
+# Structure (probed 2026-10-23 on the live file, counts only): four title
+# rows above the header, 45,551 data rows, 43 named columns with a blank
+# first column. Two columns (match_ndc, grouping_ndc) carry no value in
+# any row and are declared text so the DDL has a place for them if they
+# ever do.
+#
+# ndc is text, not the ndc type. 45,202 values are 11 digits, but 296 are
+# 12 digits, 20 are 10 digits and 29 are alphanumeric codes: the sheet
+# mixes NDCs with product codes, and the ndc type would quarantine those
+# 345 rows for being what they are. Normalisation to NDC11 belongs in the
+# curated-to-pres step, with the directory lookup the 10-digit ones need.
+#
+# natural_key: (ndc, internal_pvp_contract_number, pvp_contracted_eff_date)
+# is unique across all 45,551 rows; ndc alone leaves one duplicate (the
+# same product under two effective dates). The contract number is blank
+# on 35,110 rows (no PVP contract) and the key tolerates that.
+#
+# as_of_source: xlsx_modified. The workbook's creation stamp is 2024-06-08
+# and never moves; the modified stamp is the last save, which is when the
+# quarter's prices were put in. A dated upload folder takes precedence
+# (D5), and is what the quarterly upload should use.
+#
+# No event date: a price list is a snapshot, and a later quarter's file
+# supersedes row by row on the key. expected_cadence_days is a quarter
+# plus a week of slack.
+
+key: reference.apexus.pricing
+name: Apexus 340B pricing workbook
+vendor: Apexus (via the Sagebrush pricing workbook)
+group: Reference
+catalog_names: ["Pricing file (LIVE)"]
+lifecycle: active
+expected_cadence_days: 98
+as_of_source: xlsx_modified
+filename_patterns:
+  - "pricing.*file"
+  - "apexus"
+natural_key: [ndc, internal_pvp_contract_number, pvp_contracted_eff_date]
+on_new_column: warn
+on_missing_column: fail
+variants:
+  - name: apexus_sheet
+    description: >
+      The `apexus` worksheet: the Apexus price list columns (contract,
+      manufacturer, NDC, label, package, the three prices and the contract
+      dates) followed by the analysts' matching, grouping, pricing and
+      margin columns.
+    detect:
+      require_all: ["internal_pvp_contract_number", "ndc", "340b_sell_price", "pvp_contracted_price"]
+    read:
+      sheet: "apexus"
+      preamble_lines: 4
+    columns:
+      - target: internal_pvp_contract_number
+        sources: ["internal_pvp_contract_number"]
+        type: text
+      - target: manufacturer
+        sources: ["manufacturer"]
+        type: text
+      - target: ndc
+        sources: ["ndc"]
+        type: text
+        required: true
+        description: NDC or product code as the sheet carries it; see the header note.
+      - target: label_name
+        sources: ["label_name"]
+        type: text
+      - target: pkg_qty_description
+        sources: ["pkg_qty_description"]
+        type: text
+      - target: sell_price_340b
+        sources: ["340b_sell_price"]
+        type: currency
+      - target: pvp_contracted_price
+        sources: ["pvp_contracted_price"]
+        type: currency
+      - target: pvp_contracted_eff_date
+        sources: ["pvp_contracted_eff_date"]
+        type: date
+        date_formats: ["%Y-%m-%d", "%m/%d/%Y"]
+      - target: pvp_contracted_exp_date
+        sources: ["pvp_contracted_exp_date"]
+        type: date
+        date_formats: ["%Y-%m-%d", "%m/%d/%Y"]
+      - target: wac_price
+        sources: ["wac_price"]
+        type: currency
+      - target: class_description
+        sources: ["class_description"]
+        type: text
+      - target: label_name_first
+        sources: ["label_name_first"]
+        type: text
+      - target: match_name
+        sources: ["match_name"]
+        type: integer
+      - target: match_ndc
+        sources: ["match_ndc"]
+        type: text
+      - target: is_match
+        sources: ["isMatch"]
+        type: integer
+      - target: excluded_ndc
+        sources: ["excluded_ndc"]
+        type: integer
+      - target: grouping_name
+        sources: ["grouping_name"]
+        type: text
+      - target: grouping_ndc
+        sources: ["grouping_ndc"]
+        type: text
+      - target: grouping_adopted
+        sources: ["grouping_adopted"]
+        type: text
+      - target: price_340b
+        sources: ["340B"]
+        type: currency
+      - target: asp
+        sources: ["ASP"]
+        type: currency
+      - target: wac
+        sources: ["WAC"]
+        type: currency
+      - target: pct_340b_plus
+        sources: ["340B_plus_%"]
+        type: decimal
+      - target: asp_less_pct
+        sources: ["ASP_less_%"]
+        type: decimal
+      - target: wac_less_pct
+        sources: ["WAC_less_%"]
+        type: decimal
+      - target: sell_price
+        sources: ["sell_price"]
+        type: currency
+      - target: partner_price
+        sources: ["partner_price"]
+        type: currency
+      - target: volume
+        sources: ["volume"]
+        type: decimal
+      - target: margin_amount
+        sources: ["margin_$"]
+        type: currency
+      - target: margin_pct
+        sources: ["margin_%"]
+        type: decimal
+      - target: cogs_pa
+        sources: ["cogs_pa"]
+        type: currency
+      - target: sell_price_pa
+        sources: ["sell_price_pa"]
+        type: currency
+      - target: margin_pa
+        sources: ["margin_pa"]
+        type: currency
+      - target: partner_price_pa
+        sources: ["partner_price_pa"]
+        type: currency
+      - target: partner_savings_pa
+        sources: ["partner_savings_pa"]
+        type: currency
+      - target: partner_savings_pct
+        sources: ["partner_savings_%"]
+        type: decimal
+      - target: flag_include_ndc
+        sources: ["flag_include_ndc"]
+        type: integer
+      - target: flag_pricing_superior
+        sources: ["flag_pricing_superior"]
+        type: integer
+      - target: flag_pricing_available
+        sources: ["flag_pricing_available"]
+        type: integer
+      - target: flag_exceeds_hurdle
+        sources: ["flag_exceeds_hurdle"]
+        type: integer
+      - target: master_filter
+        sources: ["master_filter"]
+        type: integer
+      - target: exceeds_margin_hurdle
+        sources: ["exceeds_margin_hurdle"]
+        type: text
+      - target: check
+        sources: ["check"]
+        type: text

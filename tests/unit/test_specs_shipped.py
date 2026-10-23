@@ -11,7 +11,7 @@ integration run is the evidence it still holds.
 
 How to read this file:
 
-- TestAllSpecsAreSound  rules every one of the 20 specs must satisfy, found by
+- TestAllSpecsAreSound  rules every one of the 21 specs must satisfy, found by
                         iterating the registry rather than naming specs
 - TestHandOff           a recognise_only variant names its reason, and the
                         two Cardinal specs hand each other's report over
@@ -241,6 +241,39 @@ class TestAllSpecsAreSound:
         by_name = {v.name: v for v in summary.variants}
         assert by_name["invoice_detail"].loaded_by == detail.key
         assert detail.filename_patterns == summary.filename_patterns
+
+    def test_the_spec_digest_follows_only_the_typing_rules(self):
+        """A cadence, a note, a pattern or a recognise-only variant is not
+        a typing change; a column type, a date format or a hash exclusion
+        is (2026-10-23)."""
+        from sbh_data_bank.commit.engine import spec_sha256
+        from sbh_data_bank.registry.spec import SourceSpec
+
+        base = SpecRegistry.from_dir(SPEC_DIR).require("wholesaler.mckesson.invoice")
+        same = base.model_copy(
+            update={"expected_cadence_days": 3, "notes": "x", "filename_patterns": ["zzz"]}
+        )
+        assert spec_sha256(same) == spec_sha256(base)
+        extra = base.model_dump()
+        extra["variants"].append(
+            {
+                "name": "seen_only",
+                "action": "recognise_only",
+                "superseded_by": extra["variants"][0]["name"],
+                "detect": {"require_all": ["Something Else"]},
+                "columns": extra["variants"][0]["columns"],
+            }
+        )
+        assert spec_sha256(SourceSpec.model_validate(extra)) == spec_sha256(base)
+        changed = base.model_dump()
+        changed["variants"][0]["columns"][0]["description"] = "documentation only"
+        assert spec_sha256(SourceSpec.model_validate(changed)) == spec_sha256(base)
+        first = changed["variants"][0]["columns"][0]
+        first["type"] = "integer" if first["type"] == "text" else "text"
+        assert spec_sha256(SourceSpec.model_validate(changed)) != spec_sha256(base)
+        assert spec_sha256(base.model_copy(update={"row_hash_exclude": ["ndc"]})) != spec_sha256(
+            base
+        )
 
     def test_max_length_stays_within_what_nvarchar_allows(self):
         from sbh_data_bank.registry.spec import ColumnSpec

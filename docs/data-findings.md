@@ -472,6 +472,54 @@ Asking McKesson for a line identifier is not an option.
 
 ---
 
+## 17. Monthly Payments is the posting ledger of Curve Monthly Services
+
+Asked 2026-10-23 by the developer: the two reports look alike, what is the
+difference. Measured in `sbh_data_bank` on the current rows of both, counts only.
+
+The two share 68 columns: the charge line (`voucher_number`, `service_id`,
+`voidsign`, `svcdate`, `proccode`, `fee`, `units`, the provider, carrier,
+department and location columns) and the patient demographics. What each has
+that the other lacks says what each is:
+
+- **Only Monthly Payments** (48 columns): `seqnum`, `transtype`, `transcode`,
+  `transdesc`, `transcat`, `amount`, `date_paid`, `transdate`, `transmonth`,
+  the remittance carrier columns and the reimbursement category columns. These
+  describe a *posting*.
+- **Only Curve Monthly Services** (46 columns): `claimnum`, `totpmt`, `totadj`,
+  `totref`, `billdate`, the primary, secondary and tertiary carrier columns,
+  `encounter`, the appointment columns, `pif_1` to `pif_5`. These describe a
+  *charge line and its claim*.
+
+| | Monthly Payments | Curve Monthly Services |
+|---|---|---|
+| current rows | 1,287,742 | 274,476 |
+| distinct `service_id` | 249,532 | 268,434 |
+| `service_id` present in both | 247,212 | 247,212 |
+| payment rows whose service line is in Services | 1,283,114 (99.6%) | |
+
+A service line carries two to twelve payment rows (one row on 6,779 lines,
+two on 47,598, up to twelve on 2,688). By `transtype`: 181,422 `I` and
+181,422 `O` rows, identical counts with identical `transdesc` values
+("Medicare Transfer", "Commercial Insurance Transfer"), which is a transfer
+out of one responsible party and into the next; 558,243 `P` payments;
+365,499 `A` adjustments; 104 `R` refunds; 1,052 `M`. The sum of a service
+line's `P` rows equals the line's `totpmt` on 229,658 of 242,697 lines
+(94.6%); the fee agrees on 246,509 of 247,212 shared lines (99.7%). The
+rest are timing: Services is extracted through September 2026, Payments
+through July.
+
+So Monthly Payments does not duplicate Curve Monthly Services and neither
+supersedes the other. Services is the charge, Payments is what happened to
+it. Reconciliation takes charges and fees from Services and cash, by
+transaction, from Payments, and never sums `fee` across Payments rows.
+
+One spec consequence. The Services spec types `totpmt`, `totadj` and `totref`
+as text; the values are money in the vendor's own formatting (`$999.99`,
+parenthesised negatives, 70 of them). They should be currency. That is a
+typing change on a loaded source, which is the D18 case the decision record
+describes, so it waits for D18; the comparison above cast them in SQL.
+
 ## Open questions
 
 1. **When did `Class` → `Class_New` take effect?** 28 of 121 accounts were
@@ -491,8 +539,6 @@ Asking McKesson for a line identifier is not an option.
    to reconcile against. Worth confirming that future pulls will use it consistently,
    and in a single date format.
 
-4. **Is `Monthly Payments` the right source for financial reconciliation?** Its columns
-   (`Voucher_Number`, `Service_ID`, `IsVoided`, `VisitLocAbbr`, `ProcCode`, `Fee`)
-   overlap heavily with the existing `Curve_Monthly Services` extract. They appear to
-   be transactions and charges from the same practice-management system. Confirm
-   whether both are needed or one supersedes the other.
+4. **Is `Monthly Payments` the right source for financial reconciliation?** Answered
+   2026-10-23, section 17: it is the posting ledger behind `Curve_Monthly Services`,
+   and both are needed.

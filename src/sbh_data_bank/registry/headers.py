@@ -101,12 +101,22 @@ def normalize_header(raw: object) -> str:
     >>> normalize_header("10 Digit NDC (Current)") == normalize_header("NDC (Current)")
     False
 
+    A dollar or percent sign is a word, not punctuation: the pricing
+    workbook has ``margin_$`` beside ``margin_%`` (2026-10-23), and
+    folding both to ``margin`` made the file unreadable. Spec sources go
+    through the same function, so ``Extended Price ($)`` still matches
+    itself.
+
+    >>> normalize_header("margin_$"), normalize_header("margin_%")
+    ('margin_dollar', 'margin_pct')
+
     Takes any object because openpyxl hands back whatever the cell held, which
     can be a number, a datetime or ``None``. Never raises.
     """
     # None (an empty workbook cell) becomes the empty string rather than the
     # text "None", which would otherwise look like a real header.
     text = str(raw) if raw is not None else ""
+    text = text.replace("$", " dollar ").replace("%", " pct ")
     # Three steps, each one safe because it only removes what vendors change
     # by accident: outer whitespace, letter case, then every non-alphanumeric
     # run collapsed to one underscore. The final strip removes underscores

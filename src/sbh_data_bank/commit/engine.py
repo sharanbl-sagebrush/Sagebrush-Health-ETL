@@ -146,10 +146,36 @@ def utc_now() -> datetime:
 
 
 def spec_sha256(spec: SourceSpec) -> str:
-    """The typing rules' identity for ``typed.*.spec_sha256``: a digest of the
-    validated spec, not of the YAML file, so a comment edit does not look like
-    a rule change and a rule change cannot hide behind unchanged bytes."""
-    return hashlib.sha256(spec.model_dump_json(exclude_none=True).encode()).hexdigest()
+    """The typing rules' identity for ``typed.*.spec_sha256``.
+
+    A digest of the parts of the validated spec that decide what a typed
+    row is: the loading variants' detectors, read settings and columns
+    (less their descriptions), the constants, and the columns kept out of
+    the row hash. Not the YAML file, so a comment edit is not a rule
+    change; and not the whole model either (as it was until 2026-10-23),
+    so a cadence, a note, a filename pattern, a drift policy, a new
+    recognise-only variant or a field added to the model does not change
+    it. The freshness check compares this with the digest on a source's
+    newest typed rows and raises ``SPEC_CHANGED`` when they differ, which
+    is only worth raising when the rows would type differently."""
+    rules = {
+        "key": spec.key,
+        "constants": dict(spec.constants),
+        "row_hash_exclude": list(spec.row_hash_exclude),
+        "variants": [
+            {
+                "name": v.name,
+                "detect": v.detect.model_dump(exclude_none=True),
+                "read": v.read.model_dump(exclude_none=True),
+                "columns": [
+                    c.model_dump(exclude_none=True, exclude={"description"}) for c in v.columns
+                ],
+            }
+            for v in spec.variants
+            if v.loads
+        ],
+    }
+    return hashlib.sha256(_json(rules).encode()).hexdigest()
 
 
 def _json(value: Any) -> str:

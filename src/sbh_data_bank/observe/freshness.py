@@ -31,9 +31,18 @@ Findings, in the order an operator should read them:
 ``RUN_UNFINISHED``    a run with no outcome after ``unfinished_hours``;
                       its batches each committed on their own, the
                       process just ended before closing it
+``SPEC_CHANGED``      the spec's digest differs from the one stamped on
+                      the source's newest typed rows: the typing rules
+                      changed after the last load. ``retype.py`` says what
+                      that does to the data already loaded and records its
+                      verdict in ``meta.spec_check``; a digest a check
+                      found to change nothing is not raised
+``NEW_COLUMNS``       the source's newest loaded file carries columns no
+                      spec column claims; they are kept in ``extra_cells``
+                      and nothing types them until the spec names them
 ``OPEN_QUARANTINE``   rows in ``stg.quarantine`` nobody has resolved
 
-The first five are alerts; open quarantine is a note. :func:`assess` is
+The first six are alerts; new columns and open quarantine are notes. :func:`assess` is
 pure, so the rules are tested without a database; ``scripts/freshness.py``
 fills the inputs from the metadata tables and prints the findings.
 """
@@ -43,6 +52,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
+from sbh_data_bank.commit.engine import spec_sha256
 from sbh_data_bank.registry.spec import SourceSpec
 
 __all__ = [
@@ -77,7 +87,9 @@ DEFAULT_UNFINISHED_HOURS = 6
 #: hands to a sibling variant or another source.
 BENIGN_OUTCOMES = frozenset({"LOADED", "DUPLICATE_FILE", "RECOGNISED_NOT_LOADED"})
 
-ALERTS = frozenset({"STALE", "NEVER_LOADED", "OPEN_REFUSAL", "RUN_FAILED", "RUN_UNFINISHED"})
+ALERTS = frozenset(
+    {"STALE", "NEVER_LOADED", "OPEN_REFUSAL", "RUN_FAILED", "RUN_UNFINISHED", "SPEC_CHANGED"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +106,17 @@ class SourceStatus:
     """``(file_name, outcome, started_at)`` for each file whose latest
     attempt is not in :data:`BENIGN_OUTCOMES`."""
     open_quarantine: int = 0
+    latest_spec_digest: str | None = None
+    """``spec_sha256`` on the source's newest typed row: the typing rules
+    its last load ran under."""
+    verified_spec_digests: frozenset[str] = frozenset()
+    """Spec digests a ``retype.py`` run found to change no loaded file."""
+    spec_check_changes: dict[str, int] = field(default_factory=dict)
+    """The latest ``retype.py`` verdict per spec digest: files that would change."""
+    newest_file: str | None = None
+    unclaimed_columns: tuple[str, ...] = ()
+    """Vendor headers in the newest loaded file that no spec column claimed,
+    as the vendor wrote them (junk columns excluded)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,11 +216,37 @@ def assess(
                         f"({silent} days); expected every {spec.expected_cadence_days} days "
                         f"plus {grace_days} grace",
                     )
+        digest = spec_sha256(spec)
+        if (
+            status.latest_spec_digest is not None
+            and status.latest_spec_digest != digest
+            and digest not in status.verified_spec_digests
+        ):
+            if digest in status.spec_check_changes:
+                verdict = (
+                    f"scripts/retype.py found {status.spec_check_changes[digest]} loaded "
+                    "file(s) would type differently; decide what becomes of their rows (D18)"
+                )
+            else:
+                verdict = (
+                    "run scripts/retype.py on it to see what the change does to the rows "
+                    "already loaded"
+                )
+            out.add("SPEC_CHANGED", spec.key, f"the spec changed after its last load; {verdict}")
         for file_name, outcome, started_at in status.open_refusals:
             out.add(
                 "OPEN_REFUSAL",
                 spec.key,
                 f"{file_name}: {outcome} on {started_at:%Y-%m-%d %H:%M}, no later attempt loaded",
+            )
+        if status.unclaimed_columns:
+            names = ", ".join(status.unclaimed_columns)
+            out.add(
+                "NEW_COLUMNS",
+                spec.key,
+                f"newest loaded file {status.newest_file} carries "
+                f"{len(status.unclaimed_columns)} column(s) no spec column claims: {names} "
+                "(kept in extra_cells, not typed)",
             )
         if status.open_quarantine:
             out.add(

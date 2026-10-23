@@ -11,6 +11,10 @@ NEVER_LOADED, OPEN_REFUSAL, RUN_FAILED and RUN_UNFINISHED are alerts and
 make the exit code 1; OPEN_QUARANTINE is a note. Nothing is written, so
 this is safe to run from a schedule; the exit code is the alert.
 
+``--email`` sends the findings to ``SBH_ALERT_TO`` through ``SBH_SMTP_*``
+when there is anything to say; ``--mail-dry-run`` prints the mail
+instead. A quiet check sends nothing.
+
 ``expected_cadence_days`` is a staleness threshold, not a schedule, and
 ``--grace-days`` (default 2) is what keeps a Sunday-morning check from
 firing before the week's upload. ``--today`` measures staleness from
@@ -33,9 +37,14 @@ from sbh_data_bank.observe.freshness import (  # noqa: E402
     DEFAULT_GRACE_DAYS,
     DEFAULT_UNFINISHED_HOURS,
     DEFAULT_WINDOW_DAYS,
-    SourceStatus,
     assess,
-    stale_after,
+)
+from sbh_data_bank.observe.notify import (  # noqa: E402
+    PrintSender,
+    SmtpSender,
+    SmtpSettings,
+    compose_findings,
+    recipients_from_env,
 )
 from sbh_data_bank.observe.sql import collect  # noqa: E402
 from sbh_data_bank.registry.loader import SpecRegistry  # noqa: E402
@@ -54,6 +63,8 @@ def main() -> int:
     parser.add_argument("--grace-days", type=int, default=DEFAULT_GRACE_DAYS)
     parser.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS)
     parser.add_argument("--unfinished-hours", type=int, default=DEFAULT_UNFINISHED_HOURS)
+    parser.add_argument("--email", action="store_true")
+    parser.add_argument("--mail-dry-run", action="store_true")
     parser.add_argument("--specs", type=Path, default=REPO / "specs")
     args = parser.parse_args()
 
@@ -66,24 +77,11 @@ def main() -> int:
         now = datetime(args.today.year, args.today.month, args.today.day, 12)
     print(f"freshness of {settings.describe()} as of {args.today}")
     with Database(settings) as db:
-        statuses, runs = collect(db, settings.tenant, since=now - timedelta(days=args.window_days))
-
-    head = f"{'source':<36}{'cadence':>8}{'latest as-of':>14}{'days':>6}{'files':>6}"
-    head += f"{'last seen':>18}{'refused':>8}{'quar':>6}"
-    print("\n" + head)
-    for spec in registry:
-        s = statuses.get(spec.key, SourceStatus(spec.key))
-        limit = stale_after(spec, args.grace_days)
-        cadence = "-" if spec.expected_cadence_days is None else str(spec.expected_cadence_days)
-        if not spec.is_expected_to_deliver:
-            cadence = spec.lifecycle.value
-        as_of = s.latest_loaded_as_of.isoformat() if s.latest_loaded_as_of else "-"
-        days = str((args.today - s.latest_loaded_as_of).days) if s.latest_loaded_as_of else "-"
-        seen = s.latest_seen_at.strftime("%Y-%m-%d %H:%M") if s.latest_seen_at else "-"
-        flag = " *" if limit is not None and s.latest_loaded_as_of and int(days) >= limit else ""
-        print(
-            f"{spec.key:<36}{cadence:>8}{as_of:>14}{days:>6}{s.loaded_files:>6}{seen:>18}"
-            f"{len(s.open_refusals):>8}{s.open_quarantine:>6}{flag}"
+        statuses, runs = collect(
+            db,
+            settings.tenant,
+            since=now - timedelta(days=args.window_days),
+            specs=list(registry),
         )
 
     findings = assess(
@@ -100,6 +98,19 @@ def main() -> int:
     print(f"\nfindings: {len(findings)} ({len(alerts)} alerts)")
     for f in findings:
         print(f"  {f}")
+    mail = compose_findings(findings, where=f"{settings.describe()} as of {args.today}")
+    if mail is not None and (args.email or args.mail_dry_run):
+        to = recipients_from_env()
+        try:
+            if args.mail_dry_run:
+                PrintSender().send(mail, to)
+            elif to:
+                SmtpSender(SmtpSettings.from_env()).send(mail, to)
+                print(f"mailed {len(to)} recipient(s)")
+            else:
+                print("SBH_ALERT_TO is empty; nothing mailed")
+        except Exception as exc:  # noqa: BLE001 - the mail is the courtesy, not the record
+            print(f"could not send the mail: {type(exc).__name__}: {exc}")
     return 1 if alerts else 0
 
 

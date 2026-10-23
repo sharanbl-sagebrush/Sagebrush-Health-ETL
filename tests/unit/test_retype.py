@@ -21,12 +21,12 @@ import pytest
 
 from sbh_data_bank.commit.engine import CommitEngine
 from sbh_data_bank.commit.memory import MemoryStore
-from sbh_data_bank.commit.retype import replay_source
+from sbh_data_bank.commit.retype import SPEC_CHECK_INSERT, record_check, replay_source
 from sbh_data_bank.commit.sql import landed_select_sql
 from sbh_data_bank.ingest.replay import LandedLine, header_from_json, rebuild_rows
 from sbh_data_bank.registry.loader import SpecRegistry
 from sbh_data_bank.registry.spec import SourceSpec
-from sbh_data_bank.store.schema import landed_statements
+from sbh_data_bank.store.schema import landed_statements, meta_statements
 
 CLOCK = datetime(2026, 10, 22, 12, 0, 0)
 HEADER = "ID,Account,Event,Amount,SSN,Note,Memo"
@@ -241,6 +241,28 @@ class TestSql:
             for name in columns:
                 assert f"[{name}]" in create or f"    {name} " in create, (spec.key, name)
             assert "ORDER BY line_number" in select
+
+
+def test_a_check_records_the_digest_and_the_verdict(tmp_path):
+    from sbh_data_bank.commit.engine import spec_sha256
+
+    spec = _spec()
+    store = _loaded(tmp_path, spec)
+    replays = list(replay_source(store, spec, "t1"))
+    calls = []
+
+    class Db:
+        def execute(self, sql, *params):
+            calls.append((sql, params))
+            return []
+
+    record_check(Db(), spec, replays, tenant_id="t1", actor="tester", now=CLOCK)
+    ((sql, params),) = calls
+    assert sql == SPEC_CHECK_INSERT
+    assert params == ("t1", spec.key, spec_sha256(spec), CLOCK, "tester", 2, 5, 0)
+    (create,) = [s for s in meta_statements() if "CREATE TABLE meta.spec_check" in s]
+    for name in SPEC_CHECK_INSERT.split("(", 1)[1].split(")")[0].split(", "):
+        assert f"    {name} " in create, name
 
 
 def test_the_memory_store_lists_only_loaded_files(tmp_path):

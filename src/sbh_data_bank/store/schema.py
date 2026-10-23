@@ -343,6 +343,47 @@ CREATE TABLE meta.run (
     detail       NVARCHAR(MAX) NULL
 );
 
+-- One row per blob version the acquire step has copied from the upload
+-- container into the landing root (acquire.ledger). Identity is the blob's
+-- name and etag, so a blob is fetched once and a re-upload (new etag) is
+-- fetched again and left to the content-hash check in meta.source_file.
+--   file_sha256   the same identity meta.source_file carries, so "which
+--                 upload did this file come from" is one join
+--   local_path    where the copy was put, relative to the landing root
+IF OBJECT_ID('meta.blob') IS NULL
+CREATE TABLE meta.blob (
+    blob_id        BIGINT IDENTITY(1,1) PRIMARY KEY,
+    tenant_id      NVARCHAR(64)   NOT NULL,
+    account_name   NVARCHAR(128)  NOT NULL,
+    container_name NVARCHAR(128)  NOT NULL,
+    blob_name      NVARCHAR(1024) NOT NULL,
+    etag           NVARCHAR(128)  NOT NULL,
+    content_length BIGINT         NOT NULL,
+    last_modified  DATETIME2(3)   NOT NULL,
+    file_sha256    CHAR(64)       NOT NULL,
+    fetched_at     DATETIME2(3)   NOT NULL,
+    local_path     NVARCHAR(1024) NOT NULL,
+    CONSTRAINT uq_blob UNIQUE (tenant_id, account_name, container_name, blob_name, etag)
+);
+
+-- One row per run of scripts/retype.py over one source: the spec digest it
+-- typed the landed layer under and how many loaded files would change.
+-- files_changed = 0 is the proof that the rows already in typed are what
+-- this spec would produce, so the freshness check does not raise
+-- SPEC_CHANGED for a digest a check has cleared.
+IF OBJECT_ID('meta.spec_check') IS NULL
+CREATE TABLE meta.spec_check (
+    check_id       BIGINT IDENTITY(1,1) PRIMARY KEY,
+    tenant_id      NVARCHAR(64)   NOT NULL,
+    source_key     NVARCHAR(128)  NOT NULL,
+    spec_sha256    CHAR(64)       NOT NULL,
+    checked_at     DATETIME2(3)   NOT NULL,
+    checked_by     NVARCHAR(128)  NOT NULL,
+    files          INT            NOT NULL,
+    lines          BIGINT         NOT NULL,
+    files_changed  INT            NOT NULL
+);
+
 -- Rows that would not parse, kept whole so they can be corrected and replayed
 -- without going back to the source file. Never carries a prohibited column.
 -- The persisted form of ingest.reader.QuarantinedRow. The row is also in
@@ -440,7 +481,7 @@ def meta_statements() -> list[str]:
     batch at a time, and a failure part way through a blob leaves a half-built
     schema with no clear way to tell what applied.
 
-    Returns the six ``CREATE SCHEMA`` guards, the five tables, the guarded
+    Returns the six ``CREATE SCHEMA`` guards, the seven tables, the guarded
     column additions for tables that were live before those columns existed,
     the file-identity constraint repair, and two indexes, in dependency order.
     """

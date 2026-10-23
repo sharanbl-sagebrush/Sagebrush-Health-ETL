@@ -19,19 +19,21 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
 
 ## The state of things
 
-- 20 source specs in `specs/`, every one verified by loading the real extract
-  (Cardinal's summary and detail reports are two sources since 2026-10-22, D16)
+- 21 source specs in `specs/`, every one verified by loading the real extract
+  (Cardinal's summary and detail reports are two sources since 2026-10-22, D16;
+  the Apexus pricing workbook since 2026-10-23)
 - `store/schema.py` generates the layered DDL from the specs: `landed`,
   `typed` and `curated` tables per source plus `meta` and `stg`
-  (`python scripts/migrate.py --dry-run` prints it, 163 statements).
+  (`python scripts/migrate.py --dry-run` prints it, 172 statements).
   **Applied to `sbh_data_bank` on Azure 2026-10-21**, re-applied 2026-10-22
   after the fifteen empty tables of five changed specs were dropped by
-  hand: 60 layered tables plus `meta` and `stg`. The 19 `raw.*` tables
+  hand, and again 2026-10-23 for the pricing source, `meta.blob` and
+  `meta.spec_check`: 63 layered tables plus `meta` and `stg`. The 19 `raw.*` tables
   predate the layered decision, were never written to, and are left alone
   until dropped explicitly. Re-running the migration is a no-op; it only
   creates what is missing and never alters a column, so a spec change to a
   table with rows is a decision about those rows first
-- 494 tests, no database required to run them
+- 512 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -76,8 +78,22 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   proof that the landed layer is complete. It reports only; writing the
   rebuilt rows is D18, not yet decided. The two run rows the first
   backfill left open are closed as INTERRUPTED (`scripts/close_runs.py`)
-- **Not yet built**: the acquire step, and the write side of the replay
-  (replacing typed rows and re-curating from them, D18)
+- Done 2026-10-23: **the pricing workbook is a source**
+  (`reference.apexus.pricing`, the `apexus` sheet, 45,551 rows loaded, as-of
+  from the workbook's modified stamp until it arrives in a dated folder);
+  **the acquire step is built** (`acquire/`, `scripts/acquire.py`: mirror
+  the upload container into a landing root, record each blob in
+  `meta.blob`, run the backfill loop over it) and waits only for a data
+  role on the container; **email alerts are built** (`observe/notify.py`,
+  `--email` on the freshness check, the acquire pass mails its report)
+  and wait only for the SMTP settings and recipients; the freshness check
+  gained `SPEC_CHANGED` (a spec edited after its last load, cleared by a
+  `retype.py` verdict recorded in `meta.spec_check`) and `NEW_COLUMNS`
+  (vendor columns no spec column claims, as a note). The payments versus
+  services question is answered (`docs/data-findings.md`, 17)
+- **Not yet built**: the write side of the replay (replacing typed rows
+  and re-curating from them, D18), which now has a concrete case waiting:
+  Curve Monthly Services types `totpmt`, `totadj` and `totref` as text
 
 ## Rules that came from real defects
 
@@ -144,6 +160,12 @@ is a duplicate for one source.
 shape. Committed as `LOADED` with nothing behind them, their hashes would
 have been duplicates forever to the corrected spec. `max_quarantine_rate`
 (5% by default) holds the file with its hash still loadable (D17).
+
+**A dollar or percent sign in a header is a word.** Header matching folds
+punctuation, and the pricing workbook has `margin_$` beside `margin_%`;
+folded to `margin` twice, the file was unreadable (2026-10-23). The two
+signs now normalise to `dollar` and `pct` on both sides of a match, so
+McKesson's `Extended Price ($)` still matches its own spec.
 
 **A text value wider than its column fails the row, never the file.** A
 2,620-character patient note failed the first patients load at insert,
@@ -245,20 +267,23 @@ src/sbh_data_bank/
               rule with vanish, in memory
   commit/     the commit engine: one file per transaction through meta,
               landed, typed, curated and quarantine; a SQL store and an
-              in-memory store behind one interface; retype, the replay
-              of typed from landed
-  observe/    source freshness and the open items in meta and stg
+              in-memory store behind one interface; backfill, the loop
+              over a root; retype, the replay of typed from landed
+  acquire/    the upload container: list, mirror into the landing root,
+              record in meta.blob
+  observe/    source freshness, the open items in meta and stg, and mail
   store/      config, connection, ledger schema
-specs/        20 source specs (YAML) — generated once, hand-edited since
+specs/        21 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
-              trace_file, commit_file, backfill, freshness, retype, close_runs
+              trace_file, commit_file, backfill, acquire, freshness, retype,
+              close_runs
 ```
 
 ## Running things
 
 ```bash
-python -m pytest                    # 494 tests, no database
+python -m pytest                    # 512 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts
@@ -268,7 +293,8 @@ python scripts/commit_file.py <spec key> "<file>" --dry-run   # the engine, in m
 python scripts/commit_file.py <spec key> "<file>" --env-file <path>   # commit to Azure
 python scripts/backfill.py --dry-run --only <spec key>        # every delivery, in memory
 python scripts/backfill.py --env-file .env --actor <you> --fast [--only ...]   # to Azure
-python scripts/freshness.py --env-file .env          # is every source current; exit 1 on an alert
+python scripts/acquire.py --env-file .env --actor <you> [--poll 300]   # fetch uploads, then load them
+python scripts/freshness.py --env-file .env [--email]   # is every source current; exit 1 on an alert
 python scripts/retype.py --env-file .env --only <spec key>   # what a spec edit does to loaded data
 python scripts/close_runs.py --env-file .env [--apply]       # runs a dead process left open
 ```
@@ -294,8 +320,17 @@ uploaded to Azure Storage every Sunday, with ad hoc midweek re-uploads when
 data needs correcting. The ETL must pick up a midweek file without waiting for
 Sunday. So:
 
-- The acquire step (not yet built) polls the blob container or reacts to
-  blob-created events. It is never a Sunday cron.
+- The acquire step (`scripts/acquire.py`, built 2026-10-23) lists the
+  `sbh-data-bank` container of the `sbhsftp01` storage account, which the
+  team fills over SFTP, copies every blob version it has not seen into a
+  local landing root under the blob's own path, records it in `meta.blob`,
+  and runs the backfill loop over the landing root. `--poll N` repeats
+  that every N seconds. It is never a Sunday cron. The upload convention
+  is a dated folder per download day, `inbound/MMDDYYYY/`, which is what
+  gives each delivery its as-of; a corrected re-pull goes in a new dated
+  folder, never over the old file. The ETL reads the container through
+  the Blob API as an Entra ID identity (Storage Blob Data Reader on the
+  container), never over SFTP and never with the account key.
 - `expected_cadence_days` is a staleness threshold ("alert if nothing seen in
   N days"), not a schedule. Specs keep 7 for weekly sources; the freshness
   check (`observe/freshness.py`, built 2026-10-22) adds two days' grace so
@@ -318,6 +353,13 @@ root, which `.gitignore` excludes (`*.env`, decided 2026-10-21); scripts take
 `--env-file .env`. Target posture is managed identity — omit `SBH_SQL_USER`
 and the connection uses `ActiveDirectoryMsi`.
 
+The same file carries `SBH_BLOB_ACCOUNT` and `SBH_BLOB_CONTAINER` for the
+acquire step (plus `SBH_BLOB_SAS` for a developer machine without the data
+role; otherwise `DefaultAzureCredential`, which is `az login` locally and
+the managed identity in production), and `SBH_SMTP_HOST`, `SBH_SMTP_PORT`,
+`SBH_SMTP_USER`, `SBH_SMTP_PASSWORD`, `SBH_MAIL_FROM` and `SBH_ALERT_TO`
+for the alerts. Every settings object excludes its secret from `repr`.
+
 ## Open questions for the business
 
 These are in `docs/data-findings.md` with the evidence. They block
@@ -329,8 +371,13 @@ reconciliation, not ingestion.
 2. **Which McKesson report is the purchase source.** Both parse to identical
    extended price, gross purchases and net quantity — loading both doubles every
    McKesson figure. Ordered quantity differs by 23 units.
-3. **Whether `Monthly Payments` and `Curve_Monthly Services` overlap.** Both
-   carry `Voucher_Number`, `Service_ID`, `IsVoided`, `ProcCode`, `Fee`.
+3. **Answered 2026-10-23: `Monthly Payments` is the posting ledger of
+   `Curve_Monthly Services`**, not a copy of it. Services is one row per
+   charge line with its totals; Payments is two to twelve rows per charge
+   line (transfers, payments, adjustments, refunds), and the payment rows
+   sum to the service line's paid total on 94.6% of lines. Both are
+   needed; reconciliation takes charges from one and cash from the other
+   (`docs/data-findings.md`, 17).
 4. **Four vendor asks** that would each remove a real problem: an order id from
    Allscripts, an appointment id from Curve, a line-sequence number on Curve
    Monthly Services, the encounter id on Athena Encounters.

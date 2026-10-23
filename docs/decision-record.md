@@ -703,3 +703,75 @@ today). Until that is decided, a spec edit is checked with `retype.py`
 first, and if it changes loaded data the files are re-committed under the
 corrected spec, which the engine already supports (D17: a held file's
 hash stays loadable).
+
+## The pricing workbook is a source (2026-10-23, developer)
+
+"The pricing workbook must be loaded to SQL and updated every quarter, as
+Apexus does the same, and it is the source of truth." The workbook is an
+analyst's file of eleven sheets; the `apexus` sheet is the price list
+(45,551 rows, one per NDC and contract, with the analysts' matching,
+grouping and margin columns beside the Apexus columns) and is what
+`reference.apexus.pricing` loads. The `ASP`, `internal`, `external` and
+`mapping` sheets are working sheets of other grains and are not selected.
+Key `(ndc, internal_pvp_contract_number, pvp_contracted_eff_date)`, unique
+on the live file; `ndc` is text because 345 values are product codes
+rather than NDCs; as-of from the workbook's modified stamp (the creation
+stamp is the template's, 2024-06-08) until the quarterly upload lands in
+a dated folder; cadence 98 days. Loaded 2026-10-23: 45,551 inserted, 0
+quarantined, as of 2026-05-26, which the freshness check already reports
+as stale, correctly: the next quarter's file is due.
+
+The file also found a defect. Header matching folded `margin_$` and
+`margin_%` to the same name and refused the sheet as ambiguous. A dollar
+or percent sign is now a word (`dollar`, `pct`) on both sides of a match;
+every spec still binds its real files (`bind_real_files.py`, 2026-10-23).
+
+## The acquire step (2026-10-23, engine author; container set up by the developer)
+
+The team uploads over SFTP to the `sbh-data-bank` container of the
+`sbhsftp01` account (hierarchical namespace on; the SFTP user's home is
+`inbound/`). The ETL does not speak SFTP. `scripts/acquire.py` lists the
+container through the Blob API, copies every blob version it has not
+seen (identity: name and etag) into a local landing root under the blob's
+own path, records each copy in `meta.blob` the moment it is in place, and
+runs the backfill loop over the landing root, so the dated folder in the
+blob's path is the delivery's as-of (D5) exactly as it is on disk, a
+re-upload of the same bytes is a `DUPLICATE_FILE`, and nothing is loaded
+twice. `--poll N` repeats the pass, which is the midweek pickup the
+design asks for. Credentials are Entra ID (`DefaultAzureCredential`) or
+a container-scoped SAS on a developer machine; never the account key,
+which opens every vendor's container on that account.
+
+Not yet run against the container: the developer's identity has no data
+role on it (Owner on the subscription is a control-plane role), and the
+assistant's attempt to put a SAS in `.env` was refused by its own
+permission classifier as a secret-store write. One role assignment, on
+the container scope, is what remains.
+
+## Alerts by mail, and two more findings (2026-10-23, developer: "notify a few users via email")
+
+`observe/notify.py`: every alert becomes one mail, subject with the kinds
+and count, body the findings one per line as the scripts print them.
+Sent over SMTP with STARTTLS from `SBH_SMTP_*` to `SBH_ALERT_TO`;
+`--mail-dry-run` prints it. The freshness check mails when it has
+something to say (`--email`), the acquire pass mails its report when it
+fetched anything, and a send failure never fails the run that raised it.
+Waiting on the sending mailbox and the recipient list.
+
+Two findings were added for "when the spec changes":
+
+- `SPEC_CHANGED`, an alert: the spec's digest differs from the one on
+  the source's newest typed rows. For this to mean something, the digest
+  (`typed.*.spec_sha256`) was narrowed to the typing rules: the loading
+  variants' detectors, read settings and columns, the constants and the
+  hash exclusions. Until now it covered the whole model, so a cadence, a
+  note or a field added to the model changed every source's digest; the
+  first run of the check raised three such false alarms. The narrowing
+  itself changes every digest once, so `retype.py` now records its
+  verdict per source in `meta.spec_check`, and a digest a verdict found
+  to change nothing is not raised. A verdict with changes is raised with
+  its count, which is the D18 queue.
+- `NEW_COLUMNS`, a note: the vendor headers in the source's newest
+  loaded file that no spec column claims, as the vendor wrote them. They
+  are kept in `extra_cells` and nothing types them until the spec names
+  them.

@@ -22,12 +22,15 @@ from sbh_data_bank.observe.freshness import (
     stale_after,
 )
 from sbh_data_bank.observe.sql import (
+    LATEST_SPEC_DIGEST,
     LOADED_BY_SOURCE,
+    NEWEST_HEADER,
     OPEN_QUARANTINE,
     OPEN_REFUSALS,
     RUN_SOURCES,
     RUNS,
     SEEN_BY_SOURCE,
+    SPEC_CHECKS,
     collect,
 )
 from sbh_data_bank.registry.spec import SourceSpec
@@ -184,6 +187,47 @@ class TestOtherFindings:
         assert _kinds(findings) == [("RUN_UNFINISHED", None)]
         assert "run_dead" in findings[0].message and "close_runs.py" in findings[0].message
 
+    def test_a_spec_edited_after_its_last_load_is_an_alert(self):
+        from sbh_data_bank.commit.engine import spec_sha256
+
+        spec = _spec()
+        digest = spec_sha256(spec)
+        same = SourceStatus(
+            spec.key, latest_loaded_as_of=TODAY, latest_spec_digest=spec_sha256(spec)
+        )
+        assert assess([spec], {spec.key: same}, [], today=TODAY) == []
+        edited = SourceStatus(spec.key, latest_loaded_as_of=TODAY, latest_spec_digest="0" * 64)
+        (finding,) = assess([spec], {spec.key: edited}, [], today=TODAY)
+        assert finding.kind == "SPEC_CHANGED" and finding.is_alert
+        assert "retype.py" in finding.message
+        # A source never loaded has no digest to compare, and no alert here.
+        never = SourceStatus(spec.key, latest_loaded_as_of=TODAY)
+        assert assess([spec], {spec.key: never}, [], today=TODAY) == []
+        # A retype run that found nothing would change clears the alert;
+        # one that found changes keeps it and says how many.
+        cleared = SourceStatus(
+            spec.key, latest_loaded_as_of=TODAY, latest_spec_digest="0" * 64,
+            verified_spec_digests=frozenset({digest}), spec_check_changes={digest: 0},
+        )  # fmt: skip
+        assert assess([spec], {spec.key: cleared}, [], today=TODAY) == []
+        pending = SourceStatus(
+            spec.key, latest_loaded_as_of=TODAY, latest_spec_digest="0" * 64,
+            spec_check_changes={digest: 3},
+        )  # fmt: skip
+        (finding,) = assess([spec], {spec.key: pending}, [], today=TODAY)
+        assert "found 3 loaded file(s) would type differently" in finding.message
+
+    def test_unclaimed_columns_in_the_newest_file_are_a_note(self):
+        spec = _spec()
+        status = SourceStatus(
+            spec.key, latest_loaded_as_of=TODAY, newest_file="t.csv",
+            unclaimed_columns=("Site Name", "Rebate"),
+        )  # fmt: skip
+        (finding,) = assess([spec], {spec.key: status}, [], today=TODAY)
+        assert finding.kind == "NEW_COLUMNS" and not finding.is_alert
+        assert "t.csv carries 2 column(s)" in finding.message
+        assert "Site Name, Rebate" in finding.message
+
     def test_findings_print_in_three_columns(self):
         line = str(Finding("STALE", "t.weekly", "late"))
         assert line.startswith("STALE") and "t.weekly" in line and line.endswith("late")
@@ -217,7 +261,7 @@ class TestCollect:
         )  # fmt: skip
         statuses, runs = collect(db, "sagebrush", since=datetime(2026, 10, 15))
 
-        assert statuses["t.a"] == SourceStatus("t.a", date(2026, 10, 22), seen, 6, (), 0)
+        assert statuses["t.a"] == SourceStatus("t.a", date(2026, 10, 22), seen, 6, (), 0, None)
         assert statuses["t.b"].open_quarantine == 3 and statuses["t.b"].loaded_files == 40
         c = statuses["t.c"]
         assert c.latest_loaded_as_of is None and c.loaded_files == 0
@@ -231,6 +275,36 @@ class TestCollect:
         # Every query is tenant-scoped; the run query also takes the window.
         assert all(params[0] == "sagebrush" for _, params in db.calls)
         assert [p for sql, p in db.calls if sql == RUNS] == [("sagebrush", datetime(2026, 10, 15))]
+
+    def test_the_newest_header_yields_the_unclaimed_columns_without_junk(self):
+        import json
+
+        header = json.dumps(
+            [
+                {"position": 0, "header": "ID", "target": "id"},
+                {"position": 1, "header": "Unnamed: 1", "target": None},
+                {"position": 2, "header": "Rebate", "target": None},
+                {"position": 3, "header": "", "target": None},
+            ]
+        )
+        db = _FakeDb({NEWEST_HEADER: [("t.a", "a.xlsx", "Sheet1", header)]})
+        statuses, _ = collect(db, "sagebrush", since=datetime(2026, 10, 15))
+        assert statuses["t.a"].newest_file == "a.xlsx [Sheet1]"
+        assert statuses["t.a"].unclaimed_columns == ("Rebate",)
+
+    def test_spec_checks_are_merged_per_digest(self):
+        db = _FakeDb({SPEC_CHECKS: [("t.a", "a" * 64, 0), ("t.a", "b" * 64, 2)]})
+        statuses, _ = collect(db, "sagebrush", since=datetime(2026, 10, 15))
+        assert statuses["t.a"].verified_spec_digests == frozenset({"a" * 64})
+        assert statuses["t.a"].spec_check_changes == {"a" * 64: 0, "b" * 64: 2}
+
+    def test_the_spec_digest_is_read_from_each_typed_table(self):
+        spec = _spec("t.weekly")
+        sql = LATEST_SPEC_DIGEST.format(typed="typed.t_weekly")
+        db = _FakeDb({sql: [("a" * 64,)]})
+        statuses, _ = collect(db, "sagebrush", since=datetime(2026, 10, 15), specs=[spec])
+        assert statuses["t.weekly"].latest_spec_digest == "a" * 64
+        assert "ORDER BY created_at DESC" in sql
 
     def test_the_refusal_query_excludes_every_benign_outcome(self):
         for outcome in BENIGN_OUTCOMES:

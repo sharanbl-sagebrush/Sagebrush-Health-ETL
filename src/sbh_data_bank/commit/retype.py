@@ -20,9 +20,15 @@ unchanged spec every line is ``unchanged`` and the totals agree; that is
 the proof the landed layer is complete, and ``scripts/retype.py`` ran it
 over the whole database on 2026-10-22 (``docs/decision-record.md``).
 
-Nothing is written. Replacing the typed rows and re-curating from them is
-decision D18, not yet taken: the curated ledger is append-only, so a
-rebuild has to say what becomes of the rows curated from the old typing.
+Nothing in the layers is written. Replacing the typed rows and
+re-curating from them is decision D18, not yet taken: the curated ledger
+is append-only, so a rebuild has to say what becomes of the rows curated
+from the old typing. The one thing a run records is its own verdict, one
+``meta.spec_check`` row per source (:func:`record_check`): the spec
+digest it ran under and how many files would change. A verdict of none
+is what lets the freshness check stop raising ``SPEC_CHANGED`` for that
+digest, since the rows already typed are exactly what the spec would
+produce.
 """
 
 from __future__ import annotations
@@ -30,13 +36,16 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
+from typing import Any, Protocol
 
+from sbh_data_bank.commit.engine import spec_sha256
 from sbh_data_bank.commit.records import LayerReader, LoadedFile
 from sbh_data_bank.ingest.replay import load_from_landed
 from sbh_data_bank.registry.spec import SourceSpec
 
-__all__ = ["FileReplay", "replay_source"]
+__all__ = ["SPEC_CHECK_INSERT", "FileReplay", "record_check", "replay_source"]
 
 #: How many line numbers a replay keeps per difference kind, for the report.
 SAMPLE = 5
@@ -140,3 +149,40 @@ def replay_source(reader: LayerReader, spec: SourceSpec, tenant_id: str) -> Iter
     """Every loaded file of one source, in the order they were registered."""
     for file in reader.loaded_files(tenant_id, spec.key):
         yield replay_file(reader, spec, file)
+
+
+class _Queryable(Protocol):
+    def execute(self, sql: str, *params: Any) -> list[tuple]: ...
+
+
+_SPEC_CHECK_COLUMNS = [
+    "tenant_id", "source_key", "spec_sha256", "checked_at", "checked_by", "files", "lines",
+    "files_changed",
+]  # fmt: skip
+SPEC_CHECK_INSERT = (
+    f"INSERT INTO meta.spec_check ({', '.join(_SPEC_CHECK_COLUMNS)}) "
+    f"VALUES ({', '.join('?' for _ in _SPEC_CHECK_COLUMNS)})"
+)
+
+
+def record_check(
+    db: _Queryable,
+    spec: SourceSpec,
+    replays: list[FileReplay],
+    *,
+    tenant_id: str,
+    actor: str,
+    now: datetime | None = None,
+) -> None:
+    """One ``meta.spec_check`` row for a completed replay of one source."""
+    db.execute(
+        SPEC_CHECK_INSERT,
+        tenant_id,
+        spec.key,
+        spec_sha256(spec),
+        now or datetime.now(),
+        actor,
+        len(replays),
+        sum(r.lines for r in replays),
+        sum(1 for r in replays if not r.identical),
+    )
