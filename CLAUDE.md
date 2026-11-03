@@ -106,6 +106,18 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   identities, 0 quarantined. The in-file duplicates are explained, and
   three of them are rule fixes waiting for D18, led by Monthly Payments'
   key, which needs `transtype`
+- 2026-11-03: **the first upload through the container is loaded**. A
+  colleague uploaded eighteen files over SFTP (every weekly source for
+  09/29 to 11/02 plus Monthly Payments for October); the data role is
+  still not granted, so they were mirrored once with the Azure CLI into
+  the landing root under a dated folder and committed with the backfill
+  loop: 18 LOADED, 0 refused, 0 quarantined, 0 conflicts, 1,300 corrections
+  where the pulls overlap, verified against the landed files. The upload
+  had no dated folder (the guide now says so), the Cardinal workbook had
+  no summary sheet (that source is now the stale one), and three vendors
+  added columns (Curve appointments 11, Curve services 1, PRxP 5), kept in
+  `extra_cells` and reported as `NEW_COLUMNS`. Alerts went by mail both
+  times the check ran; SMTP settings are in `.env`
 - **Not yet built**: the write side of the replay (replacing typed rows
   and re-curating from them, D18). Its queue: the Monthly Payments key,
   the three Curve money columns typed as text, two keys pending vendor

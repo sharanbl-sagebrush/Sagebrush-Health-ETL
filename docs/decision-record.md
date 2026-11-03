@@ -831,3 +831,40 @@ takes: whether a rebuilt curated layer supersedes the old rows (a new
 version beside them. Until then the rows stand as loaded, which is
 correct for reconciliation as long as the occurrences are read as the
 rows they are.
+
+## The first upload through the container (2026-11-03)
+
+The colleague who downloads the vendor reports uploaded eighteen files
+over SFTP to `sbh-data-bank/inbound/` on the evening of 2026-11-02: every
+weekly source for 09/29 to 11/02, the Athena eligibility snapshot as of
+11/02 and Monthly Payments for October. Two things differed from the
+upload guide. There was no dated folder (the files sat in the five
+category folders directly under `inbound`), and the Cardinal workbook
+carried only the detail sheet, so the summary source had no delivery.
+
+The data role on the container is still not granted, so the acquire
+step could not run as the signed-in user. The files were mirrored once
+with the Azure CLI (account key, read only) into the landing root under
+`11022026/`, which gives every file the as-of the folder convention
+would have given it, and committed with `scripts/backfill.py --fast`.
+This is the one time a load used the account key; the production path
+stays the Blob API as an Entra ID identity.
+
+Result: 18 LOADED, 0 refused, 0 quarantined, 0 conflicts, 0 unclaimed.
+Where the pull overlapped the last one (09/29 and 09/30) the engine
+found 1,300 corrections and 24,328 unchanged rows, most of them the
+Athena eligibility snapshot (942 corrected, 22,917 unchanged), Curve
+Monthly Services (300 corrected, the columns that come and go) and
+PRxP (38). `scripts/verify_load.py` over the landing root: every line
+count matched, no identity with two current rows. The Monthly Payments
+transfer pairs grew to 184,481, the same pattern as before, still
+waiting for D18.
+
+The freshness check, mailed, now reports one real staleness (the
+Apexus pricing workbook, 161 days) and one caused by the upload
+(Cardinal's summary, because the workbook had no summary sheet), and
+three vendors have added columns since the last pull: Curve
+appointments (eleven, next-appointment and policy columns), Curve
+Monthly Services (`AllDxCodes`) and PRxP (five, names and group ids).
+They are landed in `extra_cells`, untyped, until a spec column claims
+them. The Monthly Payments alert is cleared.
