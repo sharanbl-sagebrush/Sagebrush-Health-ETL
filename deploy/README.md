@@ -10,8 +10,21 @@ Two scheduled jobs on Azure Container Apps, in the resource group
 
 | Job | Schedule (UTC) | Command | What it does |
 |---|---|---|---|
-| `sbh-acquire` | every 30 minutes | `scripts/acquire.py --actor etl` | lists the `sbh-data-bank` upload container, copies every unseen blob into `/tmp/landing`, records it in `meta.blob`, runs the load over the landing root, mails the report when it fetched anything |
-| `sbh-freshness` | daily 14:00 | `scripts/freshness.py --email` | the freshness check; mails the findings when there are any |
+| `sbh-acquire` | every 30 minutes | `sh scripts/job.sh acquire` (runs `scripts/acquire.py --actor etl`) | lists the `sbh-data-bank` upload container, copies every unseen blob into `/tmp/landing`, records it in `meta.blob`, runs the load over the landing root, mails the report when it fetched anything |
+| `sbh-freshness` | daily 14:00 | `sh scripts/job.sh freshness` (runs `scripts/freshness.py --email`) | the freshness check; mails the findings when there are any |
+
+The jobs were deployed 2026-11-03 (both identities hold `AcrPull` on the
+registry; `sbh-acquire` also holds Storage Blob Data Reader on the
+container). Two things the CLI taught: a job command may not carry a
+token that starts with `-` (the CLI reads it as its own option), which
+is why `scripts/job.sh` exists, and creating a job with `--registry-identity
+system` can fail its image pull before the fresh identity's `AcrPull` has
+propagated, leaving the job on the placeholder image; the fix is
+`az containerapp job registry set ... --identity system` followed by
+`job update --image`. **A `Failed` execution of `sbh-freshness` is
+expected whenever the check finds an alert**: the script exits 1 by
+design and has mailed the findings; read the log before assuming a
+crash. The acquire job exits 0 whether or not it found files.
 
 A job runs to completion and exits; nothing is billed between runs. A
 pass that finds nothing new ends in seconds. The largest load seen so far

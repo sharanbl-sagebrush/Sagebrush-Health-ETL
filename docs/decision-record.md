@@ -868,3 +868,35 @@ appointments (eleven, next-appointment and policy columns), Curve
 Monthly Services (`AllDxCodes`) and PRxP (five, names and group ids).
 They are landed in `extra_cells`, untyped, until a spec column claims
 them. The Monthly Payments alert is cleared.
+
+## Deployed (2026-11-03, developer: "Go")
+
+Worked through one task at a time, each explained and approved before
+anything changed. First the data role: Storage Blob Data Reader on the
+`sbh-data-bank` container for the developer's own account, after which
+`scripts/acquire.py` listed and fetched the container as that account
+through its normal Azure login, recorded the eighteen uploaded files in
+`meta.blob`, and on a second pass found nothing new. The account-key
+pull of the day before is the last one.
+
+Then the jobs: `deploy/deploy.sh` built the image from `fa309ec` and
+created `sbh-acquire` (every 30 minutes) and `sbh-freshness` (daily
+14:00 UTC), each with a system-assigned identity holding `AcrPull`;
+the acquire identity also holds the container role. Two defects in the
+script showed up and are fixed in the same commit: a job command cannot
+carry a `--flag` (the CLI claims it), so `scripts/job.sh` chooses the
+job by one word; and Git Bash rewrites a `/subscriptions/...` scope as
+a file path unless `MSYS_NO_PATHCONV` is set. One race is documented in
+`deploy/README.md` rather than fixed: the freshness job's image pull
+failed before its new identity's `AcrPull` had propagated and the job
+was left on the placeholder image, repaired by setting the registry
+identity and updating the image.
+
+First executions, started by hand: `sbh-acquire` succeeded ("18 blob
+versions already fetched ... 0 new files"); `sbh-freshness` mailed the
+same five findings the laptop run had and reported `Failed`, because
+the script exits 1 when it has alerts. That is the designed meaning of
+a failed freshness execution and is written down. The jobs still sign
+in to SQL as the developer's login (`pranav`) from a Container Apps
+secret; a managed-identity login on the database is a later change by
+the server's Entra admin.

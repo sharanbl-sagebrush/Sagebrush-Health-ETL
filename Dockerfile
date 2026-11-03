@@ -39,5 +39,5 @@ RUN pip install --no-cache-dir . \
 RUN useradd --create-home --uid 1000 etl && chown -R etl:etl /app /tmp/landing
 USER etl
 
-# The acquire pass by default; the freshness job overrides the command.
-CMD ["python", "scripts/acquire.py", "--actor", "etl"]
+# The acquire pass by default; the freshness job passes "freshness" (scripts/job.sh).
+CMD ["sh", "scripts/job.sh", "acquire"]

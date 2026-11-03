@@ -20,6 +20,7 @@
 #   sbh-acquire           job, every 30 minutes: fetch uploads, load them
 #   sbh-freshness         job, daily 14:00 UTC: the freshness check, mailed
 set -euo pipefail
+export MSYS_NO_PATHCONV=1   # Git Bash on Windows rewrites "/subscriptions/..." as a file path otherwise
 cd "$(dirname "$0")/.."
 # The CLI streams build logs through the console encoding and crashes on a
 # Windows console when the log carries a character cp1252 lacks.
@@ -102,8 +103,8 @@ job() {  # name, cron, command...
     --assignee-principal-type ServicePrincipal --scope "$scope" -o none 2>/dev/null || true
 }
 
-job sbh-acquire   "*/30 * * * *" python scripts/acquire.py --actor etl
-job sbh-freshness "0 14 * * *"    python scripts/freshness.py --email
+job sbh-acquire   "*/30 * * * *" sh scripts/job.sh acquire
+job sbh-freshness "0 14 * * *"    sh scripts/job.sh freshness
 
 echo "== done: image $IMAGE"
 echo "run one now:   az containerapp job start -n sbh-acquire -g $RG"

@@ -96,7 +96,13 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   half hour, freshness daily); the registry and environment exist in
   `sbh-data-bank-rg`, the jobs do not. The developer wants the loaded data
   verified against the raw files first (`scripts/verify_load.py`); nothing
-  in Azure changes until they say so. The reconciliation question (can
+  in Azure changes until they say so. **Deployed 2026-11-03** on the
+  developer's go: the container role on their account, then both jobs
+  from image `fa309ec`, each with its own managed identity; the first
+  hand-started acquire run read the container as the job identity and
+  found nothing new, the first freshness run mailed its findings and
+  exited 1 as designed (`deploy/README.md`). Every Azure change still
+  waits for the developer's word. The reconciliation question (can
   Curve Monthly Services be reconciled with WeInfuse dispenses) is
   answered with numbers in `docs/data-findings.md`, 18: yes, on patient
   number, day and HCPCS, with a code crosswalk as the first rule
