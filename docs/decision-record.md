@@ -973,3 +973,18 @@ the conversion run after the rebuild has written parsable text. The
 natural-key index `ix_curated_<source>_key` is guarded by name and so
 keeps its old column list after a key change; it serves people's
 queries, not the rule, and is left for a later migration pass.
+
+## The alert mail, laid out (2026-11-04, developer: "not in human readable form")
+
+The first mails were the terminal report pasted into a message: fixed
+width columns that a mail client reflows into one run of text. The mail
+now carries two parts. The text part is unchanged, so what the terminal
+prints and what a client without HTML shows are still the same words.
+The HTML part lays those findings out: a heading with the database and
+the check date, a "Needs attention" section with one card per alert and
+a "For information" section with one per note, each card a plain label
+(`LABELS` in `observe/notify.py`: "Stale source", "Held file", "New
+vendor columns", ...), the source key, and the message; a new-columns
+message shows its vendor columns as chips rather than a comma run. The
+acquire report keeps its lines in a monospace block that wraps, because
+it is a table. Everything is escaped before it is put in the HTML.

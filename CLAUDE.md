@@ -33,7 +33,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   until dropped explicitly. Re-running the migration is a no-op; it only
   creates what is missing and never alters a column, so a spec change to a
   table with rows is a decision about those rows first
-- 521 tests, no database required to run them
+- 525 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -140,7 +140,11 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   (`scripts/job.sh rebuild <key>`). Still queued: the three Curve money
   columns typed as text (a column type change also needs the table
   column altered, not yet a migration rule), two keys pending vendor
-  answers (`docs/decision-record.md`, "D18")
+  answers (`docs/decision-record.md`, "D18"). Same day: **the alert
+  mail is laid out for people** (`observe/notify.py`): the same
+  findings as HTML, one card per finding with a plain label ("Stale
+  source", "New vendor columns"), alerts before notes, vendor columns
+  as chips; the text part is unchanged and is what the terminal shows
 
 ## Rules that came from real defects
 
@@ -331,7 +335,7 @@ scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
 ## Running things
 
 ```bash
-python -m pytest                    # 521 tests, no database
+python -m pytest                    # 525 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts

@@ -84,9 +84,12 @@ job() {  # name, cron, command...
   local name="$1" cron="$2"; shift 2
   echo "== job $name ($cron)"
   if az containerapp job show -n "$name" -g "$RG" -o none 2>/dev/null; then
+    # An existing job takes its secrets through "secret set"; "job update"
+    # refuses --secrets (2026-11-04).
+    az containerapp job secret set -n "$name" -g "$RG" --secrets "${SECRETS[@]}" -o none
     az containerapp job update -n "$name" -g "$RG" --image "$IMAGE" --cron-expression "$cron" \
       --cpu 4 --memory 8Gi --replica-timeout 14400 \
-      --secrets "${SECRETS[@]}" --set-env-vars "${ENVVARS[@]}" --command "$@" -o none
+      --set-env-vars "${ENVVARS[@]}" --command "$@" -o none
   else
     az containerapp job create -n "$name" -g "$RG" --environment "$ENV_NAME" \
       --trigger-type Schedule --cron-expression "$cron" \
