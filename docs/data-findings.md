@@ -621,11 +621,19 @@ that differ between the rows were compared in memory (names only):
   one invoice differ only in `purchase_amount`. Correct as occurrences;
   a line number from Cardinal would make it a key.
 - **tpa.wellpartner.invoices, 10 keys**, differing only in
-  `entity_name`: the same wholesaler invoice attributed to two entities.
-  A question for Wellpartner, or `entity_name` joins the key.
-- **wholesaler.abc.purchases, 3 keys**, differing in the ABC item
-  number, description and cost: two items with one NDC on one invoice.
-  The ABC item number would complete the key.
+  `entity_name`. Looked at on 2026-11-04: all ten are in the 2023-2026
+  extract, each pair on adjacent lines, same purchase order, same
+  amount, same wholesaler, and the entity names differ only by a
+  trailing space inside the parenthesis, so it is one entity, not two.
+  No column in the file separates them (the purchase order is one per
+  invoice). A vendor duplicate, not a key gap: a question for
+  Wellpartner, and until then the ledger holds both as occurrences 1
+  and 2, which a sum over this source must know.
+- **wholesaler.abc.purchases, 3 keys** in the verification, 5 across
+  the seven typed files: every one a line with no NDC, so two
+  service-charge lines of one invoice collide on (account, invoice,
+  blank). Closed 2026-11-04: the ABC item number joins the key
+  (`docs/decision-record.md`, "The ABC item number joins the key").
 - **wholesaler.mckesson.invoice, 9 keys; wholesaler.mckesson.custom, 3
   keys**: the split shipments of finding 16, differing in quantities and
   the original invoice number. Both lines are real.

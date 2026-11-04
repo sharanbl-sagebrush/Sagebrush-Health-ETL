@@ -140,8 +140,10 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   developer's go and runs in Azure as a one-off job execution
   (`scripts/job.sh rebuild <key>`). Still queued: the three Curve money
   columns typed as text (a column type change also needs the table
-  column altered, not yet a migration rule), two keys pending vendor
-  answers (`docs/decision-record.md`, "D18"). Same day: **the alert
+  column altered, not yet a migration rule; wanted since 2026-11-04 for
+  the financial reconciliation), one key question answered without the
+  vendor (ABC, below) and one that turned out to be a vendor duplicate
+  (Wellpartner, below). Same day: **the alert
   mail is laid out for people** (`observe/notify.py`): the same
   findings as HTML, one card per finding with a plain label ("Stale
   source", "New vendor columns"), alerts before notes, vendor columns
@@ -157,6 +159,20 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   the hash, and the keyless appointments source changes every identity)
   runs in Azure after the Monthly Payments one; counts in
   `docs/decision-record.md`, "The columns three vendors added"
+- 2026-11-04, night: **the ABC item number joins the purchases key**
+  (developer: "Go ahead with Abc implementation"). Every within-file
+  collision on (account, invoice, ndc) was a line with no NDC, the item
+  number separates all of them and never points at two NDCs, so the key
+  is unique in every loaded file without asking the vendor. Rebuilt from
+  the laptop in 49 s: 5,746 live rows retired as `retyped` and 5,746
+  inserted, 0 identities with two current rows, totals equal. The
+  Wellpartner pairs are the same invoice written twice (one file,
+  adjacent lines, same purchase order and amount, a trailing space in
+  the entity name), a question for the vendor and not a key change. The
+  same evening **the Monthly Payments rebuild execution hit the job's
+  four-hour limit** inside the retire UPDATE and rolled back: nothing
+  written, and the next attempt is a decision about time or tier
+  (`docs/decision-record.md`, "The ABC item number joins the key")
 
 ## Rules that came from real defects
 

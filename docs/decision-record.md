@@ -1042,3 +1042,83 @@ and their values, where a file carried them, in `extra_cells`; the
 replay reads an unbound header position from `extra_cells`, so the
 rebuild types them from there. The rebuild runs in Azure after the
 Monthly Payments one finishes.
+
+## The ABC item number joins the key (2026-11-04, developer: "Go ahead with Abc implementation")
+
+The developer asked whether the two keys still pending (D18, item 3)
+could be completed from columns already in the files: the purchase
+order for Wellpartner, and the invoice date (with the account and
+invoice number already there) for ABC. Both were answered from the
+typed rows of the seven loaded files of each source, aggregates only.
+
+**ABC purchases.** 7,984 typed lines, 7 files, every row carries the
+item number, 632 carry no NDC. Five keys repeat within a file on
+(account, invoice, ndc), ten rows, and every one of the five is a line
+with no NDC: an invoice with two service-charge lines. The invoice date
+splits none of them (one invoice never carries two dates); the item
+number splits all five. Its stability, the question meant for the
+vendor, the data answers itself: of 394 item numbers none maps to two
+NDCs, while 10 of 374 NDCs carry two item numbers each, the
+package-size case the key has to tell apart. With `abc` in the key no
+duplicate key is left in any file. The spec change is the key, `abc`
+marked required (filled on every row of every file), and the notes
+rewritten; `retype.py` reports 0 of 7,984 lines changed, since a key
+is not in the row hash.
+
+The rebuild ran from the laptop, the source being small: 7 files,
+0 rehashed, 5,746 live rows retired as `retyped` and 5,746 inserted, in
+49 s. Read back: 5,746 current rows, 5,746 retired, 0 identities with
+two current rows, 0 current rows with an occurrence above 1 (the five
+pairs are now five pairs of identities), and the extended amount of the
+current rows equals that of the retired ones, 20,621,226.39. The
+verification against the raw files could not run: the Jul-Sep 2026
+workbook in the Original Files folder was re-saved in Excel at 19:59
+UTC the same day (its document stamp says so), is 95,039 bytes instead
+of 77,781, and was still held open with delete access by another
+process. Read through a wide-share handle and committed to the memory
+store it has the same 482 lines in the same order; the cells that
+differ are five number columns, and in every one of the 1,539 differing
+cells the number is the same and only its text changed (a trailing
+".00" dropped), which is what an Excel save does to a workbook SAP
+wrote: the typed values and so the row hashes are unchanged. The file's bytes no longer match the loaded one, so
+`verify_load.py` will report that file as not loaded until the original
+is restored or the re-saved copy is accepted as a new delivery in a
+dated folder.
+
+**Wellpartner invoices.** 10,554 typed lines, 7 files. Every row
+carries a purchase order, one invoice never carries two, and one
+purchase order spans up to 17 invoices: the purchase order is coarser
+than the invoice and cannot separate two rows of one invoice. The ten
+repeated keys (twenty rows) all sit in the 2023-2026 extract, each pair
+on adjacent lines, with the same purchase order and the same net amount,
+all debits, from one wholesaler over five accounts between 2023-05-26
+and 2023-06-26; the entity names differ by one character, a trailing
+space inside the parenthesis, and with the spaces removed no pair is
+split. So they are not one invoice attributed to two entities, which
+the findings document had said; they are one entity written two ways,
+and nothing in the file separates the pair. A vendor duplicate, and no
+key change fixes it. The rows stay as occurrences 1 and 2 under the one
+rule; their second copies sum to 43,895.62, which a reconciliation over
+this source has to exclude or Wellpartner has to withdraw. The twenty
+rows were written out for the developer to raise with Wellpartner
+(outside the repository, beside the extracts).
+
+**The Monthly Payments execution failed on time.** Execution
+`sbh-acquire-0araybc` (image c325653, started 16:26:41 UTC, the apply
+with `transtype` in the key) was inside the set-based retire UPDATE
+from 17:04 UTC, I/O bound on the 2-vCore General Purpose tier, and the
+job's replica timeout of 14,400 s ended it at 20:26 UTC. The
+transaction rolled back as designed: 0 batches for the source that day,
+1,309,804 current rows as before. Two things followed. Accelerated
+database recovery made the rollback instant and left the version
+cleaner to walk 1.3 million aborted row versions in `typed` and
+`curated`, during which a count of the live rows took over 100 s and the
+freshness check, which reads the newest typed row's spec hash by
+`created_at`, did not finish in 280 s; a count on the live index was
+back to 2 s within twenty minutes. And the run row the killed process
+left open shows as RUN_UNFINISHED until `close_runs.py` closes it,
+which it will do once the run is fourteen hours old. The
+next attempt is the developer's decision: a longer replica timeout on a
+dedicated rebuild job, a temporarily larger tier for the hour it runs,
+or a write path that commits in bounded pieces, which would give up the
+one-transaction guarantee D18 was built on.

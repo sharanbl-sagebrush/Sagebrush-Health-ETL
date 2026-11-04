@@ -50,14 +50,16 @@ filename_patterns:
 # a newer delivery = unchanged, different hash = correction that supersedes
 # the earlier row, and an older delivery never replaces a newer one.
 #
-# Evidence: ABC ships no invoice line number, so (account, invoice, ndc) is
-# the widest key the file offers. It is NOT fully unique - the earlier
-# validation pack found two duplicate rows on it (see notes below), and
-# docs/data-findings.md section 13 does not list ABC among the sources with
-# a verified key. Note too that ndc is part of the key but is not required:
-# 367 service-charge lines carry no NDC. The uniqueness probe itself is not
-# in this repository; the claim rests on the findings document.
-natural_key: [account, invoice, ndc]
+# Evidence: ABC ships no invoice line number. (account, invoice, ndc) was
+# the key until 2026-11-04 and was not unique: in the seven loaded files
+# five keys repeat within a file, every one a line with no NDC (an invoice
+# with two service-charge lines), and the ABC item number separates all
+# five. The item number is finer than the NDC and stable: across 7,984
+# rows no item number points at two NDCs, while 10 NDCs carry two item
+# numbers each (package sizes), which is exactly what the key has to tell
+# apart. With it the key is unique in every file. The probe is recorded in
+# docs/decision-record.md, "The ABC item number joins the key".
+natural_key: [account, invoice, ndc, abc]
 
 # Drift policies: what happens when the vendor's column set changes.
 #   on_new_column: warn      an extra column is recorded and the load continues
@@ -72,11 +74,11 @@ notes: >
   The Master COGS List writes the same accounts without them, so account matching
   needs an explicit normalization rule rather than an incidental one.
   
-  ABC ships no invoice line number, so (account, invoice, ndc) is the widest key
-  available and it is not quite unique - the earlier validation pack found two
-  duplicate rows on that key. Row identity therefore falls back to the row hash,
-  and the duplicates are a real question for the vendor rather than something to
-  paper over.
+  ABC ships no invoice line number. (account, invoice, ndc) alone is not unique,
+  because an invoice can carry two service-charge lines with no NDC; the ABC
+  item number completes the key (2026-11-04) and is unique in every loaded
+  file. The item number never maps to two NDCs in the data held, so a
+  re-delivered invoice matches its earlier rows.
 
 # variants: the shapes this source's file can take. A variant is one layout,
 # with its own detector, read settings and column map. Every variant lands on
@@ -128,7 +130,7 @@ variants:
     #   max_length     text only; an over-length value fails rather than truncates
     #   description    why the column matters, kept next to the mapping
     columns:
-      # Natural-key column 1 of 3. Text, because leading zeros are significant.
+      # Natural-key column 1 of 4. Text, because leading zeros are significant.
       - target: account
         sources: ['Account #']
         type: text
@@ -159,18 +161,22 @@ variants:
       - target: customer_po
         sources: ['Customer PO #']
         type: text
-      # Natural-key column 2 of 3.
+      # Natural-key column 2 of 4.
       - target: invoice
         sources: ['Invoice #']
         type: text
         required: true
+      # Natural-key column 4 of 4, since 2026-11-04: ABC's own item number,
+      # filled on every row of every file. The one column that tells two
+      # lines of one invoice apart when neither carries an NDC.
       - target: abc
         sources: ['ABC #']
         type: text
+        required: true
       - target: product_description
         sources: ['Product Description']
         type: text
-      # Natural-key column 3 of 3, yet deliberately not required - see description.
+      # Natural-key column 3 of 4, yet deliberately not required - see description.
       # type ndc normalises to 11 digits; an unresolvable value quarantines the
       # row rather than being guessed.
       - target: ndc
