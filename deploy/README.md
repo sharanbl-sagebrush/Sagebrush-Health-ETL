@@ -32,15 +32,15 @@ has been rebuilt from the commit that carries the spec change
 (`deploy/deploy.sh`):
 
 ```
-az containerapp job start -n sbh-acquire -g sbh-data-bank-rg \
-  --command sh scripts/job.sh rebuild-plan finance.monthly_payments
-az containerapp job start -n sbh-acquire -g sbh-data-bank-rg \
-  --command sh scripts/job.sh rebuild finance.monthly_payments
+python deploy/rebuild.py finance.monthly_payments                # plan, writes nothing
+python deploy/rebuild.py finance.monthly_payments --apply --wait # write, print the log
 ```
 
-The first reports the counts and writes nothing; the second applies. The
-execution's log holds the report. The scheduled acquire runs are not
-affected: an override applies to that one execution only.
+The launcher reads the job's image and environment and passes them back
+with the new command, because a start with a command override replaces
+the execution's whole container template: the first attempt (2026-11-04)
+passed only the command and ran without its SQL settings, failing before
+it connected. The scheduled acquire runs are not affected.
 
 A job runs to completion and exits; nothing is billed between runs. A
 pass that finds nothing new ends in seconds. The largest load seen so far

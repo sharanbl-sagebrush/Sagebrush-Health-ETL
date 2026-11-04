@@ -8,10 +8,9 @@
 #
 # A rebuild (decision D18) runs as a one-off execution of the acquire job
 # with the command overridden, so the work happens next to the database:
-#   az containerapp job start -n sbh-acquire -g sbh-data-bank-rg \
-#     --command sh scripts/job.sh rebuild-plan finance.monthly_payments
-# and, once the plan has been read, the same with `rebuild` in place of
-# `rebuild-plan`. The spec keys follow the word.
+#   python deploy/rebuild.py finance.monthly_payments [--apply] [--wait]
+# (the launcher carries the job's image and environment over; a bare
+# "job start" override would drop them). The spec keys follow the word.
 set -eu
 job="${1:-acquire}"
 [ $# -gt 0 ] && shift
