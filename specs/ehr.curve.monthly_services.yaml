@@ -452,15 +452,22 @@ variants:
       - target: alldxcodes
         sources: ['AllDxCodes']
         type: text
+      # Currency since 2026-11-04 (text before; wanted for the financial
+      # reconciliation). Every one of the 398,440 loaded values is a dollar
+      # amount in the parser's own vocabulary: a dollar sign, a thousands
+      # comma above 999, and accounting parentheses on the 190 to 1,031
+      # credits per column. The loaded rows were retyped by a rebuild (D18),
+      # which altered the live columns and refilled every curated row,
+      # history included, from the replay.
       - target: totpmt
         sources: ['TotPmt']
-        type: text
+        type: currency
       - target: totadj
         sources: ['TotAdj']
-        type: text
+        type: currency
       - target: totref
         sources: ['TotRef']
-        type: text
+        type: currency
       # unnamed export artifact at this position, not data
       # unnamed export artifact at this position, not data
       - target: pricarrier

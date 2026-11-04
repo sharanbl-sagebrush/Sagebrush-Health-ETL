@@ -23,7 +23,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sbh_data_bank.commit.rebuild import RETYPED, RebuildCounts, TargetRow
+from sbh_data_bank.commit.rebuild import RETYPED, ColumnRetype, RebuildCounts, TargetRow
 from sbh_data_bank.commit.records import (
     BatchRecord,
     CurrentQuery,
@@ -40,7 +40,7 @@ from sbh_data_bank.commit.records import (
 from sbh_data_bank.curate.rule import CurrentRow
 from sbh_data_bank.ingest.replay import LandedLine
 from sbh_data_bank.registry.spec import SourceSpec
-from sbh_data_bank.store.schema import DEDUP_RULE
+from sbh_data_bank.store.schema import DEDUP_RULE, typed_sql_types
 
 __all__ = ["MemoryStore"]
 
@@ -61,6 +61,11 @@ class MemoryStore:
         self.curated: dict[str, list[dict[str, Any]]] = defaultdict(list)
         self.quarantine: list[dict[str, Any]] = []
         self.findings: list[dict[str, Any]] = []
+        #: The SQL type each business column of a source was created with,
+        #: recorded at the source's first write as the migration would have
+        #: made the table, so a spec that later types a column differently
+        #: shows as a retype here exactly as it does against the catalog.
+        self.column_types: dict[str, dict[str, str]] = {}
         self._next_file_id = 1
 
     # ----------------------------------------------------------- transactions
@@ -75,6 +80,7 @@ class MemoryStore:
             "curated": self.curated,
             "quarantine": self.quarantine,
             "findings": self.findings,
+            "column_types": self.column_types,
             "_next_file_id": self._next_file_id,
         }
 
@@ -183,6 +189,9 @@ class MemoryStore:
     # ---------------------------------------------------------------- writes
 
     def write(self, spec: SourceSpec, ctx: WriteContext, batch: WriteBatch) -> None:
+        self.column_types.setdefault(
+            spec.key, dict(zip(spec.landed_targets, typed_sql_types(spec), strict=True))
+        )
         audit = {
             "tenant_id": ctx.tenant_id,
             "source_file_id": ctx.source_file_id,
@@ -416,6 +425,45 @@ class MemoryStore:
                 }
             )
         return counts
+
+    def column_retypes(self, spec: SourceSpec) -> list[ColumnRetype]:
+        live = self.column_types.get(spec.key, {})
+        return [
+            ColumnRetype(target, live[target], spec_type)
+            for target, spec_type in zip(spec.landed_targets, typed_sql_types(spec), strict=True)
+            if target in live and live[target].upper() != spec_type.upper()
+        ]
+
+    def retype_columns(
+        self, spec: SourceSpec, ctx: WriteContext, retypes: list[ColumnRetype]
+    ) -> None:
+        for layer in (self.typed, self.curated):
+            for row in layer[spec.key]:
+                if row["tenant_id"] == ctx.tenant_id:
+                    for retype in retypes:
+                        row[retype.target] = None
+        self.column_types[spec.key].update({r.target: r.spec_type for r in retypes})
+
+    def refill_curated(
+        self, spec: SourceSpec, ctx: WriteContext, retypes: list[ColumnRetype], *, apply: bool
+    ) -> tuple[int, int]:
+        typed_by_line = {
+            (r["source_file_id"], r["line_number"]): r
+            for r in self.typed[spec.key]
+            if r["tenant_id"] == ctx.tenant_id
+        }
+        rows = [r for r in self.curated[spec.key] if r["tenant_id"] == ctx.tenant_id]
+        orphans = sum(
+            1 for r in rows if (r["source_file_id"], r["line_number"]) not in typed_by_line
+        )
+        matched = len(rows) - orphans
+        if orphans or not apply:
+            return matched, orphans
+        for row in rows:
+            typed = typed_by_line[(row["source_file_id"], row["line_number"])]
+            for retype in retypes:
+                row[retype.target] = typed.get(retype.target)
+        return matched, orphans
 
     def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
         rows = [r for r in self.landed[spec.key] if r["source_file_id"] == source_file_id]

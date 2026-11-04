@@ -25,13 +25,28 @@ was recorded. What the new rule would have made history (a correction
 within the replay, a late row) is not written: the rebuild guarantees the
 current state, and the batch that did it is on every row it touched.
 
+A column type change (2026-11-04: the three Curve money columns, text to
+currency) is applied here too, since the migration never alters a live
+column. Before the first file is typed, every business column whose live
+SQL type is not the one the spec now gives it is nulled in ``typed`` and
+``curated`` and altered to the spec's type; the typed rows are then
+replaced as usual, so they carry the parsed values; and before the
+reconciliation every curated row of the source, current or history, takes
+those columns' values from the rebuilt typed row of its own line. The
+values come from the replay, never from a conversion written in SQL,
+because the parsing rule has one implementation. A history row keeps the
+row hash it was recorded with, which named its values under the rule of
+its day; its business columns are what the current rule makes of the same
+landed line, as in every layer above ``landed``.
+
 What stops a rebuild, each of which rolls back the whole source: a file
 the current spec no longer recognises; a line that would newly quarantine
 or newly type (the quarantine on record would be wrong afterwards, and that
 is a separate decision); control totals that disagree with the batch that
-loaded the file; a conflict inside the replay. ``apply=False`` runs
-everything but the writes and returns the same counts, which is what a
-person reads before saying yes.
+loaded the file; a conflict inside the replay; a curated row with no typed
+line to refill it from; a spec column the live table lacks (the migration
+runs first). ``apply=False`` runs everything but the writes and returns
+the same counts, which is what a person reads before saying yes.
 """
 
 from __future__ import annotations
@@ -60,6 +75,7 @@ from sbh_data_bank.store.schema import DEDUP_RULE
 __all__ = [
     "REBUILT",
     "RETYPED",
+    "ColumnRetype",
     "RebuildCounts",
     "RebuildRefusedError",
     "RebuildResult",
@@ -90,6 +106,20 @@ class TargetRow:
     row_hash: str
     as_of: date
     outcome: str
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnRetype:
+    """A business column whose live SQL type is not the one the spec gives
+    it: ``live_type`` and ``spec_type`` are DDL tokens as ``store.schema``
+    spells them (``NVARCHAR(1000)``, ``DECIMAL(38,4)``)."""
+
+    target: str
+    live_type: str
+    spec_type: str
+
+    def describe(self) -> str:
+        return f"{self.target} {self.live_type}->{self.spec_type}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +158,30 @@ class RebuildStore(LayerReader, Protocol):
         With ``apply`` retire and insert; without, only count."""
         ...
 
+    def column_retypes(self, spec: SourceSpec) -> list[ColumnRetype]:
+        """The business columns whose live type in ``typed`` or ``curated``
+        differs from the spec's, in ``landed_targets`` order; empty on a
+        table the migration made from this spec. May raise
+        ``RebuildRefusedError`` for a column the live table lacks."""
+        ...
+
+    def retype_columns(
+        self, spec: SourceSpec, ctx: WriteContext, retypes: list[ColumnRetype]
+    ) -> None:
+        """Null these columns on every row of the tenant in ``typed`` and
+        ``curated`` and alter them to the spec's type. The values come
+        back from the replay (``replace_typed``, then ``refill_curated``)."""
+        ...
+
+    def refill_curated(
+        self, spec: SourceSpec, ctx: WriteContext, retypes: list[ColumnRetype], *, apply: bool
+    ) -> tuple[int, int]:
+        """Copy these columns into every curated row of the tenant, current
+        or history, from the typed row of the same line. Returns (rows with
+        a typed line, rows without one); writes only with ``apply`` and
+        only when every row has its line."""
+        ...
+
 
 @dataclass(slots=True)
 class RebuildResult:
@@ -139,6 +193,10 @@ class RebuildResult:
     lines: int = 0
     rehashed: int = 0
     """Lines whose row hash the new typing changed."""
+    retypes: list[ColumnRetype] = field(default_factory=list)
+    """Live columns altered to the spec's type (module docstring)."""
+    refilled: int = 0
+    """Curated rows, current and history, whose retyped columns were refilled."""
     counts: RebuildCounts | None = None
     refusal: str | None = None
     replays: list[FileReplay] = field(default_factory=list)
@@ -151,12 +209,16 @@ class RebuildResult:
         head = (
             f"{self.source_key}: {self.files} files, {self.lines} lines, {self.rehashed} rehashed"
         )
+        if self.retypes:
+            head += "; retyping " + ", ".join(r.describe() for r in self.retypes)
         if self.refused:
             return f"{head}; REFUSED - {self.refusal}"
         assert self.counts is not None
         c = self.counts
         verb = "applied" if self.applied else "would apply"
         tail = f"curated kept {c.kept}, retired {c.retired}, inserted {c.inserted}"
+        if self.retypes:
+            tail += f", history refilled {self.refilled}"
         if self.batch_id:
             tail += f" (batch {self.batch_id})"
         return f"{head}; {verb}: {tail}"
@@ -232,6 +294,13 @@ def rebuild_source(
         with store.transaction():
             if apply:
                 store.insert_batch(batch)
+            # A type change first: the typed rows written below must land in
+            # columns of the type the spec declares, or SQL would convert the
+            # parsed values back to text on the way in.
+            retypes = store.column_retypes(spec)
+            result.retypes = list(retypes)
+            if retypes and apply:
+                store.retype_columns(spec, ctx, retypes)
             ledger = Ledger.for_spec(spec)
             outcomes: dict[tuple[int, int], str] = {}
             for file in files:
@@ -257,6 +326,14 @@ def rebuild_source(
                         f"{file.file_name}: the replay meets a conflict (same as-of, different "
                         "content for one identity); a person decides"
                     )
+            if retypes:
+                refilled, orphans = store.refill_curated(spec, ctx, retypes, apply=apply)
+                if orphans:
+                    raise RebuildRefusedError(
+                        f"{orphans} curated rows have no typed line to take their "
+                        "retyped values from"
+                    )
+                result.refilled = refilled
             target = list(iter_target(ledger, outcomes))
             counts = store.reconcile_curated(spec, ctx, target, apply=apply)
             result.counts = counts

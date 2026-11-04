@@ -5,20 +5,32 @@ edits the spec, and rebuilds. What is held: a rebuild under an unchanged
 spec touches no curated row; a key change retires every live row as
 ``retyped`` and inserts its replacement with the same business values,
 leaving exactly one current version per identity; a hash change does the
-same for the rows it affects and keeps the rest; a spec edit that would
-quarantine a typed line is refused with nothing written; and a plan
-(``apply=False``) reports the same counts as the write.
+same for the rows it affects and keeps the rest; a column typed
+differently is altered in the live tables and refilled from the replay on
+every curated row, history included; a spec edit that would quarantine a
+typed line is refused with nothing written; and a plan (``apply=False``)
+reports the same counts as the write.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from sbh_data_bank.commit.engine import CommitEngine
 from sbh_data_bank.commit.memory import MemoryStore
 from sbh_data_bank.commit.rebuild import REBUILT, RETYPED, rebuild_source
-from sbh_data_bank.commit.sql import rebuilt_insert_sql, retire_sql, typed_delete_sql
+from sbh_data_bank.commit.sql import (
+    alter_sql,
+    live_type_token,
+    null_sql,
+    orphan_sql,
+    rebuilt_insert_sql,
+    refill_sql,
+    retire_sql,
+    typed_delete_sql,
+)
 from sbh_data_bank.registry.spec import SourceSpec
 
 CLOCK = datetime(2026, 11, 4, 9, 0, 0)
@@ -228,6 +240,65 @@ class TestHashChange:
         assert {r["spec_sha256"] for r in store.typed[new.key]} == {result.spec_sha256}
 
 
+class TestTypeChange:
+    def test_the_live_columns_are_altered_and_every_curated_row_refilled(self, tmp_path):
+        """``amount`` becomes currency. The live column is text on both
+        tables (recorded at the first write, as the migration made it); the
+        rebuild alters it and refills the four curated rows, the superseded
+        January B included, with the replay's Decimal, while the plan
+        reports the same and touches nothing."""
+        store = _loaded(tmp_path, _spec())
+        new = _with_columns({}, amount={"type": "currency"})
+        assert all(isinstance(r["amount"], str) for r in store.curated[new.key])
+
+        plan = _rebuild(store, new, apply=False)
+
+        assert not plan.refused
+        assert [(r.target, r.live_type, r.spec_type) for r in plan.retypes] == [
+            ("amount", "NVARCHAR(1000)", "DECIMAL(38,4)")
+        ]
+        assert plan.refilled == 4
+        assert store.column_types[new.key]["amount"] == "NVARCHAR(1000)"
+        assert all(isinstance(r["amount"], str) for r in store.curated[new.key])
+
+        result = _rebuild(store, new, apply=True)
+
+        assert not result.refused and result.rehashed == 6
+        assert (result.counts.kept, result.counts.retired, result.counts.inserted) == (0, 3, 3)
+        assert result.refilled == 4
+        assert store.column_types[new.key]["amount"] == "DECIMAL(38,4)"
+        assert all(isinstance(r["amount"], Decimal) for r in store.curated[new.key])
+        assert all(isinstance(r["amount"], Decimal) for r in store.typed[new.key])
+        history = [r for r in store.curated[new.key] if r["supersede_reason"] == "corrected"]
+        assert [r["amount"] for r in history] == [Decimal("20.00")]
+        assert sorted(r["amount"] for r in _live(store, new)) == [
+            Decimal("10.00"), Decimal("12.00"), Decimal("21.00"),
+        ]  # fmt: skip
+        assert "retyping amount NVARCHAR(1000)->DECIMAL(38,4)" in result.summary()
+        assert "history refilled 4" in result.summary()
+
+    def test_a_curated_row_with_no_typed_line_refuses_the_source(self, tmp_path):
+        """The refill rests on every curated row having its line in typed.
+        A stray row breaks that, and the rebuild refuses rather than leave
+        it null under the new type."""
+        store = _loaded(tmp_path, _spec())
+        new = _with_columns({}, amount={"type": "currency"})
+        stray = {**store.curated[new.key][0], "line_number": 999}
+        store.curated[new.key].append(stray)
+        before = store.snapshot()
+
+        result = _rebuild(store, new, apply=True)
+
+        assert result.refused and "no typed line" in result.refusal
+        assert store.snapshot() == before
+
+    def test_an_unchanged_type_retypes_nothing(self, tmp_path):
+        store = _loaded(tmp_path, _spec())
+        result = _rebuild(store, _spec(row_hash_exclude=["note"]), apply=True)
+        assert not result.refused and result.retypes == [] and result.refilled == 0
+        assert "retyping" not in result.summary()
+
+
 class TestRefusals:
     def test_a_line_that_would_newly_quarantine_refuses_the_source(self, tmp_path):
         store = _loaded(tmp_path, _spec())
@@ -253,6 +324,41 @@ class TestRefusals:
 
 
 class TestStatements:
+    def test_a_type_change_nulls_alters_and_refills_by_line(self):
+        from sbh_data_bank.commit.rebuild import ColumnRetype
+
+        spec = _spec()
+        retype = ColumnRetype("amount", "NVARCHAR(1000)", "DECIMAL(38,4)")
+        assert null_sql(spec, "typed", [retype]) == (
+            "UPDATE typed.t_vendor_report SET [amount] = NULL WHERE tenant_id = ?"
+        )
+        assert alter_sql(spec, "curated", retype) == (
+            "ALTER TABLE curated.t_vendor_report ALTER COLUMN [amount] DECIMAL(38,4) NULL"
+        )
+        line = (
+            "ty.tenant_id = c.tenant_id AND ty.source_file_id = c.source_file_id "
+            "AND ty.line_number = c.line_number"
+        )
+        assert refill_sql(spec, [retype], count_only=False) == (
+            "UPDATE c SET c.[amount] = ty.[amount] FROM curated.t_vendor_report AS c "
+            f"JOIN typed.t_vendor_report AS ty ON {line} WHERE c.tenant_id = ?"
+        )
+        assert refill_sql(spec, [retype], count_only=True).startswith("SELECT COUNT(*) FROM")
+        assert orphan_sql(spec) == (
+            "SELECT COUNT(*) FROM curated.t_vendor_report AS c WHERE c.tenant_id = ? "
+            f"AND NOT EXISTS (SELECT 1 FROM typed.t_vendor_report AS ty WHERE {line})"
+        )
+
+    def test_a_catalog_row_is_spelled_as_the_ddl_spells_it(self):
+        assert live_type_token("nvarchar", 2000, 0, 0) == "NVARCHAR(1000)"
+        assert live_type_token("nvarchar", -1, 0, 0) == "NVARCHAR(MAX)"
+        assert live_type_token("decimal", 17, 38, 4) == "DECIMAL(38,4)"
+        assert live_type_token("char", 11, 0, 0) == "CHAR(11)"
+        assert live_type_token("bigint", 8, 19, 0) == "BIGINT"
+        assert live_type_token("date", 3, 10, 0) == "DATE"
+        assert live_type_token("bit", 1, 1, 0) == "BIT"
+        assert live_type_token("datetime2", 7, 23, 3) == "DATETIME2(3)"
+
     def test_the_sql_is_parameterised_and_keyed_on_the_match(self):
         spec = _spec()
         assert typed_delete_sql(spec) == (

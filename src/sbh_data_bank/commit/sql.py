@@ -31,7 +31,13 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Protocol
 
-from sbh_data_bank.commit.rebuild import RETYPED, RebuildCounts, TargetRow
+from sbh_data_bank.commit.rebuild import (
+    RETYPED,
+    ColumnRetype,
+    RebuildCounts,
+    RebuildRefusedError,
+    TargetRow,
+)
 from sbh_data_bank.commit.records import (
     BatchRecord,
     CurrentQuery,
@@ -459,6 +465,73 @@ def rebuilt_insert_sql(spec: SourceSpec, *, count_only: bool) -> str:
     )
 
 
+# A column type change (rebuild module docstring): the live type of every
+# business column, read from the catalog and spelled as the DDL spells it.
+_LIVE_TYPES = (
+    "SELECT c.name, t.name, c.max_length, c.precision, c.scale FROM sys.columns AS c "
+    "JOIN sys.types AS t ON t.user_type_id = c.user_type_id WHERE c.object_id = OBJECT_ID(?)"
+)
+_TYPED_LINE = (
+    "ty.tenant_id = c.tenant_id AND ty.source_file_id = c.source_file_id "
+    "AND ty.line_number = c.line_number"
+)
+
+
+def live_type_token(type_name: str, max_length: int, precision: int, scale: int) -> str:
+    """The DDL token for one ``sys.columns`` row, in the spelling
+    ``store.schema`` uses, so a live column and a spec column compare as
+    strings: ``nvarchar`` with ``max_length`` 2000 is ``NVARCHAR(1000)``
+    (two bytes a character, -1 for MAX), ``decimal`` 38/4 is
+    ``DECIMAL(38,4)``, and the rest is the type's own name."""
+    name = type_name.upper()
+    if name in ("NVARCHAR", "NCHAR"):
+        return f"{name}(MAX)" if max_length == -1 else f"{name}({max_length // 2})"
+    if name in ("VARCHAR", "CHAR", "VARBINARY", "BINARY"):
+        return f"{name}(MAX)" if max_length == -1 else f"{name}({max_length})"
+    if name in ("DECIMAL", "NUMERIC"):
+        return f"DECIMAL({precision},{scale})"
+    if name == "DATETIME2":
+        return f"DATETIME2({scale})"
+    return name
+
+
+def null_sql(spec: SourceSpec, layer: str, retypes: Sequence[ColumnRetype]) -> str:
+    """Null the columns about to be altered, on the tenant's rows, so the
+    ALTER has nothing to convert. Parameter: the tenant."""
+    sets = ", ".join(f"{_quote(r.target)} = NULL" for r in retypes)
+    return f"UPDATE {table_name(spec, layer)} SET {sets} WHERE tenant_id = ?"
+
+
+def alter_sql(spec: SourceSpec, layer: str, retype: ColumnRetype) -> str:
+    """Alter one nulled column to the spec's type."""
+    return (
+        f"ALTER TABLE {table_name(spec, layer)} ALTER COLUMN {_quote(retype.target)} "
+        f"{retype.spec_type} NULL"
+    )
+
+
+def refill_sql(spec: SourceSpec, retypes: Sequence[ColumnRetype], *, count_only: bool) -> str:
+    """Copy (or count) the retyped columns into every curated row of the
+    tenant from the typed row of the same line. Parameter: the tenant."""
+    join = (
+        f"FROM {table_name(spec, 'curated')} AS c JOIN {table_name(spec, 'typed')} AS ty "
+        f"ON {_TYPED_LINE} WHERE c.tenant_id = ?"
+    )
+    if count_only:
+        return f"SELECT COUNT(*) {join}"
+    sets = ", ".join(f"c.{_quote(r.target)} = ty.{_quote(r.target)}" for r in retypes)
+    return f"UPDATE c SET {sets} {join}"
+
+
+def orphan_sql(spec: SourceSpec) -> str:
+    """Count the tenant's curated rows with no typed row on their line:
+    nothing to refill them from, so a rebuild with a type change refuses."""
+    return (
+        f"SELECT COUNT(*) FROM {table_name(spec, 'curated')} AS c WHERE c.tenant_id = ? "
+        f"AND NOT EXISTS (SELECT 1 FROM {table_name(spec, 'typed')} AS ty WHERE {_TYPED_LINE})"
+    )
+
+
 def landed_select_sql(spec: SourceSpec) -> str:
     """The file's landed rows in line order: line number, every target in
     ``spec.landed_targets`` order, then ``extra_cells``."""
@@ -745,6 +818,45 @@ class SqlStore:
             return RebuildCounts(len(target) - inserted, retired, inserted)
         finally:
             cursor.execute(_TARGET_DROP)
+
+    def column_retypes(self, spec: SourceSpec) -> list[ColumnRetype]:
+        wanted = dict(zip(spec.landed_targets, typed_sql_types(spec), strict=True))
+        found: dict[str, ColumnRetype] = {}
+        for layer in ("typed", "curated"):
+            table = table_name(spec, layer)
+            self.cursor.execute(_LIVE_TYPES, table)
+            live = {
+                name: live_type_token(kind, max_length, precision, scale)
+                for name, kind, max_length, precision, scale in self.cursor.fetchall()
+            }
+            for target, spec_type in wanted.items():
+                if target not in live:
+                    raise RebuildRefusedError(
+                        f"{table} has no column {target}; the migration runs first"
+                    )
+                if live[target].upper() != spec_type.upper():
+                    found.setdefault(target, ColumnRetype(target, live[target], spec_type))
+        return [found[t] for t in spec.landed_targets if t in found]
+
+    def retype_columns(
+        self, spec: SourceSpec, ctx: WriteContext, retypes: list[ColumnRetype]
+    ) -> None:
+        for layer in ("typed", "curated"):
+            self.cursor.execute(null_sql(spec, layer, retypes), ctx.tenant_id)
+            for retype in retypes:
+                self.cursor.execute(alter_sql(spec, layer, retype))
+
+    def refill_curated(
+        self, spec: SourceSpec, ctx: WriteContext, retypes: list[ColumnRetype], *, apply: bool
+    ) -> tuple[int, int]:
+        cursor = self.cursor
+        cursor.execute(orphan_sql(spec), ctx.tenant_id)
+        orphans = int(cursor.fetchone()[0])
+        if orphans or not apply:
+            cursor.execute(refill_sql(spec, retypes, count_only=True), ctx.tenant_id)
+            return int(cursor.fetchone()[0]), orphans
+        cursor.execute(refill_sql(spec, retypes, count_only=False), ctx.tenant_id)
+        return int(cursor.rowcount), orphans
 
     # ------------------------------------------------------------ curated
 

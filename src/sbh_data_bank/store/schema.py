@@ -677,7 +677,9 @@ def _widen_text(spec: SourceSpec, name: str) -> list[str]:
     table went live reaches it. Widening cannot lose a value, which is why
     it is the one alteration of an existing column the migration makes; a
     column is never narrowed or retyped here (adding one is
-    ``_add_targets``). The guard compares ``sys.columns.max_length``
+    ``_add_targets``; a type change is the rebuild's, D18, which alters
+    the live column and refills it from the replay, since the rows already
+    there would not convert). The guard compares ``sys.columns.max_length``
     (bytes, two per character, -1 for MAX) and is a no-op once applied."""
     statements = []
     for target, kind, max_length in _all_targets(spec):

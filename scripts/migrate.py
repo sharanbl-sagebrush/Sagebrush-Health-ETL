@@ -54,7 +54,11 @@ Why idempotent
     declared ``max_length``, which cannot lose a value, it never drops or
     alters a column that exists; that is a decision about rows on an
     append-only ledger, not a migration. What the rows already loaded make
-    of a new column is the rebuild's question (D18), not this script's.
+    of a new column is the rebuild's question (D18), not this script's,
+    and so is a column whose type the spec changed: the rebuild alters the
+    live column and refills it from the replay (2026-11-04, the three
+    Curve money columns), because the text already there would not
+    convert and a conversion written in SQL would be a second parser.
 
 What it does NOT do
     Load any data, verify the schema matches the specs after the fact, or
