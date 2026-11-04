@@ -1,6 +1,8 @@
 # Curve appointment details.
 #
 # 101 columns, 199,591 rows, 143 MB. Never loaded by the previous pipeline.
+# 112 columns from the 09/29-11/02 pull (2026-11-02): eleven added in the
+# middle of the row, claimed 2026-11-04 after typing them by value.
 #
 # NO NATURAL KEY - the export carries no appointment identifier. See notes.
 #
@@ -252,8 +254,22 @@ variants:
       - target: prim_policy_carrier_category_descr
         sources: ['Prim_Policy_Carrier_Category_Descr']
         type: text
+      # Columns the vendor added by the 09/29-11/02 pull (claimed 2026-11-04).
+      # Not required: the seven files loaded before it do not carry them.
+      # Group numbers are plan identifiers (digits or short alphanumerics,
+      # 846 distinct in 2,460 filled rows), not a person's.
+      - target: prim_group_no
+        sources: ['Prim_Group_No']
+        type: text
       - target: certificate_number
         sources: ['Certificate_Number']
+        type: text
+      # Free text about the policy, mostly copay amounts with dates, up to 80
+      # characters. Sampled as "currency" because so many begin with "$",
+      # which is exactly the by-value guess a person has to overrule: it is
+      # a sentence, not an amount.
+      - target: prim_policy_comments
+        sources: ['Prim_Policy_Comments']
         type: text
       - target: prim_emp_abbreviation
         sources: ['Prim_Emp_Abbreviation']
@@ -267,8 +283,14 @@ variants:
       - target: sec_policy_category
         sources: ['Sec_Policy_Category']
         type: text
+      - target: sec_group_no
+        sources: ['Sec_Group_No']
+        type: text
       - target: sec_certificate_number1
         sources: ['Sec_Certificate_Number1']
+        type: text
+      - target: sec_policy_comments
+        sources: ['Sec_Policy_Comments']
         type: text
       - target: sec_emp_abbreviation
         sources: ['Sec_Emp_Abbreviation']
@@ -418,6 +440,11 @@ variants:
       - target: comments
         sources: ['Comments']
         type: text
+      # Added by the vendor with the other ten; empty in every row of the
+      # first pull that carries it, so text by default, like Comments.
+      - target: ailmentcomment
+        sources: ['AilmentComment']
+        type: text
       - target: authorization_number
         sources: ['Authorization_Number']
         type: text
@@ -440,6 +467,31 @@ variants:
         type: text
       - target: visits_remaining1
         sources: ['Visits_Remaining1']
+        type: text
+      # The patient's next appointment, as six columns the vendor added by
+      # the 09/29-11/02 pull. The timestamp parses with the sibling formats
+      # (every one of 5,792 filled sample values as MM/DD/YYYY H:MM:SS AM);
+      # the rest are the same short descriptions and user initials as the
+      # appointment's own columns above.
+      - target: next_appointment_datetime
+        sources: ['Next_Appointment_DateTime']
+        type: date
+        date_formats: ['%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%m/%d/%Y %I:%M %p',
+                       '%m/%d/%Y %I:%M:%S %p', '%m/%d/%Y']
+      - target: next_appointment_category_description
+        sources: ['Next_Appointment_Category_Description']
+        type: text
+      - target: next_appointment_type_description
+        sources: ['Next_Appointment_Type_Description']
+        type: text
+      - target: next_schresource_description
+        sources: ['Next_SchResource_Description']
+        type: text
+      - target: next_schloc_description
+        sources: ['Next_SchLoc_Description']
+        type: text
+      - target: next_scheduled_by
+        sources: ['Next_Scheduled_By']
         type: text
       - target: emp_abbreviation
         sources: ['Emp_Abbreviation']

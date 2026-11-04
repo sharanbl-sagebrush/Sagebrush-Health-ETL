@@ -24,16 +24,17 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   the Apexus pricing workbook since 2026-10-23)
 - `store/schema.py` generates the layered DDL from the specs: `landed`,
   `typed` and `curated` tables per source plus `meta` and `stg`
-  (`python scripts/migrate.py --dry-run` prints it, 172 statements).
+  (`python scripts/migrate.py --dry-run` prints it, 235 statements).
   **Applied to `sbh_data_bank` on Azure 2026-10-21**, re-applied 2026-10-22
   after the fifteen empty tables of five changed specs were dropped by
   hand, and again 2026-10-23 for the pricing source, `meta.blob` and
   `meta.spec_check`: 63 layered tables plus `meta` and `stg`. The 19 `raw.*` tables
   predate the layered decision, were never written to, and are left alone
   until dropped explicitly. Re-running the migration is a no-op; it only
-  creates what is missing and never alters a column, so a spec change to a
-  table with rows is a decision about those rows first
-- 525 tests, no database required to run them
+  creates what is missing (since 2026-11-04 that includes a column a spec
+  gained, added nullable to the live tables) and never alters a column, so
+  a spec change to a table with rows is a decision about those rows first
+- 526 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -145,6 +146,17 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   findings as HTML, one card per finding with a plain label ("Stale
   source", "New vendor columns"), alerts before notes, vendor columns
   as chips; the text part is unchanged and is what the terminal shows
+- 2026-11-04, evening: **the sixteen columns three vendors added are
+  claimed** (task 4, on the developer's go): Curve appointments eleven,
+  Curve services `AllDxCodes`, PRxP five. Each typed from its sampled
+  values, none required, so the files loaded before them still bind
+  with the columns absent. The migration gained the rule it had claimed
+  to have: a spec column missing from a live `landed`, `typed` or
+  `curated` table is added, nullable, by a guarded batch per table. The
+  rebuild of the three sources (every row rehashes when a column joins
+  the hash, and the keyless appointments source changes every identity)
+  runs in Azure after the Monthly Payments one; counts in
+  `docs/decision-record.md`, "The columns three vendors added"
 
 ## Rules that came from real defects
 

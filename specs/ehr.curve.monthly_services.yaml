@@ -1,7 +1,7 @@
 # Curve monthly services - billed charges from the practice-management system.
 #
 # 122 columns, 230,192 rows, 260 MB. The previous pipeline never loaded this
-# source at all.
+# source at all. 123 from the 09/29-11/02 pull: AllDxCodes, claimed 2026-11-04.
 #
 # CARRIES SSN, classified prohibited: matched so drift checks still see it, then
 # discarded before any value reaches the raw layer, quarantine or a log.
@@ -443,6 +443,14 @@ variants:
         type: text
       - target: dxdesc4
         sources: ['DxDesc4']
+        type: text
+      # Added by the vendor by the 09/29-11/02 pull (claimed 2026-11-04): the
+      # line's diagnosis codes as one comma-separated list, up to 166
+      # characters in the sample, filled on all but one row. Not required,
+      # since the seven files loaded before it do not carry it. The same
+      # codes as DxCode1-4 side by side, so the same (absent) PII class.
+      - target: alldxcodes
+        sources: ['AllDxCodes']
         type: text
       - target: totpmt
         sources: ['TotPmt']

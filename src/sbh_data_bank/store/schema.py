@@ -50,8 +50,9 @@ is the only caller: it takes ``meta_statements()`` once, then
 statement through ``store.connection.Database``. Every statement is guarded
 (``IF OBJECT_ID(...) IS NULL``, ``IF COL_LENGTH(...) IS NULL``, ``IF NOT
 EXISTS (... sys.indexes ...)``) so the migration is idempotent and safe to
-re-run, and a column added to a live metadata table is a guarded ``ALTER``
-rather than a hand-run script.
+re-run, and a column added to a live table (a metadata column, or a spec
+column the vendor started sending) is a guarded ``ALTER`` rather than a
+hand-run script.
 
 The first schema (24 tables on Azure, CLAUDE.md) put typed, deduplicated
 rows straight into ``raw.*``. Those tables predate the layered decision,
@@ -113,8 +114,29 @@ def _add_column(table: str, column: str, definition: str) -> str:
     """
     return (
         f"IF COL_LENGTH('{table}', '{column}') IS NULL\n"
-        f"    ALTER TABLE {table} ADD {column} {definition}"
+        f"    ALTER TABLE {table} ADD [{column}] {definition}"
     )
+
+
+def _add_targets(spec: SourceSpec, name: str, sql_types: list[str]) -> str:
+    """One guarded batch that adds every spec column the live table lacks.
+
+    A vendor adds a column, the spec claims it (2026-11-04: Curve and PRxP,
+    sixteen columns between them), and the three layer tables of a loaded
+    source have to gain it before a rebuild or the next load can write it.
+    Each column is added nullable: the rows already there never had it.
+    On a fresh database the ``CREATE`` carries the column and every guard
+    is a no-op. One batch per table rather than one statement per column,
+    because a source has a hundred columns and the migration would
+    otherwise be thousands of round trips; a batch that fails part way is
+    re-runnable, since each line guards itself.
+    """
+    lines = [
+        f"IF COL_LENGTH('{name}', '{target}') IS NULL "
+        f"ALTER TABLE {name} ADD [{target}] {sql_type} NULL"
+        for (target, _kind, _max), sql_type in zip(_all_targets(spec), sql_types, strict=True)
+    ]
+    return "\n".join(lines)
 
 
 #: The dedup rule in force, recorded on ``meta.batch.dedup_mode`` and on every
@@ -643,15 +665,19 @@ def landed_statements(spec: SourceSpec) -> list[str]:
         "    extra_cells      NVARCHAR(MAX)  NULL,",
         f"    CONSTRAINT pk_landed_{short} PRIMARY KEY (source_file_id, line_number)",
     ]
-    return [_create(name, body)]
+    return [
+        _create(name, body),
+        _add_targets(spec, name, ["NVARCHAR(MAX)"] * len(_all_targets(spec))),
+    ]
 
 
 def _widen_text(spec: SourceSpec, name: str) -> list[str]:
     """A guarded ``ALTER COLUMN`` for each text column whose declared
     ``max_length`` is wider than the default, so a width declared after the
     table went live reaches it. Widening cannot lose a value, which is why
-    it is the one alteration the migration makes; a column is never
-    narrowed or retyped here. The guard compares ``sys.columns.max_length``
+    it is the one alteration of an existing column the migration makes; a
+    column is never narrowed or retyped here (adding one is
+    ``_add_targets``). The guard compares ``sys.columns.max_length``
     (bytes, two per character, -1 for MAX) and is a no-op once applied."""
     statements = []
     for target, kind, max_length in _all_targets(spec):
@@ -695,6 +721,7 @@ def typed_statements(spec: SourceSpec) -> list[str]:
         _create(name, body),
         # "Has this exact content been typed before" - the re-delivery check.
         _index(f"ix_typed_{short}_hash", name, "(tenant_id, row_hash)"),
+        _add_targets(spec, name, typed_sql_types(spec)),
         *_widen_text(spec, name),
     ]
 
@@ -757,6 +784,7 @@ def curated_statements(spec: SourceSpec) -> list[str]:
                 "INCLUDE (identity_hash, occurrence, superseded_by, as_of)",
             )
         )
+    statements.append(_add_targets(spec, name, typed_sql_types(spec)))
     statements.extend(_widen_text(spec, name))
     return statements
 

@@ -45,13 +45,16 @@ What it builds, in order
        The ``raw.*`` tables of the first schema are left alone.
 
 Why idempotent
-    Every statement is wrapped in ``IF OBJECT_ID(...) IS NULL`` or
-    ``IF NOT EXISTS``, so the script can be re-run after a spec gains a
-    column and it creates only what is missing. Apart from widening a text
-    column to a declared ``max_length``, which cannot lose a value, it
-    never drops or alters a
-    column that exists; that is a decision about rows on an append-only
-    ledger, not a migration.
+    Every statement is wrapped in ``IF OBJECT_ID(...) IS NULL``,
+    ``IF COL_LENGTH(...) IS NULL`` or ``IF NOT EXISTS``, so the script can
+    be re-run after a spec gains a column and it creates only what is
+    missing: the column is added, nullable, to the live landed, typed and
+    curated tables (since 2026-11-04; before that only the metadata tables
+    gained columns this way). Apart from widening a text column to a
+    declared ``max_length``, which cannot lose a value, it never drops or
+    alters a column that exists; that is a decision about rows on an
+    append-only ledger, not a migration. What the rows already loaded make
+    of a new column is the rebuild's question (D18), not this script's.
 
 What it does NOT do
     Load any data, verify the schema matches the specs after the fact, or

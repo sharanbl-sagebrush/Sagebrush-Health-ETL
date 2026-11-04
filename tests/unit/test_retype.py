@@ -233,7 +233,7 @@ class TestSql:
         """The replay's SELECT reads the landed table's business columns in
         ``landed_targets`` order, plus ``extra_cells``, for every spec."""
         for spec in SpecRegistry.from_dir(SPEC_DIR):
-            (create,) = landed_statements(spec)
+            create = landed_statements(spec)[0]
             select = landed_select_sql(spec)
             listed = select.split("SELECT ", 1)[1].split(" FROM")[0]
             columns = [c.strip("[]") for c in listed.split(", ")]

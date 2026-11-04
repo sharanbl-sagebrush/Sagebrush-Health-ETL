@@ -33,6 +33,7 @@ from sbh_data_bank.store.schema import (
     meta_statements,
     table_name,
     table_statements,
+    typed_sql_types,
     typed_statements,
 )
 
@@ -119,7 +120,7 @@ class TestPerSourceStatements:
 
     def test_landed_is_text_throughout(self, registry):
         for spec in registry:
-            (create,) = landed_statements(spec)
+            create = landed_statements(spec)[0]
             business = {k: v for k, v in _columns(create).items() if k not in LEDGER_COLUMN_NAMES}
             assert business, spec.key
             assert set(business.values()) == {"NVARCHAR(MAX)"}, spec.key
@@ -131,6 +132,31 @@ class TestPerSourceStatements:
                     if column in {"extra_cells", "header_json"}:
                         continue
                     assert sql_type != "NVARCHAR(MAX)", (spec.key, column)
+
+    def test_a_spec_column_reaches_a_live_source_table_by_guarded_alter(self, registry):
+        """Task 4 (2026-11-04): Curve added eleven columns and the spec
+        claimed them, so the three layer tables of a loaded source must
+        gain them. One guarded batch per table, one ADD per spec column,
+        nullable, typed as the CREATE would type it (text in landed)."""
+        spec = registry.require("ehr.curve.appointments")
+        targets = dict(zip(spec.landed_targets, typed_sql_types(spec), strict=True))
+        assert "next_appointment_datetime" in targets
+        for statements, table, landed in (
+            (landed_statements(spec), "landed.ehr_curve_appointments", True),
+            (typed_statements(spec), "typed.ehr_curve_appointments", False),
+            (curated_statements(spec), "curated.ehr_curve_appointments", False),
+        ):
+            (batch,) = [s for s in statements if "ALTER TABLE" in s and " ADD [" in s]
+            lines = batch.splitlines()
+            assert len(lines) == len(targets)
+            for target, sql_type in targets.items():
+                expected = "NVARCHAR(MAX)" if landed else sql_type
+                assert (
+                    f"IF COL_LENGTH('{table}', '{target}') IS NULL "
+                    f"ALTER TABLE {table} ADD [{target}] {expected} NULL"
+                ) in lines
+            # and every added column is also in the CREATE for a fresh database
+            assert set(_columns(statements[0])) >= set(targets)
 
     def test_a_declared_max_length_sets_the_width_and_widens_a_live_table(self, registry):
         """WeInfuse patient notes: NVARCHAR(4000) in the create, and a
@@ -237,7 +263,7 @@ class TestPerSourceStatements:
             if spec.natural_key:
                 assert identity == tuple(spec.natural_key)
             else:
-                (create,) = landed_statements(spec)
+                create = landed_statements(spec)[0]
                 business = set(_columns(create)) - LEDGER_COLUMN_NAMES
                 assert set(identity) == business, spec.key
 

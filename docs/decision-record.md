@@ -988,3 +988,57 @@ vendor columns", ...), the source key, and the message; a new-columns
 message shows its vendor columns as chips rather than a comma run. The
 acquire report keeps its lines in a monospace block that wraps, because
 it is a table. Everything is escaped before it is put in the HTML.
+
+## The columns three vendors added (2026-11-04, developer: "Go ahead with task 4")
+
+The 09/29-11/02 pull carried sixteen columns no spec claimed, kept in
+`extra_cells` and reported as `NEW_COLUMNS` since 2026-11-03. The
+developer's go came with a reading of the vendor: Curve's columns will
+keep changing, because the Allscripts side is unreliable. Each column
+was typed by sampling its values in the pull that first carried it
+(7,541 appointment rows, 6,532 service rows, 221 PRxP rows; names,
+shapes and fill rates only, never a value):
+
+- Curve appointments, eleven, inserted mid-row rather than appended:
+  two group numbers and two policy comment columns beside the primary
+  and secondary policy, an ailment comment (empty so far) beside
+  Comments, and six "next appointment" columns. The next-appointment
+  timestamp parses with the sibling DateTime_ formats on every filled
+  value; `Prim_Policy_Comments` sampled as currency because the comments
+  begin with a dollar sign, and is text, which is the by-value guess a
+  person has to overrule.
+- Curve Monthly Services, one: `AllDxCodes`, the line's diagnosis codes
+  as a comma list, filled on all but one row, 166 characters at most in
+  the sample, so under the default width.
+- PRxP, five: the patient's and the prescriber's full names (direct PII,
+  like the first and last names they join) and three plan group ids.
+
+None is `required`, since the files loaded before the pull do not carry
+them, and a column absent from a file is drift only when it is required
+(`registry/binding.py`): every older real extract still binds under the
+edited specs with the new columns listed as optional and absent.
+
+**What the migration had to learn.** `scripts/migrate.py` said a
+re-run after a spec gains a column creates what is missing, but only the
+metadata tables had guarded `ADD`s; the three layer tables of a loaded
+source would have stayed as they were and the next load would have
+failed at insert. The rule is now built: each layer table gets one
+guarded batch, one `IF COL_LENGTH ... ALTER TABLE ADD` per spec column,
+nullable, typed as the `CREATE` types it (text in `landed`). One batch
+per table rather than a statement per column keeps the migration at 235
+statements instead of thousands of round trips; a batch that fails part
+way is re-runnable because every line guards itself. Rows already in a
+table never had the column, which is why it is nullable and why what
+those rows make of it is the rebuild's question, not the migration's.
+
+**What the rebuild will do.** A column that joins the row hash rehashes
+every row, so all three sources retire and reinsert every live row
+(358,891 appointments, 280,707 services, 7,692 PRxP transactions). The
+appointments source is keyless, so its identity is every column and
+every identity changes too; that is the cost of a keyless source under
+D18, and the appointment id Curve holds internally remains the ask that
+would end it. Landed rows of the older files keep the new columns null
+and their values, where a file carried them, in `extra_cells`; the
+replay reads an unbound header position from `extra_cells`, so the
+rebuild types them from there. The rebuild runs in Azure after the
+Monthly Payments one finishes.
