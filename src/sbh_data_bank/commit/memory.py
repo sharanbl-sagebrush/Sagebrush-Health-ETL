@@ -23,14 +23,17 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from sbh_data_bank.commit.rebuild import RETYPED, RebuildCounts, TargetRow
 from sbh_data_bank.commit.records import (
     BatchRecord,
     CurrentQuery,
+    FindingWrite,
     FoundFile,
     LoadedFile,
     RunRecord,
     SourceFileRecord,
     StoredCurrent,
+    TypedWrite,
     WriteBatch,
     WriteContext,
 )
@@ -298,9 +301,121 @@ class MemoryStore:
                     batch.batch_id,
                     batch.control_totals,
                     record.as_of,
+                    record.coverage_from,
+                    record.coverage_to,
                 )
             )
         return found
+
+    # ------------------------------------------------------------- rebuild
+
+    def replace_typed(
+        self, spec: SourceSpec, ctx: WriteContext, source_file_id: int, rows: list[TypedWrite]
+    ) -> None:
+        kept = [r for r in self.typed[spec.key] if r["source_file_id"] != source_file_id]
+        for typed in rows:
+            kept.append(
+                {
+                    "tenant_id": ctx.tenant_id,
+                    "source_file_id": source_file_id,
+                    "line_number": typed.line_number,
+                    "spec_sha256": typed.spec_sha256,
+                    "row_hash": typed.row_hash,
+                    "created_at": ctx.created_at,
+                    "created_by": ctx.created_by,
+                    "updated_at": None,
+                    "updated_by": None,
+                    **{t: typed.values.get(t) for t in spec.landed_targets},
+                }
+            )
+        self.typed[spec.key] = kept
+
+    def replace_findings(
+        self, spec: SourceSpec, ctx: WriteContext, source_file_id: int, findings: list[FindingWrite]
+    ) -> None:
+        self.findings = [
+            f
+            for f in self.findings
+            if not (f["source_key"] == spec.key and f["source_file_id"] == source_file_id)
+        ]
+        for f in findings:
+            self.findings.append(
+                {
+                    "tenant_id": ctx.tenant_id,
+                    "batch_id": ctx.batch_id,
+                    "source_key": spec.key,
+                    "source_file_id": source_file_id,
+                    "key_values": f.key_values,
+                    "line_numbers": f.line_numbers,
+                    "identical": f.identical,
+                    "detected_at": ctx.created_at,
+                }
+            )
+
+    def reconcile_curated(
+        self, spec: SourceSpec, ctx: WriteContext, target: list[TargetRow], *, apply: bool
+    ) -> RebuildCounts:
+        """The SQL store's two set operations, as dictionary scans: a live
+        row is kept when a target row names its line with the same identity,
+        occurrence and content."""
+        by_line = {(t.source_file_id, t.line_number): t for t in target}
+
+        def matched(row: dict[str, Any]) -> bool:
+            t = by_line.get((row["source_file_id"], row["line_number"]))
+            return (
+                t is not None
+                and t.identity_hash == row["identity_hash"]
+                and t.occurrence == row["occurrence"]
+                and t.row_hash == row["row_hash"]
+            )
+
+        live = [
+            r
+            for r in self.curated[spec.key]
+            if r["tenant_id"] == ctx.tenant_id and r["superseded_by"] is None
+        ]
+        retire = [r for r in live if not matched(r)]
+        kept_lines = {(r["source_file_id"], r["line_number"]) for r in live if matched(r)}
+        insert = [t for t in target if (t.source_file_id, t.line_number) not in kept_lines]
+        counts = RebuildCounts(len(target) - len(insert), len(retire), len(insert))
+        if not apply:
+            return counts
+        for row in retire:
+            row["superseded_by"] = ctx.batch_id
+            row["superseded_at"] = ctx.created_at
+            row["supersede_reason"] = RETYPED
+            row["updated_at"] = ctx.created_at
+            row["updated_by"] = ctx.created_by
+        typed_by_line = {
+            (r["source_file_id"], r["line_number"]): r
+            for r in self.typed[spec.key]
+            if r["tenant_id"] == ctx.tenant_id
+        }
+        for t in insert:
+            typed = typed_by_line[(t.source_file_id, t.line_number)]
+            self.curated[spec.key].append(
+                {
+                    "tenant_id": ctx.tenant_id,
+                    "batch_id": ctx.batch_id,
+                    "source_file_id": t.source_file_id,
+                    "line_number": t.line_number,
+                    "dedup_rule": DEDUP_RULE,
+                    "identity_hash": t.identity_hash,
+                    "occurrence": t.occurrence,
+                    "row_hash": t.row_hash,
+                    "as_of": t.as_of,
+                    "outcome": t.outcome,
+                    "created_at": ctx.created_at,
+                    "created_by": ctx.created_by,
+                    "superseded_by": None,
+                    "superseded_at": None,
+                    "supersede_reason": None,
+                    "updated_at": None,
+                    "updated_by": None,
+                    **{c: typed.get(c) for c in spec.landed_targets},
+                }
+            )
+        return counts
 
     def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
         rows = [r for r in self.landed[spec.key] if r["source_file_id"] == source_file_id]

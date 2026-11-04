@@ -20,10 +20,10 @@ unchanged spec every line is ``unchanged`` and the totals agree; that is
 the proof the landed layer is complete, and ``scripts/retype.py`` ran it
 over the whole database on 2026-10-22 (``docs/decision-record.md``).
 
-Nothing in the layers is written. Replacing the typed rows and
-re-curating from them is decision D18, not yet taken: the curated ledger
-is append-only, so a rebuild has to say what becomes of the rows curated
-from the old typing. The one thing a run records is its own verdict, one
+Nothing in the layers is written here. Writing the rebuilt rows is
+``commit.rebuild`` (decision D18, 2026-11-03): typed rows replaced, and
+every live curated row the new rule no longer produces retired as
+``retyped``. The one thing a replay records is its own verdict, one
 ``meta.spec_check`` row per source (:func:`record_check`): the spec
 digest it ran under and how many files would change. A verdict of none
 is what lets the freshness check stop raising ``SPEC_CHANGED`` for that
@@ -42,10 +42,18 @@ from typing import Any, Protocol
 
 from sbh_data_bank.commit.engine import spec_sha256
 from sbh_data_bank.commit.records import LayerReader, LoadedFile
+from sbh_data_bank.ingest.load import FileLoad
 from sbh_data_bank.ingest.replay import load_from_landed
 from sbh_data_bank.registry.spec import SourceSpec
 
-__all__ = ["SPEC_CHECK_INSERT", "FileReplay", "record_check", "replay_source"]
+__all__ = [
+    "SPEC_CHECK_INSERT",
+    "FileReplay",
+    "record_check",
+    "replay_file",
+    "replay_file_with_load",
+    "replay_source",
+]
 
 #: How many line numbers a replay keeps per difference kind, for the report.
 SAMPLE = 5
@@ -110,6 +118,14 @@ def _recorded_sums(control_totals: str | None) -> dict[str, Decimal]:
 
 def replay_file(reader: LayerReader, spec: SourceSpec, file: LoadedFile) -> FileReplay:
     """Type one loaded file again from its landed rows and compare."""
+    return replay_file_with_load(reader, spec, file)[0]
+
+
+def replay_file_with_load(
+    reader: LayerReader, spec: SourceSpec, file: LoadedFile
+) -> tuple[FileReplay, FileLoad | None]:
+    """:func:`replay_file`, keeping the load for a caller that writes it
+    (``commit.rebuild``). ``None`` when the current spec did not load it."""
     load = load_from_landed(
         spec,
         file.header_json,
@@ -119,7 +135,7 @@ def replay_file(reader: LayerReader, spec: SourceSpec, file: LoadedFile) -> File
     )
     replay = FileReplay(file, load.outcome, load.detail, lines=len(load.landed))
     if load.outcome != "LOADED":
-        return replay
+        return replay, None
     before_typed = reader.typed_hashes(spec, file.source_file_id)
     before_quarantined = reader.quarantined_lines(file.batch_id)
     for row in load.rows:
@@ -142,7 +158,7 @@ def replay_file(reader: LayerReader, spec: SourceSpec, file: LoadedFile) -> File
     recorded = _recorded_sums(file.control_totals)
     computed = {k: v for k, v in load.counters.control_totals.items()}
     replay.totals_agree = all(computed.get(k, Decimal(0)) == v for k, v in recorded.items())
-    return replay
+    return replay, load
 
 
 def replay_source(reader: LayerReader, spec: SourceSpec, tenant_id: str) -> Iterator[FileReplay]:

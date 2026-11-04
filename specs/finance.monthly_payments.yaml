@@ -98,10 +98,19 @@ period_from_filename: 'monthly payments (?P<year>\d{4})-(?P<month>\d{2})'
 # current and reconciliation sums them. Within-month pairs are unaffected.
 # This mirrors Curve Monthly Services, whose key is (service_id, voidsign).
 #
-# A transaction line is identified by its voucher, service, sequence and void
-# sign within the month. ClientID scopes it; the period keeps two months that
-# reuse a sequence number apart.
-natural_key: [clientid, voucher_number, service_id, seqnum, voidsign]
+# transtype added 2026-11-04 (the first D18 rebuild). The verification of
+# the loaded database (docs/data-findings.md, 19) found 181,422 identities
+# with two current rows under the five-column key, every one an I/O
+# transfer pair: the same voucher, service, sequence and void sign, one row
+# transferring responsibility out and one in, differing in TransType and
+# the remittance columns. With transtype the key is unique across all
+# 1,309,804 loaded rows (checked in SQL). The two legs of a transfer are
+# two postings, so they are two identities, as the void pair are.
+#
+# A transaction line is identified by its voucher, service, sequence, void
+# sign and transaction type within the month. ClientID scopes it; the
+# period keeps two months that reuse a sequence number apart.
+natural_key: [clientid, voucher_number, service_id, seqnum, voidsign, transtype]
 
 # Drift policies: what happens when the column set changes. Both fail here,
 # stricter than the warn default for new columns.

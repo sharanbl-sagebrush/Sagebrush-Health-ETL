@@ -320,6 +320,10 @@ class LoadedFile:
     batch_id: str
     control_totals: str | None
     as_of: date | None = None
+    coverage_from: date | None = None
+    coverage_to: date | None = None
+    """The window the delivery covered when it loaded, so a rebuild can
+    run the vanish outcome exactly as the load did."""
 
 
 class LayerReader(Protocol):

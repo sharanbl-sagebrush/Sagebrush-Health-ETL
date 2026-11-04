@@ -177,7 +177,10 @@ def identity_columns_for(spec: SourceSpec) -> tuple[str, ...]:
 #:   supersede_reason  corrected (a newer version arrived) | vanished (a newer
 #:                     delivery covering its date no longer carried it) |
 #:                     late (written already superseded: an older delivery's
-#:                     version, behind the batch named in superseded_by)
+#:                     version, behind the batch named in superseded_by) |
+#:                     retyped (a rebuild under a changed spec no longer
+#:                     produces this row as current, decision D18; the batch
+#:                     named in superseded_by holds its replacement)
 #:   updated_at /      set with the superseded_* columns and never otherwise,
 #:   updated_by        since supersession is the only update a ledger row has
 #: Unchanged rows (same identity, same hash, newer as-of) write nothing here;

@@ -33,7 +33,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   until dropped explicitly. Re-running the migration is a no-op; it only
   creates what is missing and never alters a column, so a spec change to a
   table with rows is a decision about those rows first
-- 512 tests, no database required to run them
+- 521 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -124,11 +124,23 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   added columns (Curve appointments 11, Curve services 1, PRxP 5), kept in
   `extra_cells` and reported as `NEW_COLUMNS`. Alerts went by mail both
   times the check ran; SMTP settings are in `.env`
-- **Decided 2026-11-03, not yet built**: D18. A rebuilt row supersedes
-  the old one in place (reason `retyped`), one current version always.
-  The write side of the replay is the next build; its queue: the Monthly
-  Payments key, the three Curve money columns typed as text, two keys
-  pending vendor answers (`docs/decision-record.md`, "D18")
+- Done 2026-11-04: **the write side of the replay is built** (D18,
+  `commit/rebuild.py`, `scripts/rebuild.py`). A rebuild types every
+  loaded file again from `landed`, replaces the typed rows, runs the
+  dedup rule over the whole source in memory and reconciles the live
+  curated rows in SQL: kept where the new rule still produces the row,
+  otherwise retired as `retyped` and the replacement inserted beside it.
+  One transaction per source; refused whole when a line would newly
+  quarantine or newly type, a file no longer loads, totals disagree or
+  the replay conflicts. Without `--apply` it reports the same counts.
+  First use: `transtype` joined the Monthly Payments key, and the plan
+  says 41 files, 1,309,804 lines, 0 rehashed, 1,309,804 retired and
+  1,309,804 inserted, exactly the prediction. The apply waits for the
+  developer's go and runs in Azure as a one-off job execution
+  (`scripts/job.sh rebuild <key>`). Still queued: the three Curve money
+  columns typed as text (a column type change also needs the table
+  column altered, not yet a migration rule), two keys pending vendor
+  answers (`docs/decision-record.md`, "D18")
 
 ## Rules that came from real defects
 
@@ -303,7 +315,8 @@ src/sbh_data_bank/
   commit/     the commit engine: one file per transaction through meta,
               landed, typed, curated and quarantine; a SQL store and an
               in-memory store behind one interface; backfill, the loop
-              over a root; retype, the replay of typed from landed
+              over a root; retype, the replay of typed from landed;
+              rebuild, writing that replay (D18)
   acquire/    the upload container: list, mirror into the landing root,
               record in meta.blob
   observe/    source freshness, the open items in meta and stg, and mail
@@ -312,13 +325,13 @@ specs/        21 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
               trace_file, commit_file, backfill, acquire, freshness, retype,
-              close_runs
+              rebuild, close_runs, verify_load; job.sh, the image's entry point
 ```
 
 ## Running things
 
 ```bash
-python -m pytest                    # 512 tests, no database
+python -m pytest                    # 521 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts
@@ -332,6 +345,7 @@ python scripts/acquire.py --env-file .env --actor <you> [--poll 300]   # fetch u
 python scripts/verify_load.py --env-file .env         # the database against the raw files; exit 1 on a gap
 python scripts/freshness.py --env-file .env [--email]   # is every source current; exit 1 on an alert
 python scripts/retype.py --env-file .env --only <spec key>   # what a spec edit does to loaded data
+python scripts/rebuild.py --env-file .env --only <spec key> [--apply]   # apply a spec edit to loaded data (D18)
 python scripts/close_runs.py --env-file .env [--apply]       # runs a dead process left open
 ```
 
@@ -344,7 +358,11 @@ file renamed past every pattern shows up there and nowhere else.
 After editing a spec, run `retype.py` on that source before loading any
 file: it says, line by line, what the edit does to the data already in
 `typed` (rehashed, newly quarantined, newly typed) without reading a file.
-It writes nothing (D18).
+It writes nothing. `rebuild.py` is the write: first without `--apply` to
+read the counts (kept, retired, inserted), then with it. A rebuild of a
+large source runs in Azure as a one-off job execution rather than on a
+laptop (`deploy/README.md`, "A one-off rebuild"); the landed reads and
+the staged rows otherwise cross the country twice.
 
 The vendor extracts are PHI and live outside this repository. Point at them
 with `SBH_SOURCE_ROOT`.

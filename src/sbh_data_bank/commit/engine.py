@@ -111,6 +111,7 @@ __all__ = [
     "CommitOutcome",
     "CommitResult",
     "filename_window_check",
+    "findings_for",
     "spec_sha256",
     "utc_now",
 ]
@@ -694,7 +695,7 @@ class CommitEngine:
                     _json(q.payload),
                 )
             )
-        writes.findings = _findings(spec, decided, load)
+        writes.findings = findings_for(spec, decided, load)
         return writes
 
     def _finish(
@@ -728,7 +729,7 @@ class CommitEngine:
         )
 
 
-def _findings(
+def findings_for(
     spec: SourceSpec, decided: list[tuple[RowFact, str]], load: FileLoad
 ) -> list[FindingWrite]:
     """One ``stg.duplicate_finding`` per identity that several lines share.

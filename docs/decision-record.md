@@ -925,3 +925,51 @@ Services (`totpmt`, `totadj`, `totref` become currency). The two
 vendor-dependent keys follow the same path when the answers arrive.
 Not yet implemented: the developer chose A and then had to leave; the
 dry comparison for Monthly Payments is shown before any write.
+
+## D18 built; the Monthly Payments plan (2026-11-04)
+
+`commit/rebuild.py` is the write side. For one source, inside one
+transaction: every loaded file is typed again from `landed` in as-of
+order and its typed rows replaced (so every typed row carries the new
+spec digest, which is what clears `SPEC_CHANGED`); the dedup rule runs
+over all the deliveries in memory, as the loads ran it, including
+vanish with each delivery's recorded coverage; the current state that
+gives is staged in a temporary table and reconciled with the live
+curated rows by two set-based statements: an UPDATE retiring every live
+row no target row matches on (file, line, identity hash, occurrence,
+row hash), reason `retyped`, and an INSERT ... SELECT writing every
+target row no live row matches, with the business values from the
+rebuilt typed row of the same line. Kept rows are never touched. The
+duplicate findings of each file are recomputed under the new key. The
+batch row is `REBUILT` with no file; the retired rows point at it.
+
+What refuses a rebuild, whole: a file the current spec does not load; a
+line that would newly quarantine or newly type (the quarantine on record
+would be wrong afterwards, and resolving quarantine is a separate step,
+not yet built); control totals that disagree; a conflict in the replay.
+Nine tests hold the rule on the in-memory store, including that a plan
+writes nothing and that a key change leaves one current version per
+identity with the same business values on every line.
+
+Two things the design decided against. The rule version on the curated
+row (`dedup_rule`) is not bumped: the dedup rule did not change, the
+spec did, and the typed row carries the spec digest while the curated
+row carries the batch. And hashing is not moved into T-SQL: it would be
+a second implementation of the identity rule, able to drift from the
+one every load uses. The comparison is in SQL; the rule stays in
+Python, and the heavy part runs in Azure as a one-off job execution.
+
+The first plan, Monthly Payments with `transtype` in the key, run from
+the developer's laptop (17 minutes, most of it the landed rows crossing
+the country): 41 files, 1,309,804 lines, 0 rehashed, 0 kept, 1,309,804
+retired, 1,309,804 inserted. Exactly the prediction: a key change moves
+every identity hash and no row hash. The apply waits for the
+developer's go.
+
+Known gaps. A column type change (the three Curve money columns) also
+needs the typed and curated table columns altered from text to decimal,
+which the migration does not do; that is the next rule to add, with
+the conversion run after the rebuild has written parsable text. The
+natural-key index `ix_curated_<source>_key` is guarded by name and so
+keeps its old column list after a key change; it serves people's
+queries, not the rule, and is left for a later migration pass.

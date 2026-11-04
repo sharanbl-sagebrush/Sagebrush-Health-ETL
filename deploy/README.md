@@ -26,6 +26,22 @@ expected whenever the check finds an alert**: the script exits 1 by
 design and has mailed the findings; read the log before assuming a
 crash. The acquire job exits 0 whether or not it found files.
 
+**A one-off rebuild** (decision D18) runs next to the database as an
+execution of the acquire job with its command overridden, after the image
+has been rebuilt from the commit that carries the spec change
+(`deploy/deploy.sh`):
+
+```
+az containerapp job start -n sbh-acquire -g sbh-data-bank-rg \
+  --command sh scripts/job.sh rebuild-plan finance.monthly_payments
+az containerapp job start -n sbh-acquire -g sbh-data-bank-rg \
+  --command sh scripts/job.sh rebuild finance.monthly_payments
+```
+
+The first reports the counts and writes nothing; the second applies. The
+execution's log holds the report. The scheduled acquire runs are not
+affected: an override applies to that one execution only.
+
 A job runs to completion and exits; nothing is billed between runs. A
 pass that finds nothing new ends in seconds. The largest load seen so far
 (Monthly Payments, 1.3 million rows) fits a 4 vCPU / 8 GiB replica, which

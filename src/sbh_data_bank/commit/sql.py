@@ -31,14 +31,17 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Protocol
 
+from sbh_data_bank.commit.rebuild import RETYPED, RebuildCounts, TargetRow
 from sbh_data_bank.commit.records import (
     BatchRecord,
     CurrentQuery,
+    FindingWrite,
     FoundFile,
     LoadedFile,
     RunRecord,
     SourceFileRecord,
     StoredCurrent,
+    TypedWrite,
     WriteBatch,
     WriteContext,
     iter_values,
@@ -64,8 +67,11 @@ __all__ = [
     "landed_columns",
     "landed_input_sizes",
     "landed_select_sql",
+    "rebuilt_insert_sql",
+    "retire_sql",
     "supersede_sql",
     "typed_columns",
+    "typed_delete_sql",
     "typed_input_sizes",
 ]
 
@@ -369,12 +375,88 @@ _FINDING_INSERT = insert_sql(
 
 _LOADED_FILES = (
     "SELECT sf.source_file_id, sf.file_name, sf.sheet_name, sf.header_json, b.batch_id, "
-    "b.control_totals, sf.as_of FROM meta.source_file AS sf "
+    "b.control_totals, sf.as_of, sf.coverage_from, sf.coverage_to FROM meta.source_file AS sf "
     "JOIN meta.batch AS b ON b.source_file_id = sf.source_file_id AND b.outcome = 'LOADED' "
     "WHERE sf.tenant_id = ? AND sf.source_key = ? AND sf.header_json IS NOT NULL "
     "ORDER BY sf.source_file_id"
 )
 _QUARANTINED_LINES = "SELECT line_number, reasons FROM stg.quarantine WHERE batch_id = ?"
+_FINDINGS_DELETE = (
+    "DELETE FROM stg.duplicate_finding WHERE tenant_id = ? AND source_key = ? "
+    "AND source_file_id = ?"
+)
+
+
+# ------------------------------------------------------------- the rebuild
+
+_TARGET_CREATE = (
+    "CREATE TABLE #target (source_file_id BIGINT NOT NULL, line_number INT NOT NULL, "
+    "identity_hash CHAR(64) NOT NULL, occurrence INT NOT NULL, row_hash CHAR(64) NOT NULL, "
+    "as_of DATE NOT NULL, outcome NVARCHAR(16) NOT NULL, "
+    "PRIMARY KEY (source_file_id, line_number))"
+)
+_TARGET_INSERT = (
+    "INSERT INTO #target (source_file_id, line_number, identity_hash, occurrence, row_hash, "
+    "as_of, outcome) VALUES (?, ?, ?, ?, ?, ?, ?)"
+)
+_TARGET_DROP = "DROP TABLE #target"
+_TARGET_INPUT_SIZES = input_sizes(
+    ["BIGINT", "INT", "CHAR(64)", "INT", "CHAR(64)", "DATE", "NVARCHAR(16)"]
+)
+#: A live row is kept when a target row names its line with the same
+#: identity, occurrence and content; the same predicate decides what to
+#: retire (live, unmatched) and what to insert (target, unmatched).
+_MATCH = (
+    "t.source_file_id = c.source_file_id AND t.line_number = c.line_number "
+    "AND t.identity_hash = c.identity_hash AND t.occurrence = c.occurrence "
+    "AND t.row_hash = c.row_hash"
+)
+
+
+def typed_delete_sql(spec: SourceSpec) -> str:
+    """Clear one file's typed rows before the rebuilt ones are written."""
+    return f"DELETE FROM {table_name(spec, 'typed')} WHERE tenant_id = ? AND source_file_id = ?"
+
+
+def retire_sql(spec: SourceSpec, *, count_only: bool) -> str:
+    """Retire (or count) the live rows no target row matches."""
+    table = table_name(spec, "curated")
+    where = (
+        f"FROM {table} AS c LEFT JOIN #target AS t ON {_MATCH} "
+        "WHERE c.tenant_id = ? AND c.superseded_by IS NULL AND t.source_file_id IS NULL"
+    )
+    if count_only:
+        return f"SELECT COUNT(*) {where}"
+    return (
+        "UPDATE c SET superseded_by = ?, superseded_at = ?, supersede_reason = ?, "
+        f"updated_at = ?, updated_by = ? {where}"
+    )
+
+
+def rebuilt_insert_sql(spec: SourceSpec, *, count_only: bool) -> str:
+    """Insert (or count) the target rows no live row matches, taking the
+    business values from the rebuilt typed row of the same line."""
+    curated = table_name(spec, "curated")
+    typed = table_name(spec, "typed")
+    unmatched = (
+        f"NOT EXISTS (SELECT 1 FROM {curated} AS c WHERE c.tenant_id = ? "
+        f"AND c.superseded_by IS NULL AND {_MATCH})"
+    )
+    if count_only:
+        return f"SELECT COUNT(*) FROM #target AS t WHERE {unmatched}"
+    business = ", ".join(f"ty.{_quote(c)}" for c in spec.landed_targets)
+    columns = ", ".join(_quote(c) for c in curated_columns(spec))
+    select = (
+        "?, ?, t.source_file_id, t.line_number, ?, t.identity_hash, t.occurrence, t.row_hash, "
+        "t.as_of, t.outcome, ?, ?, NULL, NULL, NULL, NULL, NULL"
+    )
+    if business:
+        select += f", {business}"
+    return (
+        f"INSERT INTO {curated} ({columns}) SELECT {select} FROM #target AS t "
+        f"JOIN {typed} AS ty ON ty.tenant_id = ? AND ty.source_file_id = t.source_file_id "
+        f"AND ty.line_number = t.line_number WHERE {unmatched}"
+    )
 
 
 def landed_select_sql(spec: SourceSpec) -> str:
@@ -454,6 +536,17 @@ class SqlStore:
             raise RuntimeError("SqlStore is used outside a transaction")
         return self._cursor
 
+    @contextmanager
+    def _reading(self) -> Iterator[_Cursor]:
+        """A cursor for a read: the open transaction's when there is one (a
+        rebuild reads the layers back inside its own transaction), else a
+        transaction of its own."""
+        if self._cursor is not None:
+            yield self._cursor
+            return
+        with self.transaction():
+            yield self.cursor
+
     def _executemany(self, sql: str, sizes: Sequence[InputSize], rows: list[tuple]) -> None:
         """A batch insert, sent ``batch_rows`` rows at a time inside the one
         transaction. On the fast path every parameter is declared from the
@@ -525,16 +618,15 @@ class SqlStore:
     # ---------------------------------------------------------- reading back
 
     def loaded_files(self, tenant_id: str, source_key: str) -> list[LoadedFile]:
-        with self.transaction():
-            self.cursor.execute(_LOADED_FILES, tenant_id, source_key)
-            return [LoadedFile(int(r[0]), *r[1:]) for r in self.cursor.fetchall()]
+        with self._reading() as cursor:
+            cursor.execute(_LOADED_FILES, tenant_id, source_key)
+            return [LoadedFile(int(r[0]), *r[1:]) for r in cursor.fetchall()]
 
     def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
         """Streamed in slices of ``batch_rows`` inside one read transaction,
         so a 560,000-line file is never held whole."""
         targets = list(spec.landed_targets)
-        with self.transaction():
-            cursor = self.cursor
+        with self._reading() as cursor:
             cursor.execute(landed_select_sql(spec), source_file_id)
             while chunk := cursor.fetchmany(self._batch_rows):
                 for record in chunk:
@@ -546,14 +638,113 @@ class SqlStore:
                     )
 
     def typed_hashes(self, spec: SourceSpec, source_file_id: int) -> dict[int, str]:
-        with self.transaction():
-            self.cursor.execute(_typed_hashes_sql(spec), source_file_id)
-            return {int(r[0]): r[1] for r in self.cursor.fetchall()}
+        with self._reading() as cursor:
+            cursor.execute(_typed_hashes_sql(spec), source_file_id)
+            return {int(r[0]): r[1] for r in cursor.fetchall()}
 
     def quarantined_lines(self, batch_id: str) -> dict[int, str]:
-        with self.transaction():
-            self.cursor.execute(_QUARANTINED_LINES, batch_id)
-            return {int(r[0]): r[1] for r in self.cursor.fetchall()}
+        with self._reading() as cursor:
+            cursor.execute(_QUARANTINED_LINES, batch_id)
+            return {int(r[0]): r[1] for r in cursor.fetchall()}
+
+    # ------------------------------------------------------------- rebuild
+
+    def replace_typed(
+        self, spec: SourceSpec, ctx: WriteContext, source_file_id: int, rows: list[TypedWrite]
+    ) -> None:
+        self.cursor.execute(typed_delete_sql(spec), ctx.tenant_id, source_file_id)
+        if not rows:
+            return
+        audit = (ctx.created_at, ctx.created_by, None, None)
+        targets = list(spec.landed_targets)
+        self._executemany(
+            insert_sql(table_name(spec, "typed"), typed_columns(spec)),
+            typed_input_sizes(spec),
+            [
+                (
+                    ctx.tenant_id,
+                    source_file_id,
+                    r.line_number,
+                    r.spec_sha256,
+                    r.row_hash,
+                    *audit,
+                    *iter_values(r.values, targets),
+                )  # fmt: skip
+                for r in rows
+            ],
+        )
+
+    def replace_findings(
+        self, spec: SourceSpec, ctx: WriteContext, source_file_id: int, findings: list[FindingWrite]
+    ) -> None:
+        self.cursor.execute(_FINDINGS_DELETE, ctx.tenant_id, spec.key, source_file_id)
+        if not findings:
+            return
+        self._executemany(
+            _FINDING_INSERT,
+            _FINDING_INPUT_SIZES,
+            [
+                (
+                    ctx.tenant_id,
+                    ctx.batch_id,
+                    spec.key,
+                    source_file_id,
+                    f.key_values,
+                    f.line_numbers,
+                    f.identical,
+                    ctx.created_at,
+                )  # fmt: skip
+                for f in findings
+            ],
+        )
+
+    def reconcile_curated(
+        self, spec: SourceSpec, ctx: WriteContext, target: list[TargetRow], *, apply: bool
+    ) -> RebuildCounts:
+        """Stage the target rows and let the database compare: one UPDATE
+        for the retirements, one INSERT ... SELECT for the new rows, both
+        set-based, so a million-row source is a few statements."""
+        cursor = self.cursor
+        cursor.execute(_TARGET_CREATE)
+        try:
+            if target:
+                self._executemany(
+                    _TARGET_INSERT,
+                    _TARGET_INPUT_SIZES,
+                    [
+                        (
+                            t.source_file_id,
+                            t.line_number,
+                            t.identity_hash,
+                            t.occurrence,
+                            t.row_hash,
+                            t.as_of,
+                            t.outcome,
+                        )  # fmt: skip
+                        for t in target
+                    ],
+                )
+            if not apply:
+                cursor.execute(retire_sql(spec, count_only=True), ctx.tenant_id)
+                retired = int(cursor.fetchone()[0])
+                cursor.execute(rebuilt_insert_sql(spec, count_only=True), ctx.tenant_id)
+                inserted = int(cursor.fetchone()[0])
+                return RebuildCounts(len(target) - inserted, retired, inserted)
+            cursor.execute(
+                retire_sql(spec, count_only=False),
+                ctx.batch_id, ctx.created_at, RETYPED, ctx.created_at, ctx.created_by,
+                ctx.tenant_id,
+            )  # fmt: skip
+            retired = int(cursor.rowcount)
+            cursor.execute(
+                rebuilt_insert_sql(spec, count_only=False),
+                ctx.tenant_id, ctx.batch_id, DEDUP_RULE, ctx.created_at, ctx.created_by,
+                ctx.tenant_id, ctx.tenant_id,
+            )  # fmt: skip
+            inserted = int(cursor.rowcount)
+            return RebuildCounts(len(target) - inserted, retired, inserted)
+        finally:
+            cursor.execute(_TARGET_DROP)
 
     # ------------------------------------------------------------ curated
 
