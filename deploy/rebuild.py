@@ -5,11 +5,12 @@
     python deploy/rebuild.py finance.monthly_payments --apply --wait
 
 ``az containerapp job start`` with a command override replaces the whole
-container template of that execution, so the job's image and environment
-(the SQL settings and the secret references) have to be passed again or
-the execution starts with none of them (2026-11-04, the first attempt).
-This reads them from the job and passes them back, changing only the
-command: ``sh scripts/job.sh rebuild-plan <keys>`` or ``rebuild <keys>``.
+container template of that execution, so the job's image, environment
+(the SQL settings and the secret references) and resources have to be
+passed again or the execution starts with none of them (2026-11-04: the
+first attempt had no settings, the second the default 1 GiB and was
+killed). This reads them from the job and passes them back, changing
+only the command: ``sh scripts/job.sh rebuild-plan <keys>`` or ``rebuild <keys>``.
 The scheduled executions are untouched.
 
 ``--wait`` polls the execution until it ends and prints its log. The
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -31,8 +33,9 @@ JOB = "sbh-acquire"
 
 
 def az(*args: str) -> str:
+    exe = shutil.which("az") or "az"  # az.cmd on Windows; a bare "az" is not found
     result = subprocess.run(
-        ["az", *args, "--only-show-errors"], capture_output=True, text=True, check=False
+        [exe, *args, "--only-show-errors"], capture_output=True, text=True, check=False
     )
     if result.returncode != 0:
         sys.stderr.write(result.stderr)
@@ -64,9 +67,14 @@ def main() -> int:
     mode = "rebuild" if args.apply else "rebuild-plan"
     command = ["sh", "scripts/job.sh", mode, *args.keys]
     print(f"starting {mode} of {', '.join(args.keys)} on {container['image']}")
+    # The override also resets the resources to the platform default
+    # (0.5 CPU, 1 GiB; the second attempt was killed for memory), so the
+    # job's own come along.
+    resources = container.get("resources") or {}
     name = az(
         "containerapp", "job", "start", "-n", args.job, "-g", args.resource_group,
         "--image", container["image"], "--command", *command, "--env-vars", *env,
+        "--cpu", str(resources.get("cpu", 4)), "--memory", str(resources.get("memory", "8Gi")),
         "--query", "name", "-o", "tsv",
     ).strip()  # fmt: skip
     print(f"execution {name}")
