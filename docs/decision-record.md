@@ -900,3 +900,28 @@ a failed freshness execution and is written down. The jobs still sign
 in to SQL as the developer's login (`pranav`) from a Container Apps
 secret; a managed-identity login on the database is a later change by
 the server's Entra admin.
+
+## D18: a rebuilt row supersedes the old one in place (2026-11-03, developer)
+
+Decided after a walk-through of the two options. A rule change on a
+loaded source (a key column, a column type) is applied by rebuilding
+`typed` and `curated` from `landed` inside the database, never from the
+files. Each rebuilt row whose identity hash or row hash differs from the
+current row takes its place: the old row is retired with a new supersede
+reason, `retyped`, pointing at the rebuild batch, and the replacement is
+inserted under the rule version that built it. Rows whose hashes do not
+change are left alone. There is always one current version of an
+identity, so every reader keeps `superseded_by IS NULL` and nothing
+changes for reports. The alternative, a second set of rows under a new
+rule version beside the old, was rejected because it makes "current" a
+question every query has to answer.
+
+Build order: the `retyped` reason and the rule version stamp; the write
+side of `commit/retype.py`, one transaction per source, refusing to
+write when the dry comparison shows anything unexpected; a rebuild of
+one small source first; then Monthly Payments (`transtype` joins the
+key, every identity hash changes, totals do not) and Curve Monthly
+Services (`totpmt`, `totadj`, `totref` become currency). The two
+vendor-dependent keys follow the same path when the answers arrive.
+Not yet implemented: the developer chose A and then had to leave; the
+dry comparison for Monthly Payments is shown before any write.

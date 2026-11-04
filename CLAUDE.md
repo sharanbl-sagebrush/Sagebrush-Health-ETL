@@ -124,10 +124,11 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   added columns (Curve appointments 11, Curve services 1, PRxP 5), kept in
   `extra_cells` and reported as `NEW_COLUMNS`. Alerts went by mail both
   times the check ran; SMTP settings are in `.env`
-- **Not yet built**: the write side of the replay (replacing typed rows
-  and re-curating from them, D18). Its queue: the Monthly Payments key,
-  the three Curve money columns typed as text, two keys pending vendor
-  answers (`docs/decision-record.md`, "The verification")
+- **Decided 2026-11-03, not yet built**: D18. A rebuilt row supersedes
+  the old one in place (reason `retyped`), one current version always.
+  The write side of the replay is the next build; its queue: the Monthly
+  Payments key, the three Curve money columns typed as text, two keys
+  pending vendor answers (`docs/decision-record.md`, "D18")
 
 ## Rules that came from real defects
 
