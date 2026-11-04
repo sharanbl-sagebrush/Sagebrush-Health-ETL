@@ -169,9 +169,11 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   Wellpartner pairs are the same invoice written twice (one file,
   adjacent lines, same purchase order and amount, a trailing space in
   the entity name), a question for the vendor and not a key change. The
-  same evening **the Monthly Payments rebuild execution hit the job's
-  four-hour limit** inside the retire UPDATE and rolled back: nothing
-  written, and the next attempt is a decision about time or tier
+  same evening **the Monthly Payments rebuild execution failed on the
+  database's 32 GB size quota** inside the retire UPDATE and rolled
+  back: nothing written. Monthly Payments is 14.4 GB over its three
+  layers and a rebuild keeps every retired row, so the quota has to
+  grow before the next attempt, an Azure change for the developer
   (`docs/decision-record.md`, "The ABC item number joins the key")
 
 ## Rules that came from real defects

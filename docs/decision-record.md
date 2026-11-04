@@ -1103,22 +1103,40 @@ this source has to exclude or Wellpartner has to withdraw. The twenty
 rows were written out for the developer to raise with Wellpartner
 (outside the repository, beside the extracts).
 
-**The Monthly Payments execution failed on time.** Execution
-`sbh-acquire-0araybc` (image c325653, started 16:26:41 UTC, the apply
-with `transtype` in the key) was inside the set-based retire UPDATE
-from 17:04 UTC, I/O bound on the 2-vCore General Purpose tier, and the
-job's replica timeout of 14,400 s ended it at 20:26 UTC. The
-transaction rolled back as designed: 0 batches for the source that day,
-1,309,804 current rows as before. Two things followed. Accelerated
-database recovery made the rollback instant and left the version
-cleaner to walk 1.3 million aborted row versions in `typed` and
-`curated`, during which a count of the live rows took over 100 s and the
-freshness check, which reads the newest typed row's spec hash by
-`created_at`, did not finish in 280 s; a count on the live index was
-back to 2 s within twenty minutes. And the run row the killed process
-left open shows as RUN_UNFINISHED until `close_runs.py` closes it,
-which it will do once the run is fourteen hours old. The
-next attempt is the developer's decision: a longer replica timeout on a
-dedicated rebuild job, a temporarily larger tier for the hour it runs,
-or a write path that commits in bounded pieces, which would give up the
-one-transaction guarantee D18 was built on.
+**The Monthly Payments execution failed on the database's size
+quota.** Execution `sbh-acquire-0araybc` (image c325653, started
+16:26:41 UTC, the apply with `transtype` in the key) was inside the
+set-based retire UPDATE from 17:04 UTC, I/O bound on the 2-vCore
+General Purpose tier. The execution's status read Failed with no end
+time, which looked like the job's 14,400 s replica timeout at 20:26
+UTC; the console log in Log Analytics says otherwise. At 18:46 UTC SQL
+Server raised "The database 'sbh_data_bank' has reached its size
+quota" inside `reconcile_curated`, the transaction rolled back as
+designed (0 batches for the source that day, 1,309,804 current rows as
+before), and the drop of `#target` on the way out failed because the
+rollback had already taken it. The database is 32 GB at most (GP_Gen5,
+2 vCores) and Monthly Payments occupies 14.4 GB of it over its three
+layers (curated 7.4, typed 3.7, landed 3.3, about 5.7 KB per curated
+row); a rebuild keeps every retired row beside its replacement, so the
+curated layer alone would have grown by 7 GB, with the typed
+replacement and the row versions of the UPDATE on top. Read after the
+failure: 31.6 GB of 32 used, of which 8.0 GB was the persistent
+version store of the aborted transaction, which accelerated database
+recovery leaves for the version cleaner to walk; while it does, a
+count of the live rows took over 100 s and the freshness check, which
+reads the newest typed row's spec hash by `created_at`, did not finish
+in 280 s. The cleaner will give the 8 GB back; the data itself is
+about 23.5 GB, and the three task-4 rebuilds (2.2 GB of curated growth
+between them) fit under the quota after that, while Monthly Payments
+does not. The run row the killed process left open shows as
+RUN_UNFINISHED until `close_runs.py` closes it, once the run is
+fourteen hours old.
+
+The next attempt is therefore an Azure change for the developer:
+raise the database's maximum size (General Purpose storage is billed
+per GB) to hold the ledger with its history, with the retired Monthly
+Payments rows alone adding 7 GB each time its key or hash changes. The
+two other paths, a rebuild that writes in committed pieces or a
+curated row that carries less (the identity and row hashes are 64
+characters each, and every vendor column is repeated across three
+layers), are design questions for after the ETL is signed off.
