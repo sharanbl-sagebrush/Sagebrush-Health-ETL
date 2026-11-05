@@ -228,6 +228,18 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   the OneDrive "Original Files" folder is read-only, after three
   workbooks were re-saved by Excel while open (same data, different
   bytes; `docs/decision-record.md`, "The pricing source is a snapshot")
+- 2026-11-05, evening: **the Monthly Payments rebuild is applied.**
+  `transtype` is in the key of the loaded data. The execution on image
+  e978868 ran 2 h 40 min on the 128 GB file (16:54 to 19:34 UTC) and
+  committed exactly the plan: 41 files, 1,309,804 lines, 0 rehashed,
+  1,309,804 live rows retired as `retyped` and 1,309,804 inserted.
+  Read back: landed lines, typed rows and current rows all 1,309,804,
+  curated 2,619,608 in all, 0 identities with two current rows, and
+  the `amount` and `fee` totals of the current rows equal those of the
+  retired rows and of `typed` to the cent (194,205,717.26 and
+  1,106,575,137.32). Every D18 rebuild queued since 2026-11-04 is now
+  in Azure; `docs/decision-record.md`, "The Monthly Payments rebuild
+  lands". Still with the developer: moving both jobs to e7a5161
 
 ## Rules that came from real defects
 

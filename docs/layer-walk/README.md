@@ -30,7 +30,7 @@ All nineteen notes are in.
 | ehr.allscripts.erx | loadable; June file as-of must be supplied | operator input | ordered_date |
 | ehr.curve.appointments | NOT loadable: 3 of 4 files quarantine 100% on timestamp format | yes | appointment_datetime |
 | ehr.curve.monthly_services | key `(service_id, voidsign)` adopted 2026-10-16; loads; remaining items are typing fixes | no | postdate |
-| finance.monthly_payments | `voidsign` added to the key 2026-10-16; loads cleanly | no | transdate |
+| finance.monthly_payments | `voidsign` added to the key 2026-10-16, `transtype` 2026-11-05 (the first D18 rebuild, applied in Azure); loads cleanly | no | transdate |
 | reference.wholesaler_accounts | safe for first load; order by modified stamp, full-replacement snapshot | no | none (snapshot) |
 
 Across all nineteen walks: zero conflicts, every late-file replay left current

@@ -1387,3 +1387,64 @@ them read-only and an edit has to go to a new file; a file added to
 the folder later arrives writable and gets the attribute with its
 load. Compression (above) is parked on the developer's word, the
 maximum size being 128 GB.
+
+## The Monthly Payments rebuild lands (2026-11-05, evening)
+
+The rebuild that D18 was built for, `transtype` joining the Monthly
+Payments key, is applied. It ran as one execution of the acquire job
+on image e978868 (`deploy/rebuild.py finance.monthly_payments --image
+e978868 --apply`), the fourth attempt counting the two that the 32 GB
+quota killed and the one that the Curve rebuilds queued behind: started
+16:54:24 UTC, committed 19:34:20, 9,606 seconds, well inside the
+replica's four hours, with nothing else writing to the database. The
+job's own line says what the plan said on 2026-11-04 to the row: 41
+files, 1,309,804 lines, 0 rehashed, curated kept 0, retired 1,309,804
+as `retyped`, inserted 1,309,804 (batch
+`bat_1793897664113_000000_e7c8d5a1`, run outcome COMPLETED, no run
+left open).
+
+Read back from the laptop afterwards, counts and totals only:
+
+| Check | Value |
+|---|---|
+| landed lines | 1,309,804 |
+| typed rows | 1,309,804 |
+| curated rows, all versions | 2,619,608 |
+| current rows | 1,309,804 |
+| retired as `retyped` by the batch | 1,309,804 |
+| inserted by the batch | 1,309,804 |
+| identities with two current rows | 0 |
+| `amount`, current rows | 194,205,717.26 |
+| `amount`, retired rows | 194,205,717.26 |
+| `amount`, typed | 194,205,717.26 |
+| `fee`, current = retired = typed | 1,106,575,137.32 |
+
+So the ledger holds every payment line twice, once under the old key
+and once under the new, the old version retired and the new one
+current, which is what D18 chose over an in-place rewrite: the history
+of the key change is in the table. The cost is the one measured in
+"Where the bytes go": Monthly Payments' curated layer doubled, and the
+version store the transaction built is the database's to clean up
+over the following hours (the count of the retired rows took 142
+seconds against 3 for the current ones, the hash index still carrying
+the in-row versions). The developer's standing instruction, scale to 8
+vCores if it failed again, was not needed.
+
+One thing to know about the launcher. Its `--wait` poll from the
+laptop lost its connection to the Container Apps API after two hours
+("An existing connection was forcibly closed by the remote host", at
+18:57 UTC) and the launcher exited 1 while the execution went on
+unaffected; a plain status loop re-attached and saw it end. The
+execution's state is the job's, never the launcher's, and the record
+of what it did is `meta.batch` and the console log, which is where the
+result above was read from. A database-side probe that listed
+`tempdb.sys.tables` blocked for the last 35 minutes of the transaction
+on the staged `#target` table's metadata and returned the moment the
+commit released it; a probe that wants to watch a running rebuild
+reads `sys.dm_exec_requests` and `sys.dm_tran_database_transactions`
+and stays out of tempdb's catalog.
+
+With this, every rebuild queued since D18 was built is in Azure: the
+Monthly Payments key, the sixteen added columns, the ABC key, the
+Curve money columns. The scheduled jobs still run e978868; image
+e7a5161 with the pricing variant waits for the developer to move them.
