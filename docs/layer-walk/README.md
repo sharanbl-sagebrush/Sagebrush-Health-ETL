@@ -190,6 +190,7 @@ credit rows. Each note says which column to count.
 | ehr.athena.eligibility | the `Feb042026` file is a different report (title lacks "Active"); exclude or add a variant |
 | wholesaler.cardinal.invoice | three wrong comments ("covers the same period", "2024 to 2026 in full", NDC count) |
 | wholesaler.abc.purchases | done 2026-11-04: `abc` joined the key and the notes say why |
+| reference.apexus.pricing | done 2026-11-05: a snapshot (`event_date: as_of`, vanish on) with a second variant for Apexus's own CSV export |
 | ehr.athena.encounters / prescriptions / allscripts / curve | notes restate duplicate counts that are now explained (one-day duplication, void pairs, 7,548 groups) |
 | finance.monthly_payments | `amount` as control_total; as-of from filename (`as_of_source: filename`); period assignment transmonth vs postmonth is a named decision; spec comment on PostMonth/TransMonth order is inverted; findings doc section 13 uniqueness claim is wrong |
 | tpa.wellpartner.claims | decimal on qty_allocated/unreplenished_qty/order_attempts; datetime on last_modified_date_time; shape rule on gpi; PII class on card_holder |

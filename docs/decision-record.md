@@ -1315,3 +1315,75 @@ includes with the database. The compute is unchanged at 2 vCores. The
 assistant's reading: 64 GB is enough to run every queued rebuild with
 the version store's 8.6 GB still in the file, compression then brings
 the whole database under 10 GB, and 128 GB is not needed.
+
+## The pricing source is a snapshot; the Apexus export (2026-11-05, developer: "we need to make sure the old table is made stale")
+
+The developer uploaded this quarter's pricing into
+`inbound/11052026/apexus/` and warned that the finance team reshapes
+the file between quarters. The file was not the analysts' workbook the
+spec was written for but the export Apexus itself produces, the PVP
+catalog quick download as a CSV: a title line and a download stamp
+above the header, eleven columns, 52,518 rows, the key
+(ndc, contract, effective date) unique across all of them, prices
+"$9.99" with a thousands comma, dates m/d/yyyy, 52,139 NDCs of eleven
+digits and 379 shorter, longer or alphanumeric codes, the same mix as
+the sheet. The half-hourly run refused it: the loader read the CSV
+with the sheet variant's four preamble lines, landed on a data row
+whose cells repeat, and raised the ambiguous-header error that
+`bind()` did not expect, so the run counted a refusal with no batch
+and will try again every half hour (a blob is seen once a batch exists
+for its content).
+
+Three changes, in the order they were needed. The loader now treats
+an ambiguous header under one variant's read settings as "not this
+variant" and probes the next; a file ambiguous under every variant
+ends as UNRECOGNISED with the detail, a refusal rather than a crash.
+The spec gained a second variant, `pvp_catalog_csv`, bound on four
+headers with two preamble lines; every one of its eleven columns maps
+onto a target the sheet variant already feeds (WAC and the AHFS class
+onto `wac_price` and `class_description`), so the two shapes share one
+table with no migration, and a later file supersedes the earlier row
+by row on the key whichever shape it has. And the source became a
+snapshot: `event_date: as_of`, `coverage: as_of`, `vanish: true`,
+fields the model had since D1 to D3 and no spec had used. A price list
+has no per-row date, every delivery speaks for the whole list as of
+its folder date, and a newer delivery keeps or corrects the rows it
+still carries and vanishes every current row it no longer carries, so
+the current rows are always exactly the newest file and the earlier
+quarters stay as history. That exposed a gap: both stores seeded the
+ledger's vanish candidates only through a coverage column, which a
+snapshot does not have, so the first replay vanished nothing. A
+snapshot row's date is its delivery's as-of, and the candidates are
+now seeded by `as_of` in the memory store and in the SQL
+(`c.as_of <= ?`), with a test on each.
+
+Replayed in memory over both deliveries, the May workbook then the
+CSV: 45,551 inserted; then 14,903 inserted, 37,615 corrected, 7,936
+vanished, 0 quarantined, and 37,615 + 7,936 = 45,551. Loaded from the
+laptop with the same numbers, the as-of from the dated folder; read
+back: 52,518 current rows, all as of 2026-11-05, 43,613 of them with a
+WAC price, 0 identities with two current rows, 7,936 rows superseded
+as `vanished` by the load's batch. The freshness alert on the source
+(163 days) clears at the next check. Image `e7a5161` carries the
+variant; until the developer moves the jobs to it the half-hourly run
+sees the blob as already committed and leaves it alone. The workbook
+variant stays for the day the analysts' file comes back.
+
+**The re-saved workbooks, and the read-only attribute.** Verification
+of the ABC source found three OneDrive files whose bytes no longer
+match the loaded ones: the ABC Jul-Sep 2026 workbook and two
+Wellpartner invoice workbooks, each re-saved by Excel on 2026-11-04
+while the developer had it open ("I didnt make any changes"). Compared
+through the memory store against the landed rows: the same lines in
+the same order, every cell identical in the Wellpartner pair, and in
+the ABC workbook 1,539 cells that differ only as text (a dropped ".00"
+on five number columns), 0 values changed. The warehouse holds what
+the vendor sent; only the local check stays red for those three until
+OneDrive's version history restores them. Azure never has this
+problem: the job reads the container, not OneDrive. On the developer's
+word every file under "Original Files" now carries the read-only
+attribute (97 files: 39 workbooks, 57 CSVs, one zip), so Excel opens
+them read-only and an edit has to go to a new file; a file added to
+the folder later arrives writable and gets the attribute with its
+load. Compression (above) is parked on the developer's word, the
+maximum size being 128 GB.

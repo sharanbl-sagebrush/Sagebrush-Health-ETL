@@ -34,7 +34,7 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   creates what is missing (since 2026-11-04 that includes a column a spec
   gained, added nullable to the live tables) and never alters a column, so
   a spec change to a table with rows is a decision about those rows first
-- 526 tests, no database required to run them
+- 533 tests, no database required to run them
 - Decided 2026-10-16: the two `voidsign` keys are applied; design defaults
   D1-D11 are recorded in `docs/decision-record.md` and reviewed one source
   at a time in the layer-walk load order, McKesson Purchasing Detail first
@@ -205,7 +205,29 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   measured in `docs/decision-record.md`, "Where the bytes go": page
   compression would take Monthly Payments from 14.4 GB to 5.3,
   columnstore on `landed` further, and the retired rows a rebuild keeps
-  are the real multiplier
+  are the real multiplier. Compression is parked for now on the
+  developer's word, the size being 128 GB
+- 2026-11-05: **the pricing source is a snapshot, and reads Apexus's
+  own export.** The developer uploaded this quarter's prices as the
+  CSV Apexus exports (`inbound/11052026/apexus/`, 52,518 rows, the key
+  unique) rather than the analysts' workbook, with the instruction
+  that the old quarter must go stale. The spec gained a second variant
+  for the export (every column onto a target the sheet already feeds),
+  `event_date: as_of`, `coverage: as_of` and `vanish: true`, and both
+  stores learned to seed a snapshot's vanish candidates by `as_of`
+  (before, only a coverage column could, so a snapshot vanished
+  nothing); an ambiguous header under one variant's read settings now
+  means "not this variant" instead of a crash. Loaded from the laptop
+  after an in-memory replay said the same: 14,903 inserted, 37,615
+  corrected, 7,936 vanished, 0 quarantined; the current pricing rows
+  are exactly the new file, 52,518 as of 2026-11-05. Same day: the
+  three task-4 rebuilds read back clean, the Monthly Payments rebuild
+  started on the 128 GB file, both jobs moved to e978868 on the
+  developer's word, image e7a5161 (the pricing variant) built and
+  waiting for the developer to move them again, and every file under
+  the OneDrive "Original Files" folder is read-only, after three
+  workbooks were re-saved by Excel while open (same data, different
+  bytes; `docs/decision-record.md`, "The pricing source is a snapshot")
 
 ## Rules that came from real defects
 
