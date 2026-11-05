@@ -1446,5 +1446,10 @@ and stays out of tempdb's catalog.
 
 With this, every rebuild queued since D18 was built is in Azure: the
 Monthly Payments key, the sixteen added columns, the ABC key, the
-Curve money columns. The scheduled jobs still run e978868; image
-e7a5161 with the pricing variant waits for the developer to move them.
+Curve money columns. The same evening the developer said "Go ahead
+and move the images yourself", and both jobs now run e7a5161, the
+image with the pricing variant. The registry holds eight tags, one per
+commit that was built (plus a stale `latest` from 2026-10-23), 723 MB
+in all against the Basic tier's 10 GB; a tag is kept so any one-off
+execution can name the exact code it ran on, and the older ones can be
+deleted whenever that record is no longer wanted.

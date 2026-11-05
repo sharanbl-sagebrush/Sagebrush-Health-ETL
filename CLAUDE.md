@@ -239,7 +239,9 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   retired rows and of `typed` to the cent (194,205,717.26 and
   1,106,575,137.32). Every D18 rebuild queued since 2026-11-04 is now
   in Azure; `docs/decision-record.md`, "The Monthly Payments rebuild
-  lands". Still with the developer: moving both jobs to e7a5161
+  lands". Both jobs moved to e7a5161 the same evening on the
+  developer's word ("Go ahead and move the images yourself"), so the
+  half-hourly run reads the Apexus CSV shape from here on
 
 ## Rules that came from real defects
 
