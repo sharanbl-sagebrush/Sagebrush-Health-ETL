@@ -138,12 +138,10 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   says 41 files, 1,309,804 lines, 0 rehashed, 1,309,804 retired and
   1,309,804 inserted, exactly the prediction. The apply waits for the
   developer's go and runs in Azure as a one-off job execution
-  (`scripts/job.sh rebuild <key>`). Still queued: the three Curve money
-  columns typed as text (a column type change also needs the table
-  column altered, not yet a migration rule; wanted since 2026-11-04 for
-  the financial reconciliation), one key question answered without the
-  vendor (ABC, below) and one that turned out to be a vendor duplicate
-  (Wellpartner, below). Same day: **the alert
+  (`scripts/job.sh rebuild <key>`). Queued then: the three Curve money
+  columns typed as text (done the same night, below), one key question
+  answered without the vendor (ABC, below) and one that turned out to be
+  a vendor duplicate (Wellpartner, below). Same day: **the alert
   mail is laid out for people** (`observe/notify.py`): the same
   findings as HTML, one card per finding with a plain label ("Stale
   source", "New vendor columns"), alerts before notes, vendor columns
@@ -175,6 +173,39 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   layers and a rebuild keeps every retired row, so the quota has to
   grow before the next attempt, an Azure change for the developer
   (`docs/decision-record.md`, "The ABC item number joins the key")
+- 2026-11-04, late: **a column type change is the rebuild's job**
+  (developer: "Update the curve money column first"). The migration
+  never alters a live column, and the 398,440 stored Curve money values
+  would not convert in SQL without a second parser, so the rebuild now
+  compares the live type of every business column with the spec's,
+  nulls and alters the ones that differ in `typed` and `curated`,
+  replaces typed from landed as before, and refills every curated row,
+  history included, from the rebuilt typed row of its own line (a row
+  with no typed line refuses the source). `totpmt`, `totadj` and
+  `totref` are currency in the spec; the plan from the laptop: 7 files,
+  398,440 lines all rehashed, three columns retyped, 280,707 live rows
+  retired and reinserted, 389,897 curated rows refilled. The first
+  apply in Azure failed on the size quota again (nothing written): the
+  data file was at its 32 GB with 23.9 GB in tables and 8.6 GB still
+  held by the persistent version store of the aborted Monthly Payments
+  rebuild. **The developer raised the maximum size to 128 GB** ("We can
+  increase the db size since its only 14.72 dollars"), and the three
+  task-4 rebuilds then ran overnight on image e978868 as one execution:
+  appointments 369,404 lines, 358,891 retired and inserted (25 min);
+  services 398,440 lines, 280,707 retired and inserted, 389,897 rows
+  refilled, the three columns now DECIMAL(38,4) in the catalog (91
+  min); PRxP 9,695 lines, 7,692 retired and inserted (44 s). Read back
+  2026-11-05: typed rows equal the lines, 0 identities with two current
+  rows, and the three money totals of the current rows equal those of
+  the retired ones to the cent. **The Monthly Payments rebuild started
+  2026-11-05 16:53 UTC** on the enlarged file. The scheduled jobs still
+  run c325653: the assistant's `az containerapp job update` was refused
+  as a production deploy, so the developer moves them
+  (`deploy/README.md`) before the next upload. The storage question is
+  measured in `docs/decision-record.md`, "Where the bytes go": page
+  compression would take Monthly Payments from 14.4 GB to 5.3,
+  columnstore on `landed` further, and the retired rows a rebuild keeps
+  are the real multiplier
 
 ## Rules that came from real defects
 

@@ -514,11 +514,13 @@ supersedes the other. Services is the charge, Payments is what happened to
 it. Reconciliation takes charges and fees from Services and cash, by
 transaction, from Payments, and never sums `fee` across Payments rows.
 
-One spec consequence. The Services spec types `totpmt`, `totadj` and `totref`
-as text; the values are money in the vendor's own formatting (`$999.99`,
-parenthesised negatives, 70 of them). They should be currency. That is a
-typing change on a loaded source, which is the D18 case the decision record
-describes, so it waits for D18; the comparison above cast them in SQL.
+One spec consequence. The Services spec typed `totpmt`, `totadj` and
+`totref` as text; the values are money in the vendor's own formatting
+(`$999.99`, parenthesised negatives). Since 2026-11-04 they are currency in
+the spec, and the loaded rows are retyped by a rebuild that alters the live
+columns and refills every curated row from the replay (the decision record,
+"A column type change is the rebuild's"); the comparison above cast them in
+SQL before that.
 
 ## 18. WeInfuse administrations line up with Curve service lines on patient number, date and HCPCS
 
@@ -643,8 +645,9 @@ that differ between the rows were compared in memory (names only):
 
 **Typing.** The replay of every source from the landed layer under the
 current specs changes nothing (0 of 3,044,698 lines). One typing defect
-is known and waits for D18: Curve Monthly Services' `totpmt`, `totadj`
-and `totref` are text and should be currency (finding 17).
+was known and waited for D18: Curve Monthly Services' `totpmt`, `totadj`
+and `totref` were text and should be currency (finding 17); the spec says
+currency since 2026-11-04 and the rebuild carries it to the loaded rows.
 
 ## Open questions
 

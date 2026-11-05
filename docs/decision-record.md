@@ -968,8 +968,8 @@ developer's go.
 
 Known gaps. A column type change (the three Curve money columns) also
 needs the typed and curated table columns altered from text to decimal,
-which the migration does not do; that is the next rule to add, with
-the conversion run after the rebuild has written parsable text. The
+which the migration does not do; that became the rebuild's job the same
+night ("A column type change is the rebuild's", below). The
 natural-key index `ix_curated_<source>_key` is guarded by name and so
 keeps its old column list after a key change; it serves people's
 queries, not the rule, and is left for a later migration pass.
@@ -1140,3 +1140,178 @@ two other paths, a rebuild that writes in committed pieces or a
 curated row that carries less (the identity and row hashes are 64
 characters each, and every vendor column is repeated across three
 layers), are design questions for after the ETL is signed off.
+
+## A column type change is the rebuild's; the Curve money columns (2026-11-04, night, developer: "Update the curve money column first")
+
+`totpmt`, `totadj` and `totref` of Curve Monthly Services were typed as
+text and are wanted as money for the financial reconciliation (finding
+17). Every one of the 398,440 stored values is a dollar amount in the
+parser's own vocabulary: a dollar sign, a thousands comma above 999,
+accounting parentheses on the credits (190 to 1,031 per column), four
+shapes in all. The migration cannot make the change: it never alters a
+live column, and `ALTER COLUMN` from text to decimal would fail on the
+first "$1.00", while a conversion written in SQL would be a second
+parser, which is how the parenthesised-negative defect happened the
+first time.
+
+So the rebuild does it, from `landed`, with the one parser. Before the
+first file is typed again it reads the live type of every business
+column of `typed` and `curated` from the catalog (`sys.columns`,
+spelled as the DDL spells it) and compares it with the spec's; every
+column that differs is nulled on the tenant's rows and altered to the
+spec's type; the typed rows are then replaced as before, so they carry
+the parsed values; and before the reconciliation every curated row of
+the source, current or history, takes those columns from the rebuilt
+typed row of its own line. A history row keeps the row hash it was
+recorded with, which named its values under the rule of its day; its
+business columns are what the current rule makes of the same landed
+line, as in every layer above `landed`. A curated row with no typed
+line to refill from, or a spec column the live table lacks, refuses the
+source whole. The plan reports the columns it would retype and the rows
+it would refill and alters nothing. The memory store records each
+source's column types at its first write, so the same path runs in the
+tests: five new, 531 in all.
+
+The plan from the laptop (607 s, the landed rows crossing the country):
+7 files, 398,440 lines, 398,440 rehashed; retyping `totpmt`, `totadj`,
+`totref` NVARCHAR(1000) to DECIMAL(38,4); curated kept 0, retired
+280,707, inserted 280,707, history refilled 389,897, no orphan. The
+migration had run first and added the sixteen claimed columns to the
+live tables (task 4), which the replay needs to read.
+
+**The apply in Azure failed on the size quota, again.** Image
+`e978868` was built in the registry, but the assistant's
+`az containerapp job update` was refused by the auto-mode classifier
+as a production deploy, so the launcher gained `--image` and execution
+`sbh-acquire-6mgvzlp` ran the three task-4 rebuilds (Curve
+appointments, Curve services, PRxP) on the new image while the jobs
+stayed on `c325653`. It failed seven minutes in, inside the typed
+replacement of the second Curve appointments file, with the same error
+40544. The file is the reason: `data_0` is 32,768 MB allocated and
+32,764 MB used, the layered tables hold 23,862 MB, and the internal
+table `persistent_version_store` holds 8,615 MB, the versions of the
+first aborted Monthly Payments rebuild. The DMV that reports the
+version store said 0 KB and no off-row cleaner run had ever started
+(its start time null), while in-row `cleanupPage` transactions ran: a
+count of Monthly Payments typed rows through its 221 MB hash index did
+not return in 900 s, `sp_persistent_version_cleanup` did not return in
+600 s, and a second call without a timeout was cut when the size change
+below reset the connections. Nothing was written; the transaction
+rolled back; the run row of the first killed execution was closed as
+INTERRUPTED the next day.
+
+**The developer raised the maximum size to 128 GB** the same evening
+("We can increase the db size since its only 14.72 dollars"), the one
+Azure change of the night taken on their word: `az sql db update
+--max-size 128GB`, online, same tier. The three rebuilds then ran as
+execution `sbh-acquire-39s8ovo` on image `e978868`, 23:52 to 01:49
+UTC:
+
+| Source | Files, lines | Rehashed | Retired = inserted | Refilled | Time |
+|---|---|---|---|---|---|
+| ehr.curve.appointments | 7, 369,404 | 369,404 | 358,891 | | 1,524 s |
+| ehr.curve.monthly_services | 7, 398,440 | 398,440 | 280,707 | 389,897 | 5,457 s |
+| tpa.prxp.transactions | 6, 9,695 | 9,695 | 7,692 | | 44 s |
+
+Read back on 2026-11-05: in each source the typed rows equal the lines,
+every typed row carries the one new digest, the retired rows equal the
+inserted ones, and no identity has two current rows. In Curve services
+the three columns are DECIMAL(38,4) in the catalog, no row of 670,604
+has a null payment, 212 typed payments are negative (the parentheses),
+and the totals of the current rows equal those of the retired ones to
+the cent: `totpmt` 63,103,401.73, `totadj` 141,366,408.16, `totref`
+-46,761.40. After the executions the file was 44,992 MB allocated and
+25,149 used; the version store had gone with the rollback's versions.
+The Monthly Payments rebuild (`transtype` in the key) started at 16:53
+UTC on 2026-11-05 as its own execution, with the four hours to itself.
+
+**Wellpartner, two questions answered the same night.** "What if we
+keep all lines as identity?" means a keyless spec, every column in the
+identity. The two rows of each pair would then be two identities and
+both would still be in the ledger, so nothing is gained, and two things
+are lost: the duplicate finding that marks them today (occurrence 2 of
+one key, in `stg.duplicate_finding`) and corrections, since under a
+keyless identity a changed row is a new row and the old one only goes
+when a newer delivery's coverage vanishes it. The keyless specs are the
+five denormalised reports that have no line identity at all; an
+invoice line has one. The key stays. "We must have cleaned those
+spaces?" Yes: `parse_text` trims every value, and the typed entity
+names of all twenty rows equal the landed ones and carry no leading or
+trailing space. The one extra character is interior, a space before the
+closing parenthesis, which no trim touches and which a collapse of
+interior whitespace would have to be a deliberate rule, since it would
+alter every value that legitimately has two spaces in it. The
+follow-up, "if we keep all the columns as identity, technically there
+should be only 1 row?": no, two either way. The rows differ by that
+character, so under a keyless identity they are two identities and
+both current, with no finding; and even byte-identical rows do not
+collapse under the one rule, they are numbered occurrence 1 and 2 and
+both kept, because dedup never decides that a line the vendor sent
+twice is one event (the McKesson split shipments, the 8,100 identical
+Allscripts rows). One counted row is a reconciliation rule for this
+source, excluding occurrence 2 of a pair, or a quarantine by hand,
+until Wellpartner answers.
+
+## Where the bytes go, and the storage question (2026-11-04, night)
+
+Developer: "Give me some suggestions to save the storage since the
+monthly payments will always be a big file and we cant keep on
+increasing the db storage". Measured on the live database, with the
+database's own compression estimator (`sp_estimate_data_compression_savings`,
+a sample, no row written).
+
+The layered tables are 23.9 GB. Monthly Payments is 14.4 of them:
+landed 3.4 GB, typed 3.7, curated 7.6 (6.2 the table, 1.4 its four
+indexes), 1,309,804 rows in each layer. A curated row averages 2,486
+bytes over 132 columns, 101 of them NVARCHAR(1000) holding the
+vendor's text; the clustered index pages are 60% full and the hash,
+identity and key indexes 96% to 99% fragmented, the ordinary state of
+B-trees filled in hash order. The source grows by one file a month of
+22,000 to 38,000 lines (41 files, 2023-04 to 2026-11, 116 to 68,206
+lines each, 31,946 on average): about 0.4 GB a month across the three
+layers at today's row shape. The multiplier is not the monthly file;
+it is a rebuild, which keeps every retired row beside its replacement
+and so adds the whole curated layer, 7.6 GB, each time the key or the
+hash of this source changes.
+
+What the estimator says a compression setting would do to the three
+Monthly Payments tables:
+
+| Table | Now | ROW | PAGE | COLUMNSTORE |
+|---|---|---|---|---|
+| landed | 3,400 MB | 3,364 | 1,590 | 232 |
+| typed (table) | 3,511 MB | 1,848 | 865 | 363 |
+| curated (table) | 6,197 MB | 3,462 | 1,817 | 825 |
+| curated indexes | 1,398 MB | 1,194 | 1,002 | 664 |
+
+Page compression alone takes the source from 14.4 GB to about 5.3, with
+no change to the model or the code: the tables are rebuilt in place
+with `DATA_COMPRESSION = PAGE`, which the migration can carry as a rule
+for every layered table. Columnstore fits `landed` exactly, an
+append-only layer read whole by replays and never updated: 3.4 GB to
+0.23. `typed` and `curated` take updates (the replacement per file, the
+retire) that a columnstore handles through a delta store and that page
+compression handles with nothing to learn, so page compression there.
+Both are Azure changes that need free space while a table is rebuilt,
+so they come after the quota question, smallest tables first. Beyond
+compression, two design options for the developer: a rebuild that
+rewrites the live curated rows in place instead of retiring them (the
+replay is deterministic from `landed` under a spec that git holds, so
+the `retyped` history duplicates what landed and git already record;
+this gives up the before-and-after on the row and would be the end of
+the 7.6 GB per pass), and a curated row that carries only the ledger
+columns and takes its business values from `typed` by (file, line)
+through views, which halves the source again and is a larger change to
+the readers and the rebuild's insert. The hash columns as BINARY(32)
+instead of CHAR(64) save 64 bytes a row, under 200 MB here, and are not
+worth a migration on their own.
+
+The price, West US 3 retail (`prices.azure.com`, 2026-11-04): General
+Purpose data storage is $0.115 per GB-month, billed on the maximum size
+configured, not on the bytes used, so 32 GB is $3.68 a month, 64 GB
+$7.36 and 128 GB $14.72, plus point-in-time backup storage at $0.20 per
+GB-month (geo-redundant, as configured) beyond the allowance Azure
+includes with the database. The compute is unchanged at 2 vCores. The
+assistant's reading: 64 GB is enough to run every queued rebuild with
+the version store's 8.6 GB still in the file, compression then brings
+the whole database under 10 GB, and 128 GB is not needed.

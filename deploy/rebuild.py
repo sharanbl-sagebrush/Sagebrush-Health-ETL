@@ -13,6 +13,8 @@ killed). This reads them from the job and passes them back, changing
 only the command: ``sh scripts/job.sh rebuild-plan <keys>`` or ``rebuild <keys>``.
 The scheduled executions are untouched.
 
+``--image <tag>`` runs an image the scheduled jobs have not been moved to
+yet (the registry's tag is the commit), leaving the jobs as they are.
 ``--wait`` polls the execution until it ends and prints its log. The
 exit code is 1 when the execution did not succeed. Needs ``az`` signed
 in with rights on the resource group; nothing here touches the database
@@ -52,6 +54,12 @@ def main() -> int:
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--job", default=JOB)
     parser.add_argument("--resource-group", default=RG)
+    parser.add_argument(
+        "--image",
+        help="run this image instead of the job's own: a tag such as e978868, or a full "
+        "reference. For a rebuild whose spec change is in a commit the scheduled jobs have "
+        "not been moved to yet; the jobs themselves are untouched",
+    )
     args = parser.parse_args()
 
     container = json.loads(
@@ -64,16 +72,19 @@ def main() -> int:
             env.append(f"{e['name']}=secretref:{e['secretRef']}")
         else:
             env.append(f"{e['name']}={e.get('value', '')}")
+    image = container["image"]
+    if args.image:
+        image = args.image if "/" in args.image else image.rsplit(":", 1)[0] + ":" + args.image
     mode = "rebuild" if args.apply else "rebuild-plan"
     command = ["sh", "scripts/job.sh", mode, *args.keys]
-    print(f"starting {mode} of {', '.join(args.keys)} on {container['image']}")
+    print(f"starting {mode} of {', '.join(args.keys)} on {image}")
     # The override also resets the resources to the platform default
     # (0.5 CPU, 1 GiB; the second attempt was killed for memory), so the
     # job's own come along.
     resources = container.get("resources") or {}
     name = az(
         "containerapp", "job", "start", "-n", args.job, "-g", args.resource_group,
-        "--image", container["image"], "--command", *command, "--env-vars", *env,
+        "--image", image, "--command", *command, "--env-vars", *env,
         "--cpu", str(resources.get("cpu", 4)), "--memory", str(resources.get("memory", "8Gi")),
         "--query", "name", "-o", "tsv",
     ).strip()  # fmt: skip

@@ -34,7 +34,15 @@ has been rebuilt from the commit that carries the spec change
 ```
 python deploy/rebuild.py finance.monthly_payments                # plan, writes nothing
 python deploy/rebuild.py finance.monthly_payments --apply --wait # write, print the log
+python deploy/rebuild.py <key> --image e978868 --apply --wait    # on an image the jobs are not on yet
 ```
+
+`--image` takes the registry tag, which is the commit; it runs that
+image for the one execution and leaves the scheduled jobs on theirs.
+Moving the jobs themselves is `deploy/deploy.sh --no-build` after the
+image is built, or one `az containerapp job update --image` per job;
+until then the half-hourly acquire run types files with the specs of
+the image it runs.
 
 The launcher reads the job's image and environment and passes them back
 with the new command, because a start with a command override replaces

@@ -186,7 +186,7 @@ credit rows. Each note says which column to count.
 | dispense.weinfuse.buybill | type `date` as date with ISO then US formats |
 | dispense.weinfuse.administered | fix the filename pattern lookahead (it matches BuyBill files); split `Created Date` from `Created At` |
 | dispense.weinfuse.patients | rebind `Created Date` to a new `created_date` target |
-| ehr.curve.monthly_services | currency on totpmt/totadj/totref, boolean on isvoided, integer on voidsign/encounter; notes say five Textbox columns, there are eight |
+| ehr.curve.monthly_services | currency on totpmt/totadj/totref done 2026-11-04 (a rebuild applies it); still open: boolean on isvoided, integer on voidsign/encounter; notes say five Textbox columns, there are eight |
 | ehr.athena.eligibility | the `Feb042026` file is a different report (title lacks "Active"); exclude or add a variant |
 | wholesaler.cardinal.invoice | three wrong comments ("covers the same period", "2024 to 2026 in full", NDC count) |
 | wholesaler.abc.purchases | done 2026-11-04: `abc` joined the key and the notes say why |
