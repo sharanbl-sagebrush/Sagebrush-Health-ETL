@@ -53,7 +53,7 @@ from sbh_data_bank.ingest.reader import (
 )
 from sbh_data_bank.ingest.reader import type_row as _type_row
 from sbh_data_bank.registry.binding import Binding, NoVariantMatchedError, bind
-from sbh_data_bank.registry.headers import HeaderIndex
+from sbh_data_bank.registry.headers import AmbiguousHeaderError, HeaderIndex
 from sbh_data_bank.registry.spec import FooterPolicy, PiiClass, SourceSpec
 from sbh_data_bank.transforms.ndc import NdcDirectory
 from sbh_data_bank.transforms.values import parse_currency
@@ -535,9 +535,12 @@ def load_file(
         try:
             # bind() runs every variant's detector against the header, not
             # just this one's - so the header read with variant A's settings
-            # may legitimately bind to variant B.
+            # may legitimately bind to variant B. An ambiguous header is a
+            # row that is not the header under these read settings (the
+            # Apexus CSV read with the sheet variant's four preamble lines
+            # gives a data row, 2026-11-05): not this variant either.
             binding = bind(spec, HeaderIndex(header))
-        except NoVariantMatchedError as exc:
+        except (NoVariantMatchedError, AmbiguousHeaderError) as exc:
             last_error = str(exc)
             continue
         attempts.append((binding, rows, tuple(header)))

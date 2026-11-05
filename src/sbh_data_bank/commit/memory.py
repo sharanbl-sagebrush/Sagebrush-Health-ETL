@@ -160,7 +160,11 @@ class MemoryStore:
                 continue
             key = (row["identity_hash"], row["occurrence"])
             in_window = False
-            if query.coverage is not None and query.coverage_column is not None:
+            if query.coverage is not None and query.snapshot_as_of_is_event_date:
+                # A snapshot row's date is its delivery's as-of (2026-11-05:
+                # the pricing list), so the window is on as_of.
+                in_window = query.coverage.covers(row["as_of"])
+            elif query.coverage is not None and query.coverage_column is not None:
                 day = row.get(query.coverage_column)
                 in_window = isinstance(day, date) and query.coverage.covers(day)
             if key not in query.keys and not in_window:

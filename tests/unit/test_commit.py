@@ -285,6 +285,38 @@ class TestVanish:
         assert (gone["id"], gone["superseded_by"]) == ("B", feb.batch_id)
         assert store.batches[feb.batch_id].rows_vanished == 1
 
+    def test_a_snapshot_vanishes_every_row_a_newer_file_no_longer_carries(self, tmp_path):
+        """A price list (``event_date: as_of``) has no per-row date: every
+        delivery speaks for the whole list as of its folder date, so the
+        rows it still carries are kept or corrected and every older current
+        row it lacks is vanished. The current rows are then exactly the
+        newest file (2026-11-05, the Apexus catalog)."""
+        snapshot = _spec(event_date="as_of", coverage="as_of", vanish=True, vanish_scope=[])
+        store = MemoryStore()
+        engine = _engine(store)
+        first = _commit(
+            engine,
+            snapshot,
+            _write(tmp_path / "inbound" / "11012026", "prices.csv", A_X, B_X),
+            tmp_path,
+        )
+        second = _commit(
+            engine,
+            snapshot,
+            _write(tmp_path / "inbound" / "11052026", "prices.csv", A_X, C_Y),
+            tmp_path,
+        )
+
+        assert (first.outcomes.inserted, first.outcomes.vanished) == (2, 0)
+        assert (second.outcomes.unchanged, second.outcomes.inserted, second.outcomes.vanished) == (
+            1, 1, 1,
+        )  # fmt: skip
+        assert sorted(r["id"] for r in store.live(snapshot.key)) == ["A", "C"]
+        (gone,) = [r for r in store.curated[snapshot.key] if r["supersede_reason"] == "vanished"]
+        assert (gone["id"], gone["superseded_by"], gone["as_of"]) == (
+            "B", second.batch_id, date(2026, 11, 1),
+        )  # fmt: skip
+
     def test_a_row_outside_the_window_survives(self, tmp_path, spec):
         store = MemoryStore()
         engine = _engine(store)
@@ -541,6 +573,20 @@ class TestSqlStore:
         assert "c.[event] >= ? AND c.[event] <= ?" in sql
         assert params == [date(2026, 1, 1), date(2026, 1, 31)]
         assert sql.split(" FROM ")[0].endswith("c.as_of, c.[event], c.[account], c.[amount]")
+
+    def test_a_snapshot_query_windows_on_the_as_of(self, spec):
+        query = CurrentQuery(
+            keys=frozenset({("h", 1)}),
+            coverage=Coverage(None, date(2026, 11, 5), CoverageSource.AS_OF),
+            coverage_column=None,
+            event_column=None,
+            scope_columns=(),
+            control_columns=(),
+            snapshot_as_of_is_event_date=True,
+        )
+        sql, params = current_rows_sql(spec, query)
+        assert sql.endswith("OR (c.as_of <= ?))")
+        assert params == [date(2026, 11, 5)]
 
     def test_one_commit_runs_the_expected_statements(self, tmp_path):
         spec = _spec(max_quarantine_rate=0.5)  # one of the three rows below is bad

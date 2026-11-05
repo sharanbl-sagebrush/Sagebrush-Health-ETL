@@ -32,18 +32,43 @@
 # quarter's prices were put in. A dated upload folder takes precedence
 # (D5), and is what the quarterly upload should use.
 #
-# No event date: a price list is a snapshot, and a later quarter's file
-# supersedes row by row on the key. expected_cadence_days is a quarter
-# plus a week of slack.
+# A snapshot (event_date: as_of, coverage: as_of, vanish: true since
+# 2026-11-05, developer: "we need to make sure the old table is made stale
+# ... the pricing changes every quarter and we cant use the old data"): a
+# price list has no per-row date, every delivery speaks for the whole
+# list as of its date, and a newer delivery supersedes the rows it still
+# carries (corrected or unchanged, row by row on the key) and vanishes
+# every current row it no longer carries. So the current rows are always
+# exactly the newest file, and the earlier quarters stay as history.
+# expected_cadence_days is a quarter plus a week of slack.
+#
+# Second shape, 2026-11-05: the catalog as Apexus exports it, a CSV
+# ("... Apexus Pricing File(PVP_catalog_quickdownload).csv") uploaded by
+# the developer into a dated folder, before the analysts add their
+# columns. Probed on the file, counts only: a title line and a download
+# stamp above the header, 11 columns, 52,518 rows, the key unique across
+# all of them, 52,139 NDCs of 11 digits and 379 shorter, longer or
+# alphanumeric codes (the same mix as the sheet, the same reason ndc is
+# text). Prices are "$9.99" with a thousands comma, dates m/d/yyyy, the
+# contract number blank on 42,781 rows. Every column maps onto a target
+# the sheet already feeds (WAC and the AHFS class onto wac_price and
+# class_description), so the two shapes share one table and a later
+# file supersedes the earlier row by row on the key whichever shape it
+# has. The developer warns that the finance team reshapes the file
+# between quarters; the detector binds on four headers and a new column
+# is a warning, not a refusal.
 
 key: reference.apexus.pricing
 name: Apexus 340B pricing workbook
 vendor: Apexus (via the Sagebrush pricing workbook)
 group: Reference
-catalog_names: ["Pricing file (LIVE)"]
+catalog_names: ["Pricing file (LIVE)", "Apexus Pricing File (PVP catalog quick download)"]
 lifecycle: active
 expected_cadence_days: 98
 as_of_source: xlsx_modified
+event_date: as_of
+coverage: as_of
+vanish: true
 filename_patterns:
   - "pricing.*file"
   - "apexus"
@@ -195,4 +220,55 @@ variants:
         type: text
       - target: check
         sources: ["check"]
+        type: text
+
+  # The vendor's own export (2026-11-05, header note): the price list
+  # before the analysts' columns, in a CSV with two title lines.
+  - name: pvp_catalog_csv
+    description: >
+      The Apexus PVP catalog quick download as a CSV: a title line and a
+      download stamp above the header, then eleven columns of the price
+      list itself, without the analysts' matching, grouping and margin
+      columns.
+    detect:
+      require_all: ["Internal PVP Contract Number", "NDC/Item #", "340B Selling Price", "PVP Contracted Price - 340B Account"]
+    read:
+      preamble_lines: 2
+    columns:
+      - target: internal_pvp_contract_number
+        sources: ["Internal PVP Contract Number"]
+        type: text
+      - target: manufacturer
+        sources: ["Manufacturer"]
+        type: text
+      - target: ndc
+        sources: ["NDC/Item #"]
+        type: text
+        required: true
+        description: NDC or product code as the export carries it; see the header note.
+      - target: label_name
+        sources: ["Label Name"]
+        type: text
+      - target: pkg_qty_description
+        sources: ["Package Quantity Description"]
+        type: text
+      - target: sell_price_340b
+        sources: ["340B Selling Price"]
+        type: currency
+      - target: pvp_contracted_price
+        sources: ["PVP Contracted Price - 340B Account"]
+        type: currency
+      - target: pvp_contracted_eff_date
+        sources: ["PVP Contracted Price Eff Date - 340B Account"]
+        type: date
+        date_formats: ["%m/%d/%Y"]
+      - target: pvp_contracted_exp_date
+        sources: ["PVP Contracted Price Exp Date - 340B Account"]
+        type: date
+        date_formats: ["%m/%d/%Y"]
+      - target: wac_price
+        sources: ["WAC Price"]
+        type: currency
+      - target: class_description
+        sources: ["AHFS Therapeutic Class Description"]
         type: text

@@ -267,8 +267,16 @@ def current_rows_sql(spec: SourceSpec, query: CurrentQuery) -> tuple[str, list[A
         "EXISTS (SELECT 1 FROM #incoming AS i WHERE i.identity_hash = c.identity_hash "
         "AND i.occurrence = c.occurrence)"
     )
-    if query.coverage is not None and query.coverage_column is not None:
-        column = f"c.{_quote(query.coverage_column)}"
+    if query.coverage is not None and (
+        query.coverage_column is not None or query.snapshot_as_of_is_event_date
+    ):
+        # A snapshot row's date is its delivery's as-of, so its window is on
+        # as_of; any other source dates its rows by the coverage column.
+        column = (
+            "c.as_of"
+            if query.snapshot_as_of_is_event_date
+            else f"c.{_quote(query.coverage_column)}"
+        )
         window = f"{column} <= ?"
         params.append(query.coverage.end)
         if query.coverage.start is not None:
