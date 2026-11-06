@@ -1574,13 +1574,26 @@ refresh over the superseded, non-retyped rows, the count taken from
 the replay in the file loop so the plan reports what the apply writes
 (and the apply refuses if the two differ); the rows retired as
 ``retyped`` keep their old hash by design, as the previous generation.
-The 110,672 rows already in Azure were repaired with
-``scripts/refresh_hashes.py --apply`` on the developer's word ("Go
-ahead with the hashes"); it refuses if a live row were involved.
+The 110,672 rows already in Azure were repaired on the developer's
+word ("Go ahead with the hashes"); the repair script refuses if a live
+row were involved.
 
-The results table is in the next section once the run over all 21
-sources completes; Monthly Payments alone takes the better part of an
-hour of comparisons on the 2-vCore database.
+The same check then showed the hash was only half of it. PRxP's
+superseded rows had been refilled with the five newly claimed columns
+null, where the rebuilt typed line of the same file and line carried
+values (835 rows in ``primary_group_id``, 114 in
+``secondary_group_id``, 847 rows in all), because the refill copied
+only the columns whose *type* changed. A history row is still a row
+of its line, so the rebuild's history refresh now copies every
+business column with the hash (``commit/rebuild.py`` →
+``refresh_history``), and the plan predicts the count from the replay
+hashes. The first version of the one-time repair counted zero of the
+847: ``NOT (c = ty OR (both NULL))`` is unknown in SQL when one side is
+null, so the inequality is spelled out in three clauses. The 847 rows
+were repaired with ``scripts/refresh_history.py --apply`` on the
+developer's word ("Go ahead with item 1").
+
+The results table is in the next section.
 
 **The Cardinal summary is discontinued.** Jay answered the missing-file
 question: Cardinal had a summary report and removed it, and because
@@ -1598,3 +1611,67 @@ Review is the Cardinal purchase source. The spec change is recorded
 in ``meta.spec_check`` (3 files, 16,004 lines, 0 would change). Jay
 is to stop making the file, and the upload guide lists one Cardinal
 report.
+
+## The results, source by source (2026-11-06, night)
+
+The full run over the 21 sources took 83 minutes (19:13 to 20:36 UTC),
+Monthly Payments 47 of them. The table is from
+``docs/validation/verify_layers_2026-11-06.json``; the two failures
+are the engine's bookkeeping defect above, repaired and re-verified
+the same night (``verify_layers_2026-11-06_prxp.json`` and the re-run
+of the rebuilt sources). Landed equals typed on every source; the
+Cardinal and McKesson differences are the footer lines the specs skip,
+recorded as such on the batches. "Compared" is the current-generation
+rows (live, or superseded by the rule, not retired by a rebuild), on
+which the hash and every business column were held equal to the typed
+line.
+
+| Source | Landed | Typed | Current | Compared | Columns | First run |
+|---|---|---|---|---|---|---|
+| dispense.weinfuse.administered | 88,614 | 88,614 | 64,541 | 65,023 | 35 | pass |
+| dispense.weinfuse.buy_bill | 66,300 | 66,300 | 46,323 | 46,325 | 33 | pass |
+| dispense.weinfuse.patients | 3,916 | 3,916 | 2,223 | 2,813 | 57 | pass |
+| ehr.allscripts.erx | 255,869 | 255,869 | 171,647 | 171,647 | 21 | pass |
+| ehr.athena.eligibility | 119,292 | 119,292 | 25,188 | 27,076 | 10 | pass |
+| ehr.athena.encounters | 41,184 | 41,184 | 25,520 | 25,520 | 11 | pass |
+| ehr.athena.prescriptions | 65,494 | 65,494 | 48,296 | 48,296 | 20 | pass |
+| ehr.curve.appointments | 369,404 | 369,404 | 358,891 | 358,891 | 112 | pass |
+| ehr.curve.services | 398,440 | 398,440 | 280,707 | 389,897 | 114 | fail, hash; repaired, pass |
+| ehr.curve.monthly_payments | 1,309,804 | 1,309,804 | 1,309,804 | 1,309,804 | 115 | pass |
+| reference.apexus.pricing | 98,069 | 98,069 | 52,518 | 98,069 | 43 | pass |
+| reference.wholesaler.accounts | 247 | 247 | 247 | 247 | 8 | pass |
+| tpa.pharmaforce.claims | 255,178 | 255,178 | 218,509 | 219,272 | 65 | pass |
+| tpa.prxp.transactions | 9,695 | 9,695 | 7,692 | 9,174 | 97 | fail, values; repaired, pass |
+| tpa.wellpartner.claims | 51,090 | 51,090 | 46,024 | 50,013 | 119 | pass |
+| tpa.wellpartner.invoices | 10,554 | 10,554 | 8,900 | 8,900 | 10 | pass |
+| wholesaler.abc.purchases | 7,984 | 7,984 | 5,746 | 12,557 | 26 | pass |
+| wholesaler.cardinal.invoice_detail | 31,767 | 31,760 | 23,226 | 23,226 | 17 | pass |
+| wholesaler.cardinal.invoice_summary | 16,004 | 16,001 | 15,484 | 15,484 | 9 | pass |
+| wholesaler.mckesson.custom | 8,105 | 8,105 | 6,853 | 6,869 | 35 | pass |
+| wholesaler.mckesson.invoice | 9,516 | 9,509 | 7,902 | 7,921 | 44 | pass |
+
+Across the 21: 0 quarantined rows, 0 identities with two current rows,
+0 lines with two current-generation rows, 0 curated rows without a
+typed line, every numeric column's typed total equal to its
+current-generation total plus the total over the lines the rule wrote
+nothing for. The vendors' own repeats stay as numbered occurrences, as
+designed (Allscripts 9,857 identical rows; the Cardinal summary's
+1,300 invoice lines).
+
+One more thing the check had to learn, from PRxP's re-run. A rebuild
+writes the state the new rule makes current and retires the live rows
+it no longer produces as ``retyped``; what the new rule would have
+made history *inside* the replay is not written, by design (D18, the
+``commit/rebuild.py`` docstring). PRxP has 162 such lines: each is a
+line of the March 2026 file whose key the April file carries with a
+different hash under today's spec (the five claimed columns), so the
+replay corrected it, the rebuild retired its old live row, and no
+"corrected" version of it exists. The current rows are right and the
+line's previous generation is in the ledger with its old hash. The
+completeness check now counts such a line as made history by a newer
+delivery of the same identity (a current-generation row with the same
+key and a newer or equal as-of) and fails only a line no
+current-generation row accounts for in any of the three ways: its
+own row, its hash on another row, or its key on a newer one. The
+numbers are in the log under
+``unchanged_lines_a_rebuild_made_history_without_writing``.

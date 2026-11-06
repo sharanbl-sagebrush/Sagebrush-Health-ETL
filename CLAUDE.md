@@ -276,8 +276,14 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   place with the hash of the spec that wrote them, so 109,190 Curve
   services and 1,482 PRxP superseded rows carried a stale fingerprint.
   The rebuild now rehashes those rows, counted the same by the plan
-  and the apply; the rows already in Azure were repaired on the
-  developer's word (`scripts/refresh_hashes.py`). Same evening: Jay
+  and the apply, and copies every business column with the hash (PRxP
+  had 847 superseded rows refilled with its five new columns null);
+  the rows already in Azure were repaired on the developer's word
+  (`scripts/refresh_history.py`). What a rebuild would have made
+  history inside the replay (a line a newer delivery corrected) is not
+  written, by D18's design, and the check counts those lines
+  separately (PRxP 162). All 21 sources pass; the table is in the
+  decision record, "The results, source by source". Same evening: Jay
   answered that Cardinal no longer produces the "Cardinal_Invoice"
   summary report and had been making it by hand from the Invoice
   Review, so `wholesaler.cardinal.invoice_summary` is `discontinued`
@@ -468,7 +474,8 @@ specs/        21 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
               trace_file, commit_file, backfill, acquire, freshness, retype,
-              rebuild, close_runs, verify_load, verify_layers, drop_raw;
+              rebuild, close_runs, verify_load, verify_layers, refresh_history,
+              drop_raw;
               job.sh, the image's entry point
 ```
 
