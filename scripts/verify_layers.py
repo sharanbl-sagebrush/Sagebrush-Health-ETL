@@ -28,8 +28,13 @@ Checks, cheapest first, each reported per source:
 
 1. **lines**: landed lines = typed rows + quarantined + skipped, where
    skipped (blank and footer lines) is what the batches recorded
-2. **completeness**: typed lines with no curated row equal the unchanged
-   count the batches recorded; curated rows with no typed line are 0
+2. **completeness**: a typed line with no current-generation curated row
+   is unchanged (an earlier delivery already carried its identity and
+   content), and its content must then be on some current-generation
+   row; lines whose content is nowhere are loss. Without a rebuild the
+   count equals what the loads recorded; after one, the new rule may
+   count a line unchanged that the load did not, so the recorded count
+   is reported beside it. Curated rows with no typed line are 0
 3. **duplicates**: 0 identities with two current rows; 0 lines with two
    current-generation rows; the vendor's own repeats are reported as
    occurrences and findings, not failures
@@ -169,13 +174,29 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
         fail("lines", f"{n_quar} quarantined rows (no quarantine was expected on any source)")
 
     # --- 2. completeness between typed and curated ------------------------
-    (missing,) = _one(
+    # A typed line with no current-generation curated row is "unchanged":
+    # its identity and content were already current from an earlier
+    # delivery (the load counted it on the batch and wrote nothing, or a
+    # rebuild retired its old row and found the new rule produced none).
+    # The proof that nothing was lost is that its content exists on a
+    # current-generation row: same row hash, somewhere in curated.
+    no_current_gen = (
+        f"NOT EXISTS (SELECT 1 FROM {curated} c WHERE c.source_file_id = t.source_file_id "
+        f"AND c.line_number = t.line_number AND {CURRENT_GEN})"
+    )
+    (missing, unchanged, lost) = _one(
         cur,
-        f"SELECT COUNT(*) FROM {typed} t WHERE t.tenant_id = ? AND NOT EXISTS "
-        f"(SELECT 1 FROM {curated} c WHERE c.source_file_id = t.source_file_id "
-        f"AND c.line_number = t.line_number)",
+        f"SELECT SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM {curated} c "
+        f"WHERE c.source_file_id = t.source_file_id AND c.line_number = t.line_number) "
+        f"THEN 1 ELSE 0 END), "
+        f"SUM(CASE WHEN {no_current_gen} THEN 1 ELSE 0 END), "
+        f"SUM(CASE WHEN {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
+        f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
+        f"THEN 1 ELSE 0 END) "
+        f"FROM {typed} t WHERE t.tenant_id = ?",
         tenant,
     )
+    missing, unchanged, lost = int(missing or 0), int(unchanged or 0), int(lost or 0)
     (orphans,) = _one(
         cur,
         f"SELECT COUNT(*) FROM {curated} c WHERE c.tenant_id = ? AND NOT EXISTS "
@@ -195,7 +216,9 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
     )
     checks["completeness"] = {
         "typed_lines_without_curated_row": missing,
-        "unchanged_recorded": recorded["rows_unchanged"],
+        "typed_lines_unchanged": unchanged,
+        "unchanged_recorded_by_loads": recorded["rows_unchanged"],
+        "unchanged_lines_whose_content_is_on_no_current_generation_row": lost,
         "curated_rows_without_typed_line": orphans,
         "curated_rows": n_curated,
         "current": n_current,
@@ -204,20 +227,28 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
         "superseded_late": n_late,
         "retired_retyped": n_retyped,
     }
-    if missing != recorded["rows_unchanged"]:
+    if lost:
         sample = _rows(
             cur,
             f"SELECT TOP {SAMPLE} t.source_file_id, t.line_number FROM {typed} t "
-            f"WHERE t.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM {curated} c "
-            f"WHERE c.source_file_id = t.source_file_id AND c.line_number = t.line_number) "
+            f"WHERE t.tenant_id = ? AND {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
+            f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
             f"ORDER BY t.source_file_id, t.line_number",
             tenant,
         )
         fail(
             "completeness",
-            f"{missing} typed lines have no curated row; the batches recorded "
-            f"{recorded['rows_unchanged']} unchanged",
+            f"{lost} typed lines have no current-generation curated row and their content "
+            f"is on no other row either",
             sample,
+        )
+    if not rebuilt and missing != recorded["rows_unchanged"]:
+        # Without a rebuild the loads' own count is exact; after one, the
+        # new rule may count a line unchanged that the load did not.
+        fail(
+            "completeness",
+            f"{missing} typed lines have no curated row; the loads recorded "
+            f"{recorded['rows_unchanged']} unchanged",
         )
     if orphans:
         sample = _rows(
@@ -328,8 +359,7 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
             cur,
             "SELECT "
             + ", ".join(f"SUM(t.[{c}])" for c in numeric)
-            + f" FROM {typed} t WHERE t.tenant_id = ? AND NOT EXISTS (SELECT 1 FROM {curated} c "
-            f"WHERE c.source_file_id = t.source_file_id AND c.line_number = t.line_number)",
+            + f" FROM {typed} t WHERE t.tenant_id = ? AND {no_current_gen}",
             tenant,
         )
         sums_gen = _one(

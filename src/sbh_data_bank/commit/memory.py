@@ -484,17 +484,19 @@ class MemoryStore:
             for r in self._history_rows(spec, tenant_id)
         }
 
-    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext) -> int:
-        typed_hash = {
-            (r["source_file_id"], r["line_number"]): r["row_hash"]
+    def refresh_history(self, spec: SourceSpec, ctx: WriteContext) -> int:
+        typed_by_line = {
+            (r["source_file_id"], r["line_number"]): r
             for r in self.typed[spec.key]
             if r["tenant_id"] == ctx.tenant_id
         }
         written = 0
         for row in self._history_rows(spec, ctx.tenant_id):
-            new = typed_hash.get((row["source_file_id"], row["line_number"]))
-            if new is not None and row["row_hash"] != new:
-                row["row_hash"] = new
+            typed = typed_by_line.get((row["source_file_id"], row["line_number"]))
+            if typed is not None and row["row_hash"] != typed["row_hash"]:
+                for target in spec.landed_targets:
+                    row[target] = typed.get(target)
+                row["row_hash"] = typed["row_hash"]
                 written += 1
         return written
 

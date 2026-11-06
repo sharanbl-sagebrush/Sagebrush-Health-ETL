@@ -28,7 +28,7 @@ from sbh_data_bank.commit.sql import (
     orphan_sql,
     rebuilt_insert_sql,
     refill_sql,
-    refresh_hashes_sql,
+    refresh_history_sql,
     retire_sql,
     typed_delete_sql,
 )
@@ -366,13 +366,22 @@ class TestStatements:
             "UPDATE c SET c.[amount] = ty.[amount] FROM curated.t_vendor_report AS c "
             f"JOIN typed.t_vendor_report AS ty ON {line} WHERE c.tenant_id = ?"
         )
-        assert refresh_hashes_sql(spec, count_only=False) == (
-            "UPDATE c SET c.row_hash = ty.row_hash FROM curated.t_vendor_report AS c "
+        refresh = refresh_history_sql(spec, count_only=False)
+        assert refresh.startswith("UPDATE c SET c.[id] = ty.[id], ")
+        assert ", c.row_hash = ty.row_hash FROM curated.t_vendor_report AS c " in refresh
+        assert refresh.endswith(
             f"JOIN typed.t_vendor_report AS ty ON {line} WHERE c.tenant_id = ? "
-            "AND c.row_hash <> ty.row_hash AND c.superseded_by IS NOT NULL "
-            "AND c.supersede_reason <> 'retyped'"
+            "AND c.superseded_by IS NOT NULL AND c.supersede_reason <> 'retyped' "
+            "AND (c.row_hash <> ty.row_hash)"
         )
-        assert refresh_hashes_sql(spec, count_only=True).startswith("SELECT COUNT(*) FROM")
+        for target in spec.landed_targets:
+            assert f"c.[{target}] = ty.[{target}]" in refresh
+        assert refresh_history_sql(spec, count_only=True).startswith("SELECT COUNT(*) FROM")
+        wide = refresh_history_sql(spec, count_only=True, any_column=True)
+        assert (
+            "OR (c.[amount] <> ty.[amount] OR (c.[amount] IS NULL AND ty.[amount] IS NOT NULL) "
+            "OR (c.[amount] IS NOT NULL AND ty.[amount] IS NULL))"
+        ) in wide
         assert refill_sql(spec, [retype], count_only=True).startswith("SELECT COUNT(*) FROM")
         assert orphan_sql(spec) == (
             "SELECT COUNT(*) FROM curated.t_vendor_report AS c WHERE c.tenant_id = ? "

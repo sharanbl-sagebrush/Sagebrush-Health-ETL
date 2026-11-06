@@ -187,9 +187,10 @@ class RebuildStore(LayerReader, Protocol):
         in place (not retired as ``retyped``), by (file, line)."""
         ...
 
-    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext) -> int:
-        """Bring those rows' hashes in step with the typed rows now written
-        (the replay's). Returns how many changed."""
+    def refresh_history(self, spec: SourceSpec, ctx: WriteContext) -> int:
+        """Bring those of them whose hash differs from their typed line's
+        (the replay's, now written) in step: every business column and the
+        hash copied from typed. Returns how many changed."""
         ...
 
 
@@ -373,14 +374,16 @@ def rebuild_source(
             if retypes and apply:
                 store.refill_curated(spec, ctx, retypes, apply=True)
             # The reconcile rewrote the live rows; the history rows it left
-            # in place rehash too when a column joined the hash or changed
-            # type, and their fingerprint must stay true to their values.
+            # in place retype too when a column joined the spec or changed
+            # type, and rehash with it. They are brought to the new typed
+            # values and fingerprint, so every curated row of the current
+            # generation equals its typed line (scripts/verify_layers.py).
             result.rehashed_history = stale_history
             if apply:
-                written = store.refresh_hashes(spec, ctx)
+                written = store.refresh_history(spec, ctx)
                 if written != stale_history:
                     raise RebuildRefusedError(
-                        f"the hash refresh touched {written} history rows where the replay "
+                        f"the history refresh touched {written} rows where the replay "
                         f"counted {stale_history}"
                     )
             if apply:

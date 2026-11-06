@@ -532,26 +532,45 @@ def refill_sql(spec: SourceSpec, retypes: Sequence[ColumnRetype], *, count_only:
     return f"UPDATE c SET {sets} {join}"
 
 
-def refresh_hashes_sql(spec: SourceSpec, *, count_only: bool) -> str:
-    """Bring (or count) the tenant's superseded curated rows whose row hash
-    differs from their typed line's back in step, the rows a rebuild
-    retired as ``retyped`` excepted: those are the previous generation and
-    keep the fingerprint of the spec that wrote them. Parameter: the tenant.
+def _differs(column: str) -> str:
+    """Null-safe inequality of one business column between c and ty, spelt
+    out in three clauses: ``NOT (c = ty OR ...)`` is UNKNOWN, not true,
+    when one side is null, and a WHERE treats UNKNOWN as false."""
+    c, ty = f"c.{_quote(column)}", f"ty.{_quote(column)}"
+    return (
+        f"({c} <> {ty} OR ({c} IS NULL AND {ty} IS NOT NULL) OR ({c} IS NOT NULL AND {ty} IS NULL))"
+    )
 
-    Every line rehashes when a column joins the hash or changes type. The
-    reconcile settles the live rows (kept with an equal hash, or retired
-    and reinserted), so only the history rows it leaves in place can be
-    out of step, and limiting the statement to them is what makes the
-    plan's count equal the apply's (found missing 2026-11-06 by
-    ``scripts/verify_layers.py``)."""
+
+def refresh_history_sql(spec: SourceSpec, *, count_only: bool, any_column: bool = False) -> str:
+    """Bring (or count) the tenant's superseded curated rows that no longer
+    match their typed line back in step: every business column and the row
+    hash copied from typed. The rows a rebuild retired as ``retyped`` are
+    excepted; those are the previous generation and keep the values and
+    the fingerprint of the spec that wrote them. Parameter: the tenant.
+
+    Every line retypes when a column joins the spec or changes type, and
+    rehashes with it. The reconcile settles the live rows (kept with an
+    equal hash, or retired and reinserted), so only the history rows it
+    leaves in place can be out of step, and limiting the statement to
+    them is what makes the plan's count equal the apply's. The rebuild
+    selects by the hash alone, which the replay can predict; the one-time
+    repair script selects with ``any_column`` as well, for rows whose hash
+    was repaired before their values were (found 2026-11-06 by
+    ``scripts/verify_layers.py``: 109,190 Curve services and 1,482 PRxP
+    history rows)."""
+    condition = "c.row_hash <> ty.row_hash"
+    if any_column:
+        condition = " OR ".join([condition, *(_differs(t) for t in spec.landed_targets)])
     join = (
         f"FROM {table_name(spec, 'curated')} AS c JOIN {table_name(spec, 'typed')} AS ty "
-        f"ON {_TYPED_LINE} WHERE c.tenant_id = ? AND c.row_hash <> ty.row_hash "
-        f"AND c.superseded_by IS NOT NULL AND c.supersede_reason <> 'retyped'"
+        f"ON {_TYPED_LINE} WHERE c.tenant_id = ? AND c.superseded_by IS NOT NULL "
+        f"AND c.supersede_reason <> 'retyped' AND ({condition})"
     )
     if count_only:
         return f"SELECT COUNT(*) {join}"
-    return f"UPDATE c SET c.row_hash = ty.row_hash {join}"
+    sets = ", ".join(f"c.{_quote(t)} = ty.{_quote(t)}" for t in spec.landed_targets)
+    return f"UPDATE c SET {sets}, c.row_hash = ty.row_hash {join}"
 
 
 def history_hashes_sql(spec: SourceSpec) -> str:
@@ -908,9 +927,9 @@ class SqlStore:
         cursor.execute(history_hashes_sql(spec), tenant_id)
         return {(int(f), int(line)): h for f, line, h in cursor.fetchall()}
 
-    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext) -> int:
+    def refresh_history(self, spec: SourceSpec, ctx: WriteContext) -> int:
         cursor = self.cursor
-        cursor.execute(refresh_hashes_sql(spec, count_only=False), ctx.tenant_id)
+        cursor.execute(refresh_history_sql(spec, count_only=False), ctx.tenant_id)
         return int(cursor.rowcount)
 
     # ------------------------------------------------------------ curated
