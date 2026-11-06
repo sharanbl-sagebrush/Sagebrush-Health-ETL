@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from sbh_data_bank.commit.sql import refresh_hashes_sql  # noqa: E402
 from sbh_data_bank.registry.loader import SpecRegistry  # noqa: E402
 from sbh_data_bank.store.config import SqlSettings, load_env_file  # noqa: E402
 from sbh_data_bank.store.connection import Database  # noqa: E402
@@ -46,23 +47,25 @@ def main() -> int:
         for key in args.only:
             spec = registry.require(key)
             curated, typed = table_name(spec, "curated"), table_name(spec, "typed")
-            join = (
-                f"FROM {curated} AS c JOIN {typed} AS ty ON ty.source_file_id = c.source_file_id "
-                f"AND ty.line_number = c.line_number WHERE c.tenant_id = ? "
-                f"AND c.row_hash <> ty.row_hash"
-            )
+            cur.execute(refresh_hashes_sql(spec, count_only=True), settings.tenant)
+            (stale,) = cur.fetchone()
             cur.execute(
-                f"SELECT COUNT(*), SUM(CASE WHEN c.superseded_by IS NULL THEN 1 ELSE 0 END) {join}",
+                f"SELECT COUNT(*) FROM {curated} AS c JOIN {typed} AS ty "
+                f"ON ty.source_file_id = c.source_file_id AND ty.line_number = c.line_number "
+                f"WHERE c.tenant_id = ? AND c.superseded_by IS NULL AND c.row_hash <> ty.row_hash",
                 settings.tenant,
             )
-            stale, live = cur.fetchone()
+            (live,) = cur.fetchone()
             print(
-                f"{key}: {stale} curated rows hash differently from their typed line "
-                f"({live or 0} of them live)"
+                f"{key}: {stale} history rows hash differently from their typed line; "
+                f"{live} live rows do (must be 0)"
             )
+            if live:
+                print(f"{key}: REFUSED, a live row out of step is a rebuild's job, not this one's")
+                return 1
             if not stale or not args.apply:
                 continue
-            cur.execute(f"UPDATE c SET c.row_hash = ty.row_hash {join}", settings.tenant)
+            cur.execute(refresh_hashes_sql(spec, count_only=False), settings.tenant)
             print(f"{key}: {cur.rowcount} rows refreshed")
             db.connection.commit()
     return 0

@@ -182,6 +182,13 @@ class RebuildStore(LayerReader, Protocol):
         only when every row has its line."""
         ...
 
+    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext, *, apply: bool) -> int:
+        """Bring the tenant's curated rows whose row hash differs from their
+        typed line's back in step, the rows retired as ``retyped`` excepted
+        (they keep the fingerprint of the spec that wrote them). Returns
+        how many; writes only with ``apply``."""
+        ...
+
 
 @dataclass(slots=True)
 class RebuildResult:
@@ -197,6 +204,10 @@ class RebuildResult:
     """Live columns altered to the spec's type (module docstring)."""
     refilled: int = 0
     """Curated rows, current and history, whose retyped columns were refilled."""
+    rehashed_history: int = 0
+    """Curated rows the reconcile left in place whose row hash no longer
+    matched their typed line's, brought back in step (history rows, when
+    a column joined the hash or changed type)."""
     counts: RebuildCounts | None = None
     refusal: str | None = None
     replays: list[FileReplay] = field(default_factory=list)
@@ -219,6 +230,8 @@ class RebuildResult:
         tail = f"curated kept {c.kept}, retired {c.retired}, inserted {c.inserted}"
         if self.retypes:
             tail += f", history refilled {self.refilled}"
+        if self.rehashed_history:
+            tail += f", history rehashed {self.rehashed_history}"
         if self.batch_id:
             tail += f" (batch {self.batch_id})"
         return f"{head}; {verb}: {tail}"
@@ -347,6 +360,10 @@ def rebuild_source(
             result.counts = counts
             if retypes and apply:
                 store.refill_curated(spec, ctx, retypes, apply=True)
+            # The reconcile rewrote the live rows; the history rows it left
+            # in place rehash too when a column joined the hash or changed
+            # type, and their fingerprint must stay true to their values.
+            result.rehashed_history = store.refresh_hashes(spec, ctx, apply=apply)
             if apply:
                 batch.rows_read = result.lines
                 batch.rows_inserted = counts.inserted

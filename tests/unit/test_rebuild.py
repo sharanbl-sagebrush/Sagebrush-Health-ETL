@@ -28,6 +28,7 @@ from sbh_data_bank.commit.sql import (
     orphan_sql,
     rebuilt_insert_sql,
     refill_sql,
+    refresh_hashes_sql,
     retire_sql,
     typed_delete_sql,
 )
@@ -212,6 +213,7 @@ class TestHashChange:
         store = _loaded(tmp_path, _spec())
         new = _spec(row_hash_exclude=["note"])
 
+        plan = _rebuild(store, new, apply=False)
         result = _rebuild(store, new, apply=True)
 
         assert not result.refused
@@ -220,6 +222,16 @@ class TestHashChange:
         assert all(r["superseded_by"] == result.batch_id for r in store.curated[new.key]
                    if r["supersede_reason"] == RETYPED)  # fmt: skip
         assert {r["spec_sha256"] for r in store.typed[new.key]} == {result.spec_sha256}
+        # The one history row (January B, corrected) stays in place and is
+        # brought to the new hash; the plan counted the same row. The three
+        # retired rows keep the hash of the spec that wrote them.
+        assert plan.rehashed_history == result.rehashed_history == 1
+        typed_hash = {
+            (r["source_file_id"], r["line_number"]): r["row_hash"] for r in store.typed[new.key]
+        }
+        for r in store.curated[new.key]:
+            same = r["row_hash"] == typed_hash[(r["source_file_id"], r["line_number"])]
+            assert same == (r["supersede_reason"] != RETYPED), r["supersede_reason"]
 
     def test_a_change_that_touches_no_row_keeps_everything(self, tmp_path):
         """A stricter detector changes the digest but not one hash: typed is
@@ -271,15 +283,17 @@ class TestTypeChange:
         assert all(isinstance(r["amount"], Decimal) for r in store.typed[new.key])
         history = [r for r in store.curated[new.key] if r["supersede_reason"] == "corrected"]
         assert [r["amount"] for r in history] == [Decimal("20.00")]
-        # The fingerprint moves with the values: every curated row, history
-        # included, hashes as its typed line does (found missing 2026-11-06).
+        # The fingerprint moves with the values: every curated row of the
+        # current generation, history included, hashes as its typed line
+        # does; only the rows retired as retyped keep the old spec's hash
+        # (found missing 2026-11-06).
         typed_hash = {
             (r["source_file_id"], r["line_number"]): r["row_hash"] for r in store.typed[new.key]
         }
-        assert all(
-            r["row_hash"] == typed_hash[(r["source_file_id"], r["line_number"])]
-            for r in store.curated[new.key]
-        )
+        for r in store.curated[new.key]:
+            same = r["row_hash"] == typed_hash[(r["source_file_id"], r["line_number"])]
+            assert same == (r["supersede_reason"] != "retyped"), r["supersede_reason"]
+        assert result.rehashed_history == 1 and "history rehashed 1" in result.summary()
         assert sorted(r["amount"] for r in _live(store, new)) == [
             Decimal("10.00"), Decimal("12.00"), Decimal("21.00"),
         ]  # fmt: skip
@@ -349,10 +363,16 @@ class TestStatements:
             "AND ty.line_number = c.line_number"
         )
         assert refill_sql(spec, [retype], count_only=False) == (
-            "UPDATE c SET c.[amount] = ty.[amount], c.row_hash = ty.row_hash "
-            "FROM curated.t_vendor_report AS c "
+            "UPDATE c SET c.[amount] = ty.[amount] FROM curated.t_vendor_report AS c "
             f"JOIN typed.t_vendor_report AS ty ON {line} WHERE c.tenant_id = ?"
         )
+        assert refresh_hashes_sql(spec, count_only=False) == (
+            "UPDATE c SET c.row_hash = ty.row_hash FROM curated.t_vendor_report AS c "
+            f"JOIN typed.t_vendor_report AS ty ON {line} WHERE c.tenant_id = ? "
+            "AND c.row_hash <> ty.row_hash AND c.superseded_by IS NOT NULL "
+            "AND c.supersede_reason <> 'retyped'"
+        )
+        assert refresh_hashes_sql(spec, count_only=True).startswith("SELECT COUNT(*) FROM")
         assert refill_sql(spec, [retype], count_only=True).startswith("SELECT COUNT(*) FROM")
         assert orphan_sql(spec) == (
             "SELECT COUNT(*) FROM curated.t_vendor_report AS c WHERE c.tenant_id = ? "

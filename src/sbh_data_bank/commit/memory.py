@@ -467,9 +467,27 @@ class MemoryStore:
             typed = typed_by_line[(row["source_file_id"], row["line_number"])]
             for retype in retypes:
                 row[retype.target] = typed.get(retype.target)
-            # The hash runs over the typed values, so it moves with them.
-            row["row_hash"] = typed["row_hash"]
         return matched, orphans
+
+    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext, *, apply: bool) -> int:
+        typed_hash = {
+            (r["source_file_id"], r["line_number"]): r["row_hash"]
+            for r in self.typed[spec.key]
+            if r["tenant_id"] == ctx.tenant_id
+        }
+        stale = [
+            r
+            for r in self.curated[spec.key]
+            if r["tenant_id"] == ctx.tenant_id
+            and r.get("superseded_by") is not None
+            and r.get("supersede_reason") != RETYPED
+            and (r["source_file_id"], r["line_number"]) in typed_hash
+            and r["row_hash"] != typed_hash[(r["source_file_id"], r["line_number"])]
+        ]
+        if apply:
+            for row in stale:
+                row["row_hash"] = typed_hash[(row["source_file_id"], row["line_number"])]
+        return len(stale)
 
     def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
         rows = [r for r in self.landed[spec.key] if r["source_file_id"] == source_file_id]

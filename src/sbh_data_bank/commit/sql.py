@@ -519,14 +519,9 @@ def alter_sql(spec: SourceSpec, layer: str, retype: ColumnRetype) -> str:
 
 
 def refill_sql(spec: SourceSpec, retypes: Sequence[ColumnRetype], *, count_only: bool) -> str:
-    """Copy (or count) the retyped columns, and the row hash, into every
-    curated row of the tenant from the typed row of the same line.
-    Parameter: the tenant.
-
-    The row hash runs over the typed values, so a retyped column changes
-    it on every line; a refilled row that kept its old hash would carry a
-    fingerprint of values it no longer holds (found 2026-11-06 by
-    ``scripts/verify_layers.py`` on 109,190 Curve services history rows)."""
+    """Copy (or count) the retyped columns into every curated row of the
+    tenant from the typed row of the same line. Parameter: the tenant.
+    The row hash is :func:`refresh_hashes_sql`'s, after the reconcile."""
     join = (
         f"FROM {table_name(spec, 'curated')} AS c JOIN {table_name(spec, 'typed')} AS ty "
         f"ON {_TYPED_LINE} WHERE c.tenant_id = ?"
@@ -534,7 +529,29 @@ def refill_sql(spec: SourceSpec, retypes: Sequence[ColumnRetype], *, count_only:
     if count_only:
         return f"SELECT COUNT(*) {join}"
     sets = ", ".join(f"c.{_quote(r.target)} = ty.{_quote(r.target)}" for r in retypes)
-    return f"UPDATE c SET {sets}, c.row_hash = ty.row_hash {join}"
+    return f"UPDATE c SET {sets} {join}"
+
+
+def refresh_hashes_sql(spec: SourceSpec, *, count_only: bool) -> str:
+    """Bring (or count) the tenant's superseded curated rows whose row hash
+    differs from their typed line's back in step, the rows a rebuild
+    retired as ``retyped`` excepted: those are the previous generation and
+    keep the fingerprint of the spec that wrote them. Parameter: the tenant.
+
+    Every line rehashes when a column joins the hash or changes type. The
+    reconcile settles the live rows (kept with an equal hash, or retired
+    and reinserted), so only the history rows it leaves in place can be
+    out of step, and limiting the statement to them is what makes the
+    plan's count equal the apply's (found missing 2026-11-06 by
+    ``scripts/verify_layers.py``)."""
+    join = (
+        f"FROM {table_name(spec, 'curated')} AS c JOIN {table_name(spec, 'typed')} AS ty "
+        f"ON {_TYPED_LINE} WHERE c.tenant_id = ? AND c.row_hash <> ty.row_hash "
+        f"AND c.superseded_by IS NOT NULL AND c.supersede_reason <> 'retyped'"
+    )
+    if count_only:
+        return f"SELECT COUNT(*) {join}"
+    return f"UPDATE c SET c.row_hash = ty.row_hash {join}"
 
 
 def orphan_sql(spec: SourceSpec) -> str:
@@ -871,6 +888,14 @@ class SqlStore:
             return int(cursor.fetchone()[0]), orphans
         cursor.execute(refill_sql(spec, retypes, count_only=False), ctx.tenant_id)
         return int(cursor.rowcount), orphans
+
+    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext, *, apply: bool) -> int:
+        cursor = self.cursor
+        if not apply:
+            cursor.execute(refresh_hashes_sql(spec, count_only=True), ctx.tenant_id)
+            return int(cursor.fetchone()[0])
+        cursor.execute(refresh_hashes_sql(spec, count_only=False), ctx.tenant_id)
+        return int(cursor.rowcount)
 
     # ------------------------------------------------------------ curated
 
