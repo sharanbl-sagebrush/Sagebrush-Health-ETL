@@ -441,10 +441,13 @@ def main() -> int:
     parser.add_argument("--out", type=Path, help="write the results as JSON here")
     args = parser.parse_args()
     registry = SpecRegistry.from_dir(args.specs)
+    only = set(args.only)
+    unknown = sorted(only - {spec.key for spec in registry})
+    if unknown:
+        parser.error(f"no spec has the key {', '.join(unknown)}")
     if args.env_file:
         load_env_file(args.env_file)
     settings = SqlSettings.from_env()
-    only = set(args.only)
     started = datetime.now(UTC)
     print(f"verifying the layers of {settings.describe()}")
     results = []
