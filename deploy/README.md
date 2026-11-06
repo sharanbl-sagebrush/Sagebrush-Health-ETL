@@ -91,6 +91,17 @@ az group delete -n sbh-data-bank-rg   # remove everything the deploy made
 The upload convention is unchanged: the team uploads each download day's
 files into `inbound/MMDDYYYY/` over SFTP; the dated folder is the as-of.
 
+**Image tags.** Every build is tagged with the commit it was built from
+and nothing else, so a tag names exact code and an old tag can be
+deleted once no job or execution record needs it. Delete a tag with
+`az acr repository delete --image sbh-data-bank:<tag>`, and only after
+`az acr repository show-manifests` says no other tag shares its
+manifest: deleting one tag of a shared manifest deletes the build
+under every tag. The deploy script used to add `latest` to each build
+for that reason it no longer does (2026-11-06: removing the stale
+`latest` removed e7a5161, the image both jobs ran, and it was rebuilt
+from the commit's tree with `git archive` before the next run).
+
 ## The landing root is ephemeral
 
 `/tmp/landing` does not survive the run. That is why `meta.blob` decides

@@ -241,7 +241,14 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   in Azure; `docs/decision-record.md`, "The Monthly Payments rebuild
   lands". Both jobs moved to e7a5161 the same evening on the
   developer's word ("Go ahead and move the images yourself"), so the
-  half-hourly run reads the Apexus CSV shape from here on
+  half-hourly run reads the Apexus CSV shape from here on. 2026-11-06:
+  the older image tags deleted on the developer's word; `latest`
+  shared e7a5161's manifest and took it along, so the image was
+  rebuilt from the commit's tree and the deploy script now tags each
+  build once (`docs/decision-record.md`, "The registry keeps one tag
+  per build"). Open: the freshness `NEW_COLUMNS` notes on the three
+  task-4 sources persist because a rebuild re-binds the recorded
+  header but does not re-record it in `meta.source_file`; fix proposed
 
 ## Rules that came from real defects
 

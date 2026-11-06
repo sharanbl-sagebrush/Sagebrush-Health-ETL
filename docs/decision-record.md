@@ -1453,3 +1453,28 @@ commit that was built (plus a stale `latest` from 2026-10-23), 723 MB
 in all against the Basic tier's 10 GB; a tag is kept so any one-off
 execution can name the exact code it ran on, and the older ones can be
 deleted whenever that record is no longer wanted.
+
+## The registry keeps one tag per build (2026-11-06, developer: "Delete the older image tags")
+
+The developer asked what the images are and why there were several,
+then had the older tags deleted. Six went cleanly. The seventh,
+`latest`, shared its manifest with `e7a5161` because the deploy script
+tagged every build twice, and `az acr repository delete --image` on a
+tag deletes the manifest under all its tags: for a few minutes the
+registry held no image at all while both jobs pointed at `e7a5161`.
+The image was rebuilt under that tag from the commit's own tree
+(`git archive e7a5161` into a scratch folder, `az acr build` with the
+one tag) and was back at 18:28 UTC, before the 18:30 acquire run,
+which pulled it and ran. No data was touched: the container had
+nothing new, and a run that cannot pull its image does nothing.
+
+Decided: one tag per build, the commit hash, and no `latest`. The
+deploy script no longer adds it, `deploy/README.md` says how to delete
+a tag safely (check `show-manifests` for a shared manifest first), and
+the registry holds `e7a5161` alone, 177 MB. The same request answered
+the state of loading: every source's newest loaded delivery is as of
+2026-11-02 except the pricing export (2026-11-05), the January
+wholesaler-accounts snapshot, the discontinued WeInfuse buy-bill
+(2026-04-05) and the Cardinal summary (2026-10-22, the sheet missing
+from the last upload, with Jay); no open refusal, no quarantined row,
+every blob the container has held is committed.

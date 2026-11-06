@@ -53,7 +53,11 @@ az acr show -n "$ACR" -g "$RG" -o none 2>/dev/null || az acr create -n "$ACR" -g
 
 if [ "${1:-}" != "--no-build" ]; then
   echo "== building $IMAGE in the registry"
-  az acr build -r "$ACR" -t "sbh-data-bank:$TAG" -t "sbh-data-bank:latest" --no-logs . -o none
+  # One tag per build, the commit hash. A second tag on the same build shares
+  # its manifest, and deleting either tag with `az acr repository delete
+  # --image` deletes the build itself: that is how e7a5161 vanished on
+  # 2026-11-06 when the stale `latest` was removed.
+  az acr build -r "$ACR" -t "sbh-data-bank:$TAG" --no-logs . -o none
   az acr task list-runs -r "$ACR" --top 1 --query "[0].{status:status, started:startTime}" -o tsv
 fi
 
