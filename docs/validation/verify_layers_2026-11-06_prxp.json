@@ -1,0 +1,126 @@
+{
+  "started_at": "2026-11-06T23:44:12+00:00",
+  "finished_at": "2026-11-06T23:44:13+00:00",
+  "database": "sbh_data_bank on sagebrushhealth-data-analysis.database.windows.net as login 'pranav' (tenant 'sagebrush')",
+  "sources": 1,
+  "passed": 1,
+  "failed": 0,
+  "never_loaded": 0,
+  "results": [
+    {
+      "source": "tpa.prxp.transactions",
+      "identity": [
+        "rx_transaction_id"
+      ],
+      "columns": 97,
+      "checks": {
+        "recorded": {
+          "files_loaded": 6,
+          "rebuilds": 1,
+          "rows_landed": 9695,
+          "rows_read": 9695,
+          "rows_unchanged": 521,
+          "rows_quarantined": 0,
+          "rows_inserted": 7692,
+          "rows_superseded": 1482,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 9695,
+          "typed": 9695,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 9695
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 359,
+          "typed_lines_unchanged": 521,
+          "unchanged_recorded_by_loads": 521,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 162,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 16866,
+          "current": 7692,
+          "superseded_corrected": 1482,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 7692
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 9174,
+          "row_hash_mismatches": 0,
+          "columns_compared": 97,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "days_supply": {
+            "typed": "303328.000000",
+            "current_generation_plus_unchanged": "303328.000000",
+            "current": "241051.000000"
+          },
+          "qty_dispensed": {
+            "typed": "306057.460000",
+            "current_generation_plus_unchanged": "306057.460000",
+            "current": "243141.460000"
+          },
+          "patient_paid_amount": {
+            "typed": "14899.3100",
+            "current_generation_plus_unchanged": "14899.3100",
+            "current": "14645.1500"
+          },
+          "primary_paid_amount": {
+            "typed": "16656264.5100",
+            "current_generation_plus_unchanged": "16656264.5100",
+            "current": "13359920.4700"
+          },
+          "secondary_paid_amount": {
+            "typed": "521262.5600",
+            "current_generation_plus_unchanged": "521262.5600",
+            "current": "445411.2400"
+          },
+          "tertiary_paid_amount": {
+            "typed": "5311.4500",
+            "current_generation_plus_unchanged": "5311.4500",
+            "current": "5170.3500"
+          },
+          "ce_responsibility": {
+            "typed": "84575.9200",
+            "current_generation_plus_unchanged": "84575.9200",
+            "current": "81537.4200"
+          },
+          "total_amount_collected": {
+            "typed": "17197737.8300",
+            "current_generation_plus_unchanged": "17197737.8300",
+            "current": "13825147.2100"
+          },
+          "acquisition_cost": {
+            "typed": "8627967.6800",
+            "current_generation_plus_unchanged": "8627967.6800",
+            "current": "6892746.9100"
+          },
+          "wac": {
+            "typed": "18412673.7265",
+            "current_generation_plus_unchanged": "18412673.7265",
+            "current": "14857193.0804"
+          },
+          "awp": {
+            "typed": "26399884.7318",
+            "current_generation_plus_unchanged": "26399884.7318",
+            "current": "21311156.8696"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 1.4
+    }
+  ]
+}

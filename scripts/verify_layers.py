@@ -184,19 +184,52 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
         f"NOT EXISTS (SELECT 1 FROM {curated} c WHERE c.source_file_id = t.source_file_id "
         f"AND c.line_number = t.line_number AND {CURRENT_GEN})"
     )
-    (missing, unchanged, lost) = _one(
+    # The other way a line has no current-generation row: a rebuild (D18)
+    # writes the state the new rule makes current and retires the live rows
+    # it no longer produces as "retyped"; what the new rule would have made
+    # history inside the replay (a line a newer delivery corrected, a late
+    # line) is not written, by design (commit/rebuild.py). Such a line is
+    # accounted for when a current-generation row of the same identity
+    # carries a newer or equal as-of. Only a keyed source can show that; a
+    # keyless identity is the whole row, which the hash already covers.
+    identity = identity_columns_for(spec) if spec.natural_key else ()
+    same_identity = " AND ".join(
+        f"(c.[{k}] = t.[{k}] OR (c.[{k}] IS NULL AND t.[{k}] IS NULL))" for k in identity
+    )
+    typed_as_of = (
+        "(SELECT f.as_of FROM meta.source_file f WHERE f.source_file_id = t.source_file_id)"
+    )
+    superseded_by_newer = (
+        f"EXISTS (SELECT 1 FROM {curated} c WHERE c.tenant_id = t.tenant_id AND {CURRENT_GEN} "
+        f"AND c.as_of >= {typed_as_of} AND NOT (c.source_file_id = t.source_file_id "
+        f"AND c.line_number = t.line_number) AND {same_identity})"
+        if identity
+        else "1 = 0"
+    )
+    # SQL Server refuses a subquery inside an aggregate, so the flags are
+    # computed per typed line in a derived table and summed outside it.
+    (missing, unchanged, made_history, lost) = _one(
         cur,
-        f"SELECT SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM {curated} c "
+        f"SELECT SUM(x.missing), SUM(x.unchanged), SUM(x.made_history), SUM(x.lost) FROM ("
+        f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM {curated} c "
         f"WHERE c.source_file_id = t.source_file_id AND c.line_number = t.line_number) "
-        f"THEN 1 ELSE 0 END), "
-        f"SUM(CASE WHEN {no_current_gen} THEN 1 ELSE 0 END), "
-        f"SUM(CASE WHEN {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
+        f"THEN 1 ELSE 0 END AS missing, "
+        f"CASE WHEN {no_current_gen} THEN 1 ELSE 0 END AS unchanged, "
+        f"CASE WHEN {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
         f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
-        f"THEN 1 ELSE 0 END) "
-        f"FROM {typed} t WHERE t.tenant_id = ?",
+        f"AND {superseded_by_newer} THEN 1 ELSE 0 END AS made_history, "
+        f"CASE WHEN {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
+        f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
+        f"AND NOT {superseded_by_newer} THEN 1 ELSE 0 END AS lost "
+        f"FROM {typed} t WHERE t.tenant_id = ?) AS x",
         tenant,
     )
-    missing, unchanged, lost = int(missing or 0), int(unchanged or 0), int(lost or 0)
+    missing, unchanged, made_history, lost = (
+        int(missing or 0),
+        int(unchanged or 0),
+        int(made_history or 0),
+        int(lost or 0),
+    )
     (orphans,) = _one(
         cur,
         f"SELECT COUNT(*) FROM {curated} c WHERE c.tenant_id = ? AND NOT EXISTS "
@@ -218,6 +251,7 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
         "typed_lines_without_curated_row": missing,
         "typed_lines_unchanged": unchanged,
         "unchanged_recorded_by_loads": recorded["rows_unchanged"],
+        "unchanged_lines_a_rebuild_made_history_without_writing": made_history,
         "unchanged_lines_whose_content_is_on_no_current_generation_row": lost,
         "curated_rows_without_typed_line": orphans,
         "curated_rows": n_curated,
@@ -233,6 +267,7 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
             f"SELECT TOP {SAMPLE} t.source_file_id, t.line_number FROM {typed} t "
             f"WHERE t.tenant_id = ? AND {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
             f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
+            f"AND NOT {superseded_by_newer} "
             f"ORDER BY t.source_file_id, t.line_number",
             tenant,
         )
