@@ -55,9 +55,10 @@ column the vendor started sending) is a guarded ``ALTER`` rather than a
 hand-run script.
 
 The first schema (24 tables on Azure, CLAUDE.md) put typed, deduplicated
-rows straight into ``raw.*``. Those tables predate the layered decision,
-were never written to (the commit engine did not exist), and are not touched
-by this module; dropping them is a separate, explicit step.
+rows straight into ``raw.*``. Those tables predated the layered decision,
+were never written to (the commit engine did not exist), and were dropped
+with their schema on 2026-11-06 (``scripts/drop_raw.py``, on the
+developer's word); this module never knew them.
 
 ``sbh_data_bank.commit`` writes into these tables: ``commit.sql`` builds its
 INSERT column lists from the same spec properties this module builds the DDL

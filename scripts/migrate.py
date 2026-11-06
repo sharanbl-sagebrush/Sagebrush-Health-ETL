@@ -42,7 +42,7 @@ What it builds, in order
        the row hash) and ``curated.<source>`` (the ledger columns - batch,
        identity hash, occurrence, as-of, superseded_by - plus the typed
        columns again), with the live, identity and natural-key indexes.
-       The ``raw.*`` tables of the first schema are left alone.
+       The ``raw.*`` tables of the first schema were dropped 2026-11-06.
 
 Why idempotent
     Every statement is wrapped in ``IF OBJECT_ID(...) IS NULL``,

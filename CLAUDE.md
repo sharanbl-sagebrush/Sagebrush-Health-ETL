@@ -29,8 +29,9 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   after the fifteen empty tables of five changed specs were dropped by
   hand, and again 2026-10-23 for the pricing source, `meta.blob` and
   `meta.spec_check`: 63 layered tables plus `meta` and `stg`. The 19 `raw.*` tables
-  predate the layered decision, were never written to, and are left alone
-  until dropped explicitly. Re-running the migration is a no-op; it only
+  that predated the layered decision were never written to and were
+  dropped with their schema 2026-11-06 (`scripts/drop_raw.py`, developer:
+  "Drop the raw tables"). Re-running the migration is a no-op; it only
   creates what is missing (since 2026-11-04 that includes a column a spec
   gained, added nullable to the live tables) and never alters a column, so
   a spec change to a table with rows is a decision about those rows first
@@ -433,7 +434,8 @@ specs/        21 source specs (YAML) — generated once, hand-edited since
 tools/spec_build/  the generators that produced them, from real headers
 scripts/      migrate, audit_files, bind_real_files, scaffold_spec, layer_walk,
               trace_file, commit_file, backfill, acquire, freshness, retype,
-              rebuild, close_runs, verify_load; job.sh, the image's entry point
+              rebuild, close_runs, verify_load, verify_layers, drop_raw;
+              job.sh, the image's entry point
 ```
 
 ## Running things

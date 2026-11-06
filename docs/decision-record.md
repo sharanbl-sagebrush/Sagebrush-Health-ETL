@@ -1478,3 +1478,17 @@ wholesaler-accounts snapshot, the discontinued WeInfuse buy-bill
 (2026-04-05) and the Cardinal summary (2026-10-22, the sheet missing
 from the last upload, with Jay); no open refusal, no quarantined row,
 every blob the container has held is committed.
+
+## The raw schema is dropped (2026-11-06, developer: "Drop the raw tables")
+
+The nineteen ``raw.*`` tables were the first schema, from before the
+layered decision of 2026-10-07: typed, deduplicated rows were to go
+straight into them. The commit engine never existed in that form, so
+they held no rows, and they had been left alone since the layered
+migration of 2026-10-21 pending an explicit decision. The developer
+took it while asking where the audit columns should sit for readers;
+``scripts/drop_raw.py`` listed the nineteen with their row counts (all
+0; it refuses if any table holds a row), dropped them and the empty
+schema. The migration never generated them, so it has nothing to
+recreate. The database now holds the three generated layers, ``meta``
+and ``stg``, and nothing else.
