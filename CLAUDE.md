@@ -263,6 +263,27 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   statements, all guarded); Power BI connects to `pres` in import
   mode. The 19 empty `raw.*` tables were dropped the same day
   (`docs/decision-record.md`, "The presentation layer")
+- 2026-11-06, evening: **the curated layer is verified against the
+  staging layers** (developer: "make sure the data is good to use
+  before presenting it to the management"). `scripts/verify_layers.py`
+  holds every source's curated rows against `landed` and `typed`
+  inside the database: line accounting, completeness both ways against
+  what the batches recorded, duplicates, the row hash and every
+  business column value-equal on the current generation, numeric
+  totals reconciled; results to a JSON log, counts and line numbers
+  only. Its first run found one defect, in the engine's bookkeeping
+  and not in any value: a rebuild left the history rows it keeps in
+  place with the hash of the spec that wrote them, so 109,190 Curve
+  services and 1,482 PRxP superseded rows carried a stale fingerprint.
+  The rebuild now rehashes those rows, counted the same by the plan
+  and the apply; the rows already in Azure were repaired on the
+  developer's word (`scripts/refresh_hashes.py`). Same evening: Jay
+  answered that Cardinal no longer produces the "Cardinal_Invoice"
+  summary report and had been making it by hand from the Invoice
+  Review, so `wholesaler.cardinal.invoice_summary` is `discontinued`
+  (its 16,004 rows stay; its silence is not an alert; the detail is
+  the Cardinal purchase source). Results in `docs/decision-record.md`,
+  "Verified for management"
 
 ## Rules that came from real defects
 

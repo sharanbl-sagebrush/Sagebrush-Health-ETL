@@ -1537,3 +1537,64 @@ If Monthly Payments has to refresh faster, page compression of its
 curated table (parked, "Where the bytes go") would roughly halve the
 scan, and a materialised current-rows mart is the step after that;
 neither is needed to present the data.
+
+## Verified for management; the Cardinal summary is discontinued (2026-11-06, evening)
+
+The developer pasted a verification contract (staging against target:
+completeness both ways, duplicates, fingerprints, aggregates, a control
+list, a central log) and asked for it run before the data goes to
+management. The layers map onto it directly: ``landed`` is the staging
+as delivered, ``typed`` the staging normalised, ``curated`` the target,
+and the one transformation between them is the dedup rule, which the
+checks allow for exactly: a line whose identity and hash a newer
+delivery already carries writes no curated row and is counted on the
+batch; every other line writes one row per generation; supersession is
+the rule's output, reported and never counted as loss. The control list
+is the specs. ``scripts/verify_layers.py`` runs five checks per source
+inside the database (no row leaves it) and writes a JSON log with
+counts, column names and (file, line) samples of any failure.
+
+Stage one, the files: ``verify_load.py`` re-read 205 files from the
+OneDrive originals, every line count matched the database, 0
+structural problems; the three "not in database" are the workbooks
+Excel re-saved on 2026-11-04 (same data, different bytes).
+
+Stage two, the layers, found one defect, and it was the engine's and
+not the data's. A rebuild rewrites the live rows (kept with an equal
+hash, or retired as ``retyped`` and reinserted) but the superseded
+rows it leaves in place kept the hash of the spec that wrote them,
+while every line rehashes when a column joins the hash or changes
+type. Curve services had 109,190 such rows after the money columns
+were retyped (the values had been refilled, the fingerprint not) and
+PRxP 1,482 after its five new columns joined the hash; appointments,
+ABC and Monthly Payments none, because every row of theirs was
+retired. No current row was affected and no value anywhere; the dedup
+rule reads only live rows' hashes. The rebuild now ends with a hash
+refresh over the superseded, non-retyped rows, the count taken from
+the replay in the file loop so the plan reports what the apply writes
+(and the apply refuses if the two differ); the rows retired as
+``retyped`` keep their old hash by design, as the previous generation.
+The 110,672 rows already in Azure were repaired with
+``scripts/refresh_hashes.py --apply`` on the developer's word ("Go
+ahead with the hashes"); it refuses if a live row were involved.
+
+The results table is in the next section once the run over all 21
+sources completes; Monthly Payments alone takes the better part of an
+hour of comparisons on the 2-vCore database.
+
+**The Cardinal summary is discontinued.** Jay answered the missing-file
+question: Cardinal had a summary report and removed it, and because
+the guide expected one he had been building the 2026 "Cardinal_Invoice"
+files by hand from the Invoice Review, dropping the eight line-level
+columns (line number, CIN, NDC, trade and generic name, unit price,
+ordered and shipped quantity). That is exactly what the loads showed:
+the same rows, invoices and purchase dollars as the detail of the
+period. A hand-made copy of a loaded report adds nothing and costs him
+time, so ``wholesaler.cardinal.invoice_summary`` is ``lifecycle:
+discontinued``: its 16,004 rows stay (the three-year history file
+above all, 5,326 invoices the detail cannot reach), its silence is not
+an alert, a genuine re-delivery would still load, and the Invoice
+Review is the Cardinal purchase source. The spec change is recorded
+in ``meta.spec_check`` (3 files, 16,004 lines, 0 would change). Jay
+is to stop making the file, and the upload guide lists one Cardinal
+report.

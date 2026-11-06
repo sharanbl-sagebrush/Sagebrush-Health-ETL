@@ -33,7 +33,17 @@ name: Cardinal Health - Invoice Summary
 vendor: Cardinal Health
 group: "1 Wholesalers"
 catalog_names: ["Cardinal"]
-lifecycle: active
+# discontinued, 2026-11-06: Cardinal no longer produces this report. The
+# colleague who uploads the files answered that Cardinal had it and removed
+# it, and that the 2026 "Cardinal_Invoice" files were made by hand from the
+# Invoice Review with eight line-level columns dropped (which is exactly
+# what the loads showed: the same rows, invoices and dollars as the detail
+# of the period). A hand-made copy of a loaded report adds nothing, so the
+# source is closed: its silence is not an alert, the 16,004 loaded rows
+# (the three-year history above all) stay, and a genuine re-delivery would
+# still be recognised and loaded. The detail report is the Cardinal
+# purchase source.
+lifecycle: discontinued
 expected_cadence_days: 7
 
 # filename_patterns: a routing HINT only, and the same hint the detail spec
