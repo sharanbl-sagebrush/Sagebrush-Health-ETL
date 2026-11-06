@@ -1492,3 +1492,48 @@ took it while asking where the audit columns should sit for readers;
 schema. The migration never generated them, so it has nothing to
 recreate. The database now holds the three generated layers, ``meta``
 and ``stg``, and nothing else.
+
+## The presentation layer: views, business columns first (2026-11-06, developer: "they want the data first not the audit columns")
+
+The developer looked at the tables and asked for the audit columns at
+the end, since a non-technical reader wants the data first. SQL Server
+cannot reorder a column; the only way to move them in a table is to
+build a new table and copy every row, which for Monthly Payments is
+another multi-hour job on the 2-vCore database, and it would only help
+someone reading the base tables. The architecture had reserved `pres`,
+"views and marts for users", for exactly this and never built it. The
+developer's worry that a fourth layer "simply adds additional cost"
+was answered with the fact that a view holds no data: it is a saved
+query over `curated`, zero bytes, nothing to keep in step. Decided:
+`pres` is views, generated from the specs like the tables are.
+
+Two per source. `pres.<source>` is what Power BI and people read: the
+business columns in spec order, then `as_of`, `source_file_id` and
+`line_number` so a row can be traced to its line in the three layers,
+over the current rows only (`superseded_by IS NULL`), so the dedup
+rule is applied once here and no report has to know about
+supersession. `pres.<source>_history` is every version with the same
+business columns first and then the ledger columns a reader can use
+(`as_of`, `outcome`, `superseded_at`, `supersede_reason`, file, line,
+batch). Neither exposes the hashes, the tenant or the audit stamps.
+The statements are `CREATE OR ALTER VIEW` through `EXEC`, guarded on
+the curated table, so a column a spec gains reaches the readers on the
+next migration run. Six tests hold the shape; 539 in all. Applied to
+Azure the same day: 277 statements, 42 views, every table statement a
+no-op.
+
+Fast, measured rather than promised ("the management wont understand
+the complexity and blame it on the developer"). Power BI reads the
+views in import mode: one pull per scheduled refresh, after which the
+report runs from Power BI's own copy and no reader waits on the
+database. Server-side scans of the current rows, timed while the
+layer verification was running on the same tables and so pessimistic:
+Monthly Payments 1,309,804 rows in 161 s, Curve services 280,707 in
+51 s, Curve appointments 358,891 in 23 s, Pharmaforce 218,509 in under
+a second; a full pull of the Cardinal detail view to the laptop took
+1.0 s and Wellpartner claims 5.2 s. So a weekly refresh is minutes,
+dominated by Monthly Payments, and DirectQuery is the mode to avoid.
+If Monthly Payments has to refresh faster, page compression of its
+curated table (parked, "Where the bytes go") would roughly halve the
+scan, and a materialised current-rows mart is the step after that;
+neither is needed to present the data.

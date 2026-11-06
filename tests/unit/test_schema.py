@@ -24,17 +24,21 @@ import pytest
 from sbh_data_bank.registry.loader import SpecRegistry
 from sbh_data_bank.registry.spec import PiiClass
 from sbh_data_bank.store.schema import (
+    CURRENT_TAIL,
     DEDUP_RULE,
+    HISTORY_TAIL,
     LAYERS,
     LEDGER_COLUMN_NAMES,
     curated_statements,
     identity_columns_for,
     landed_statements,
     meta_statements,
+    pres_statements,
     table_name,
     table_statements,
     typed_sql_types,
     typed_statements,
+    view_name,
 )
 
 SPEC_DIR = Path(__file__).resolve().parents[2] / "specs"
@@ -279,3 +283,62 @@ class TestPerSourceStatements:
 
 def test_dedup_rule_is_versioned():
     assert re.fullmatch(r"[a-z_]+\.v\d+", DEDUP_RULE)
+
+
+class TestPresViews:
+    """Decided 2026-11-06: readers get the business columns first and the
+    audit columns last, through views that hold no data."""
+
+    def _select_columns(self, statement: str) -> list[str]:
+        head = statement.split("FROM ")[0]
+        return re.findall(r"c\.\[([A-Za-z0-9_]+)\]", head)
+
+    def test_two_views_per_source_after_the_three_tables(self, registry):
+        for spec in registry:
+            statements = table_statements(spec)
+            views = [s for s in statements if "CREATE OR ALTER VIEW" in s]
+            assert len(views) == 2
+            assert statements[-2:] == views
+            assert view_name(spec) in views[0]
+            assert view_name(spec, history=True) in views[1]
+
+    def test_every_view_is_guarded_on_its_curated_table(self, registry):
+        for spec in registry:
+            for statement in pres_statements(spec):
+                assert statement.startswith(f"IF OBJECT_ID('{table_name(spec, 'curated')}')")
+
+    def test_business_columns_come_first_in_spec_order_then_the_tail(self, registry):
+        for spec in registry:
+            current, history = pres_statements(spec)
+            business = [
+                c for c in _columns(curated_statements(spec)[0]) if c not in LEDGER_COLUMN_NAMES
+            ]
+            assert self._select_columns(current) == business + list(CURRENT_TAIL)
+            assert self._select_columns(history) == business + list(HISTORY_TAIL)
+
+    def test_the_current_view_applies_the_dedup_rule(self, registry):
+        for spec in registry:
+            current, history = pres_statements(spec)
+            assert "WHERE c.superseded_by IS NULL" in current
+            assert "WHERE" not in history
+
+    def test_no_view_exposes_the_engine_columns(self, registry):
+        hidden = {
+            "tenant_id",
+            "identity_hash",
+            "row_hash",
+            "dedup_rule",
+            "created_by",
+            "updated_by",
+        }
+        for spec in registry:
+            for statement in pres_statements(spec):
+                assert not hidden & set(self._select_columns(statement)), spec.key
+
+    def test_prohibited_columns_are_absent_from_the_views(self, registry):
+        for spec in registry:
+            prohibited = {
+                c.target for v in spec.variants for c in v.columns if c.pii is PiiClass.PROHIBITED
+            }
+            for statement in pres_statements(spec):
+                assert not prohibited & set(self._select_columns(statement)), spec.key

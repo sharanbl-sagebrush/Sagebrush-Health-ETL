@@ -792,8 +792,73 @@ def curated_statements(spec: SourceSpec) -> list[str]:
     return statements
 
 
+#: The ledger columns a reader of the history view gets after the business
+#: columns, in this order: what the row is, when it was delivered, and what
+#: happened to it. Hashes, the tenant and the audit stamps stay in the table.
+HISTORY_TAIL = (
+    "as_of",
+    "outcome",
+    "superseded_at",
+    "supersede_reason",
+    "source_file_id",
+    "line_number",
+    "batch_id",
+)
+#: What the current view appends after the business columns: enough to say
+#: which delivery a row came from and to find its line in the three layers.
+CURRENT_TAIL = ("as_of", "source_file_id", "line_number")
+
+
+def view_name(spec: SourceSpec, *, history: bool = False) -> str:
+    """``pres.wholesaler_cardinal_invoice``, or ``..._history`` for every version."""
+    short = spec.key.replace(".", "_")
+    return f"pres.{short}_history" if history else f"pres.{short}"
+
+
+def _view(name: str, source: str, columns: list[str], where: str | None) -> str:
+    """A guarded ``CREATE OR ALTER VIEW`` over one curated table.
+
+    ``CREATE OR ALTER VIEW`` must be the only statement in its batch, so it
+    runs through ``EXEC``; the guard is the base table's existence, and
+    re-running replaces the view with the spec's current column list, which
+    is how a column added to a spec reaches the readers.
+    """
+    select = ",\n    ".join(f"c.[{column}]" for column in columns)
+    body = f"SELECT\n    {select}\nFROM {source} AS c"
+    if where:
+        body += f"\nWHERE {where}"
+    return f"IF OBJECT_ID('{source}') IS NOT NULL EXEC(N'CREATE OR ALTER VIEW {name} AS\n{body}')"
+
+
+def pres_statements(spec: SourceSpec) -> list[str]:
+    """The presentation views for one source: what readers and Power BI see.
+
+    Decided 2026-11-06 (developer: the audit columns last, "they want the
+    data first"; a view instead of rewriting the tables, since a view holds
+    no data). Two views over ``curated``:
+
+      pres.<source>          the current rows only (``superseded_by IS NULL``),
+                             the business columns first in spec order, then
+                             the as-of date and the (file, line) a row can be
+                             traced by. The dedup rule is applied here, so a
+                             report never has to know about supersession
+      pres.<source>_history  every version, the same business columns first,
+                             then the ledger columns a reader can use
+
+    Neither view exposes the hashes, the tenant or the audit stamps; those
+    are the engine's, and remain in the table for anyone who needs them.
+    """
+    business = [target for target, _kind, _max in _all_targets(spec)]
+    source = table_name(spec, "curated")
+    return [
+        _view(view_name(spec), source, business + list(CURRENT_TAIL), "c.superseded_by IS NULL"),
+        _view(view_name(spec, history=True), source, business + list(HISTORY_TAIL), None),
+    ]
+
+
 def table_statements(spec: SourceSpec) -> list[str]:
-    """Every statement for one source across the three generated layers.
+    """Every statement for one source: the three generated layers and the
+    presentation views over the third.
 
     The spec is the schema definition; there is no second place to keep the two
     in step. A column added to a spec becomes a migration, not a manual DDL edit
@@ -801,6 +866,11 @@ def table_statements(spec: SourceSpec) -> list[str]:
 
     Returned as separate statements because pyodbc executes one batch at a time,
     and a failure part way through a single blob leaves a half-built schema with
-    no clear way to tell what applied. Order is landed, typed, curated.
+    no clear way to tell what applied. Order is landed, typed, curated, pres.
     """
-    return landed_statements(spec) + typed_statements(spec) + curated_statements(spec)
+    return (
+        landed_statements(spec)
+        + typed_statements(spec)
+        + curated_statements(spec)
+        + pres_statements(spec)
+    )
