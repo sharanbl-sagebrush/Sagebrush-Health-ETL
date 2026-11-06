@@ -469,25 +469,34 @@ class MemoryStore:
                 row[retype.target] = typed.get(retype.target)
         return matched, orphans
 
-    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext, *, apply: bool) -> int:
+    def _history_rows(self, spec: SourceSpec, tenant_id: str) -> list[dict[str, Any]]:
+        return [
+            r
+            for r in self.curated[spec.key]
+            if r["tenant_id"] == tenant_id
+            and r.get("superseded_by") is not None
+            and r.get("supersede_reason") != RETYPED
+        ]
+
+    def history_hashes(self, spec: SourceSpec, tenant_id: str) -> dict[tuple[int, int], str]:
+        return {
+            (r["source_file_id"], r["line_number"]): r["row_hash"]
+            for r in self._history_rows(spec, tenant_id)
+        }
+
+    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext) -> int:
         typed_hash = {
             (r["source_file_id"], r["line_number"]): r["row_hash"]
             for r in self.typed[spec.key]
             if r["tenant_id"] == ctx.tenant_id
         }
-        stale = [
-            r
-            for r in self.curated[spec.key]
-            if r["tenant_id"] == ctx.tenant_id
-            and r.get("superseded_by") is not None
-            and r.get("supersede_reason") != RETYPED
-            and (r["source_file_id"], r["line_number"]) in typed_hash
-            and r["row_hash"] != typed_hash[(r["source_file_id"], r["line_number"])]
-        ]
-        if apply:
-            for row in stale:
-                row["row_hash"] = typed_hash[(row["source_file_id"], row["line_number"])]
-        return len(stale)
+        written = 0
+        for row in self._history_rows(spec, ctx.tenant_id):
+            new = typed_hash.get((row["source_file_id"], row["line_number"]))
+            if new is not None and row["row_hash"] != new:
+                row["row_hash"] = new
+                written += 1
+        return written
 
     def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:
         rows = [r for r in self.landed[spec.key] if r["source_file_id"] == source_file_id]

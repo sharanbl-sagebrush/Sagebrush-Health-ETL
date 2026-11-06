@@ -182,11 +182,14 @@ class RebuildStore(LayerReader, Protocol):
         only when every row has its line."""
         ...
 
-    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext, *, apply: bool) -> int:
-        """Bring the tenant's curated rows whose row hash differs from their
-        typed line's back in step, the rows retired as ``retyped`` excepted
-        (they keep the fingerprint of the spec that wrote them). Returns
-        how many; writes only with ``apply``."""
+    def history_hashes(self, spec: SourceSpec, tenant_id: str) -> dict[tuple[int, int], str]:
+        """The row hash of every superseded curated row the reconcile leaves
+        in place (not retired as ``retyped``), by (file, line)."""
+        ...
+
+    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext) -> int:
+        """Bring those rows' hashes in step with the typed rows now written
+        (the replay's). Returns how many changed."""
         ...
 
 
@@ -316,12 +319,21 @@ def rebuild_source(
                 store.retype_columns(spec, ctx, retypes)
             ledger = Ledger.for_spec(spec)
             outcomes: dict[tuple[int, int], str] = {}
+            # The history rows the reconcile will leave in place, with the
+            # hash they carry now; every replayed line is checked against
+            # them, so the count is the plan's as much as the apply's.
+            history = store.history_hashes(spec, tenant_id)
+            stale_history = 0
             for file in files:
                 replay, typed, findings, facts = _retype(store, spec, file)
                 _check(replay)
                 result.replays.append(replay)
                 result.files += 1
                 result.lines += len(typed)
+                for row in typed:
+                    old = history.get((file.source_file_id, row.line_number))
+                    if old is not None and old != row.row_hash:
+                        stale_history += 1
                 result.rehashed += replay.rehashed
                 if on_file is not None:
                     on_file(replay)
@@ -363,7 +375,14 @@ def rebuild_source(
             # The reconcile rewrote the live rows; the history rows it left
             # in place rehash too when a column joined the hash or changed
             # type, and their fingerprint must stay true to their values.
-            result.rehashed_history = store.refresh_hashes(spec, ctx, apply=apply)
+            result.rehashed_history = stale_history
+            if apply:
+                written = store.refresh_hashes(spec, ctx)
+                if written != stale_history:
+                    raise RebuildRefusedError(
+                        f"the hash refresh touched {written} history rows where the replay "
+                        f"counted {stale_history}"
+                    )
             if apply:
                 batch.rows_read = result.lines
                 batch.rows_inserted = counts.inserted

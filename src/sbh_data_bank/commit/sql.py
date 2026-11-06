@@ -554,6 +554,20 @@ def refresh_hashes_sql(spec: SourceSpec, *, count_only: bool) -> str:
     return f"UPDATE c SET c.row_hash = ty.row_hash {join}"
 
 
+def history_hashes_sql(spec: SourceSpec) -> str:
+    """The (file, line, row hash) of the tenant's superseded curated rows
+    that a rebuild leaves in place: superseded, and not retired as
+    ``retyped``. The rebuild compares them with the replay's hashes to
+    count what :func:`refresh_hashes_sql` will touch before it writes
+    anything, which is how the plan's count equals the apply's. Parameter:
+    the tenant."""
+    return (
+        f"SELECT c.source_file_id, c.line_number, c.row_hash FROM {table_name(spec, 'curated')} "
+        f"AS c WHERE c.tenant_id = ? AND c.superseded_by IS NOT NULL "
+        f"AND c.supersede_reason <> 'retyped'"
+    )
+
+
 def orphan_sql(spec: SourceSpec) -> str:
     """Count the tenant's curated rows with no typed row on their line:
     nothing to refill them from, so a rebuild with a type change refuses."""
@@ -889,11 +903,13 @@ class SqlStore:
         cursor.execute(refill_sql(spec, retypes, count_only=False), ctx.tenant_id)
         return int(cursor.rowcount), orphans
 
-    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext, *, apply: bool) -> int:
+    def history_hashes(self, spec: SourceSpec, tenant_id: str) -> dict[tuple[int, int], str]:
         cursor = self.cursor
-        if not apply:
-            cursor.execute(refresh_hashes_sql(spec, count_only=True), ctx.tenant_id)
-            return int(cursor.fetchone()[0])
+        cursor.execute(history_hashes_sql(spec), tenant_id)
+        return {(int(f), int(line)): h for f, line, h in cursor.fetchall()}
+
+    def refresh_hashes(self, spec: SourceSpec, ctx: WriteContext) -> int:
+        cursor = self.cursor
         cursor.execute(refresh_hashes_sql(spec, count_only=False), ctx.tenant_id)
         return int(cursor.rowcount)
 
