@@ -519,8 +519,14 @@ def alter_sql(spec: SourceSpec, layer: str, retype: ColumnRetype) -> str:
 
 
 def refill_sql(spec: SourceSpec, retypes: Sequence[ColumnRetype], *, count_only: bool) -> str:
-    """Copy (or count) the retyped columns into every curated row of the
-    tenant from the typed row of the same line. Parameter: the tenant."""
+    """Copy (or count) the retyped columns, and the row hash, into every
+    curated row of the tenant from the typed row of the same line.
+    Parameter: the tenant.
+
+    The row hash runs over the typed values, so a retyped column changes
+    it on every line; a refilled row that kept its old hash would carry a
+    fingerprint of values it no longer holds (found 2026-11-06 by
+    ``scripts/verify_layers.py`` on 109,190 Curve services history rows)."""
     join = (
         f"FROM {table_name(spec, 'curated')} AS c JOIN {table_name(spec, 'typed')} AS ty "
         f"ON {_TYPED_LINE} WHERE c.tenant_id = ?"
@@ -528,7 +534,7 @@ def refill_sql(spec: SourceSpec, retypes: Sequence[ColumnRetype], *, count_only:
     if count_only:
         return f"SELECT COUNT(*) {join}"
     sets = ", ".join(f"c.{_quote(r.target)} = ty.{_quote(r.target)}" for r in retypes)
-    return f"UPDATE c SET {sets} {join}"
+    return f"UPDATE c SET {sets}, c.row_hash = ty.row_hash {join}"
 
 
 def orphan_sql(spec: SourceSpec) -> str:

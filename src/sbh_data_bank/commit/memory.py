@@ -467,6 +467,8 @@ class MemoryStore:
             typed = typed_by_line[(row["source_file_id"], row["line_number"])]
             for retype in retypes:
                 row[retype.target] = typed.get(retype.target)
+            # The hash runs over the typed values, so it moves with them.
+            row["row_hash"] = typed["row_hash"]
         return matched, orphans
 
     def landed_lines(self, spec: SourceSpec, source_file_id: int) -> Iterator[LandedLine]:

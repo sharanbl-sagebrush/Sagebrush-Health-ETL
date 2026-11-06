@@ -327,7 +327,15 @@ def rebuild_source(
                         "content for one identity); a person decides"
                     )
             if retypes:
-                refilled, orphans = store.refill_curated(spec, ctx, retypes, apply=apply)
+                # Count first, write after the reconcile: the refill carries
+                # the row hash with the values (every line rehashes under a
+                # new type), and a live row refilled before the reconcile
+                # would match its replacement and be kept, which the plan,
+                # which writes nothing, could not predict. After it, the
+                # rule has retired the old generation and inserted the new,
+                # and the refill brings the retired rows and the older
+                # history up to the new types with the fingerprint to match.
+                refilled, orphans = store.refill_curated(spec, ctx, retypes, apply=False)
                 if orphans:
                     raise RebuildRefusedError(
                         f"{orphans} curated rows have no typed line to take their "
@@ -337,6 +345,8 @@ def rebuild_source(
             target = list(iter_target(ledger, outcomes))
             counts = store.reconcile_curated(spec, ctx, target, apply=apply)
             result.counts = counts
+            if retypes and apply:
+                store.refill_curated(spec, ctx, retypes, apply=True)
             if apply:
                 batch.rows_read = result.lines
                 batch.rows_inserted = counts.inserted

@@ -271,6 +271,15 @@ class TestTypeChange:
         assert all(isinstance(r["amount"], Decimal) for r in store.typed[new.key])
         history = [r for r in store.curated[new.key] if r["supersede_reason"] == "corrected"]
         assert [r["amount"] for r in history] == [Decimal("20.00")]
+        # The fingerprint moves with the values: every curated row, history
+        # included, hashes as its typed line does (found missing 2026-11-06).
+        typed_hash = {
+            (r["source_file_id"], r["line_number"]): r["row_hash"] for r in store.typed[new.key]
+        }
+        assert all(
+            r["row_hash"] == typed_hash[(r["source_file_id"], r["line_number"])]
+            for r in store.curated[new.key]
+        )
         assert sorted(r["amount"] for r in _live(store, new)) == [
             Decimal("10.00"), Decimal("12.00"), Decimal("21.00"),
         ]  # fmt: skip
@@ -340,7 +349,8 @@ class TestStatements:
             "AND ty.line_number = c.line_number"
         )
         assert refill_sql(spec, [retype], count_only=False) == (
-            "UPDATE c SET c.[amount] = ty.[amount] FROM curated.t_vendor_report AS c "
+            "UPDATE c SET c.[amount] = ty.[amount], c.row_hash = ty.row_hash "
+            "FROM curated.t_vendor_report AS c "
             f"JOIN typed.t_vendor_report AS ty ON {line} WHERE c.tenant_id = ?"
         )
         assert refill_sql(spec, [retype], count_only=True).startswith("SELECT COUNT(*) FROM")
