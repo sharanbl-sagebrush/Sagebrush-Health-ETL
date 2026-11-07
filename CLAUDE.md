@@ -290,6 +290,19 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   (its 16,004 rows stay; its silence is not an alert; the detail is
   the Cardinal purchase source). Results in `docs/decision-record.md`,
   "Verified for management"
+- 2026-11-07: **Curve changed the Monthly Payments export.** The two
+  files Jay uploaded 2026-11-06 (05/01 to 09/30 in two pulls, in a
+  dated folder) were held by the midnight acquire run with every row
+  quarantined: `transmonth` and `postmonth` now arrive as "Jul-26"
+  where 41 loaded files wrote "Jul 2026". Jay uploaded the download
+  untouched, so the spec declares the hyphenated two-digit-year shape
+  beside the two it had (a month name is never ambiguous; nothing
+  numeric is admitted; the column stays DATE). The dry run loads the
+  held file whole. Loading the two files waits for the developer's
+  word: image, jobs, then a load by hand from the laptop copies or a
+  re-upload, since a blob with a batch is never fetched again
+  (`docs/decision-record.md`, "Curve changed the Monthly Payments
+  export")
 
 ## Rules that came from real defects
 

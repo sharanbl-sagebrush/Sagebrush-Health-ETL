@@ -1675,3 +1675,46 @@ current-generation row accounts for in any of the three ways: its
 own row, its hash on another row, or its key on a newer one. The
 numbers are in the log under
 ``unchanged_lines_a_rebuild_made_history_without_writing``.
+
+## Curve changed the Monthly Payments export; the spec declares the new month shape (2026-11-07, developer: "keep the sql column dtype constant and convert the incoming data")
+
+Jay uploaded the two Monthly Payments files that close the gap since
+July (05/01 to 07/31 and 07/01 to 09/30, 135 MB and 125 MB) under a
+dated folder on 2026-11-06, the convention exactly. The midnight
+acquire run fetched both, bound each to the spec with all 116 columns
+matched and no drift, and held both: 118,497 and 109,451 rows read,
+every one quarantined, on the same two columns with the same reason,
+``transmonth`` and ``postmonth`` BAD_DATE. Nothing past the file and
+batch rows was written, which is D17 doing its job. The reason was
+read from a laptop copy of the smaller file with ``trace_file.py``
+(counts, column names and reason codes only).
+
+The 41 files loaded before write those two columns as a month name
+and a four-digit year, the two formats the spec declared. The new
+files write a month name, a hyphen and a two-digit year on every row,
+and their money cells carry a trailing space the old ones lack. Both
+are what a CSV looks like after Excel, so the first question was
+whether the file had been opened on the way; Jay confirmed he
+uploaded the download untouched, so Curve changed its export. The
+developer asked whether the column could stay as it is in SQL and
+the incoming text be converted whatever its format. It already is:
+the column is DATE and the parser converts into it; what is not
+automatic is the list of text formats accepted, and that stays
+deliberate because a numeric date is ambiguous (the Cardinal rule). A
+month name with a two-digit year is not, so the two columns now
+declare it beside the two shapes they had, in the order the files
+arrived; nothing numeric is admitted and the column type is
+unchanged. The dry run over the held file then loads all 109,451
+rows with 0 quarantined and the filename window satisfied. The retype
+of the 1,309,804 loaded lines under the edited spec is recorded in
+``meta.spec_check`` (the old shapes parse first, so no stored value
+changes).
+
+Loading the two files is the next Azure step and waits for the
+developer's word: the image built from the spec commit, both jobs
+moved to it, and the files committed either by hand from the laptop
+copies or from a fresh upload to a new dated folder. The automation
+will not fetch these blobs again on its own: a blob whose content has
+a batch, held included, counts as seen, which is the rule that keeps
+an ephemeral landing root safe. The two held batches stay as the
+record of what arrived first.
