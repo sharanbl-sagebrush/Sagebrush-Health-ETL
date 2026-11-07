@@ -230,10 +230,13 @@ variants:
         type: date
         date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
         required: true
+      # The export writes "Jul 2026"; the two files of 2026-11-06 arrived as
+      # "Jul-26" on every row (a month name and a two-digit year, which is
+      # not ambiguous), so that shape is declared too. Never a numeric form.
       - target: transmonth
         sources: ["TransMonth"]
         type: date
-        date_formats: ["%b %Y", "%B %Y"]
+        date_formats: ["%b %Y", "%B %Y", "%b-%y", "%B-%y"]
       - target: date_paid
         sources: ["Date_Paid"]
         type: date
@@ -415,7 +418,7 @@ variants:
       - target: postmonth
         sources: ["PostMonth"]
         type: date
-        date_formats: ["%b %Y", "%B %Y"]
+        date_formats: ["%b %Y", "%B %Y", "%b-%y", "%B-%y"]
       - target: svcdate
         sources: ["SvcDate"]
         type: date
