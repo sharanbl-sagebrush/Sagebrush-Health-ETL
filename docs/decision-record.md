@@ -1718,3 +1718,38 @@ will not fetch these blobs again on its own: a blob whose content has
 a batch, held included, counts as seen, which is the rule that keeps
 an ephemeral landing root safe. The two held batches stay as the
 record of what arrived first.
+
+## The Monthly Payments reload, and what Curve's new export changed (2026-11-07 to 09)
+
+The laptop load started 2026-11-07 00:30 UTC was stopped at 00:57 when
+the developer had to close the laptop; its transaction rolled back
+whole (landed back at 1,309,804 lines, no locks), and the open run row
+is closed with ``close_runs.py``. Jay re-uploaded the same two files to
+``inbound/11072026/`` at 00:56; a new blob name is never one the job
+has seen, so the 01:00 UTC acquire run fetched both and committed them
+on image 9bf2fd7 by 02:19: the May to July file 118,497 rows, 18,273
+inserted, 12,704 unchanged, 87,520 corrected; the July to September
+file 109,451 rows, 64,758 inserted, 44,693 unchanged (the July overlap
+between the two pulls), 0 corrected; 0 conflicts, 0 quarantined on
+either. The as-of is 2026-11-07 from the folder. Monthly Payments is
+current through 2026-09-30, 1,392,835 current rows, 2,790,159 in all.
+The two held batches of midnight stay in the record under the same
+file ids (188, 189): a file is its source plus its bytes, and the
+bytes did not change.
+
+The 87,520 corrections were read column by column (counts only), and
+they are mostly not corrections. 83,683 differ only in ``dob``, which
+the spec holds as text (``pii: direct``): the new export zero-pads the
+date on every row (shape 99/99/9999) where the old wrote 9/9/9999 on
+most, so the same birth date hashes differently. Typing ``dob`` as a
+date with an explicit US format would make both shapes one value and
+turn those rows back into "unchanged" at the next rebuild; that is a
+spec decision for the developer, and the rebuild is a Monthly
+Payments-sized job in Azure. 9,817 differ in ``reference``, and the
+reason is a vendor defect: 9,054 rows of the July to September file
+carry the reference in scientific notation (9.99999E+99) where the old
+export wrote fifteen digits, so those reference numbers are lost in
+Curve's own file. That goes to Jay and through him to Curve. The rest
+(patient address, phone, email, diagnosis codes, referring provider)
+differ in the low thousands and look like genuine updates between the
+pulls.

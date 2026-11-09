@@ -302,7 +302,18 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   word: image, jobs, then a load by hand from the laptop copies or a
   re-upload, since a blob with a batch is never fetched again
   (`docs/decision-record.md`, "Curve changed the Monthly Payments
-  export")
+  export"). **Loaded 2026-11-07** by the 01:00 UTC acquire run after
+  Jay re-uploaded both files to `inbound/11072026/`: 118,497 and
+  109,451 rows, 83,031 inserted, 57,397 unchanged, 87,520 corrected, 0
+  conflict, 0 quarantined; Monthly Payments is current through
+  2026-09-30 with 1,392,835 current rows. 83,683 of the corrections
+  differ only in `dob`, a text column the new export zero-pads, and
+  9,054 rows of the Jul-Sep file carry `reference` in scientific
+  notation where the old export wrote 15 digits: a vendor defect to
+  raise with Curve. Next, in order (also in the assistant's memory):
+  close the run row the stopped laptop load left (`close_runs.py`),
+  verify Monthly Payments, decide `dob` as a date, let a held file be
+  retried daily (`acquire/ledger.py`), re-record headers on rebuild
 
 ## Rules that came from real defects
 
