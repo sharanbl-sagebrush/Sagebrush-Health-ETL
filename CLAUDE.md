@@ -314,6 +314,18 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
   close the run row the stopped laptop load left (`close_runs.py`),
   verify Monthly Payments, decide `dob` as a date, let a held file be
   retried daily (`acquire/ledger.py`), re-record headers on rebuild
+- 2026-11-09: **after the restart.** The run row is closed and the
+  freshness check reports 0 alerts. Monthly Payments `dob` is a `date`
+  (developer: "yes DOBs must be date column"; Jay uploads the report as
+  it comes, so every vendor shape change is handled in the spec or the
+  code): the retype says 43 files, 1,537,752 lines, every line with a
+  value rehashed, 0 newly quarantined, totals agree; the rebuild runs in
+  Azure on the image built from this commit. The `NEW_COLUMNS` note now
+  binds the recorded header against the spec as it is now instead of
+  reading the recorded target map, which is the landed layout the
+  replay depends on and must not be rewritten; the three stale notes
+  cleared with nothing written. The registry holds one tag, the one
+  the jobs run (`docs/decision-record.md`, the two 2026-11-09 entries)
 
 ## Rules that came from real defects
 

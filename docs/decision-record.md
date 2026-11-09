@@ -1753,3 +1753,81 @@ Curve's own file. That goes to Jay and through him to Curve. The rest
 (patient address, phone, email, diagnosis codes, referring provider)
 differ in the low thousands and look like genuine updates between the
 pulls.
+
+## The new-columns note reads the spec as it is now; the registry holds one tag (2026-11-09, developer: "Go ahead with item 5 and also delete the unused images and keep the latest one")
+
+The freshness check kept reporting the sixteen columns three vendors
+added as ``NEW_COLUMNS`` five days after task 4 claimed them and the
+rebuilds typed them. The note was derived from the header the commit
+engine recorded on ``meta.source_file`` when the file loaded: every
+position, its text, and the target it bound to then. Those three
+headers still said the columns bound to nothing, because a rebuild
+does not re-record them, and the plan written on 2026-11-06 was to
+make it do so.
+
+That plan was wrong, and the reason is worth keeping. The recorded
+target map is the landed layout the replay reads a line by
+(``ingest/replay.py``): a bound position reads its target's cell from
+``cells``, an unbound one reads the vendor header's cell from
+``extra_cells``. A rebuild leaves ``landed`` alone, so a column the
+spec claimed after the load still lives in ``extra_cells`` on every
+line loaded before the claim, and the map has to keep saying so, or
+the next replay would read ``cells`` for it and type null. The map
+records where each cell lives, not what the spec claims today, and
+the two questions had been one function.
+
+So the check now binds the recorded header against the spec as it is
+now (``observe/sql.py::unclaimed_columns``, given the spec by
+``collect``), and reports the columns that binding leaves unclaimed,
+in file order. The recorded map is the fallback for a check run
+without specs and for a header no variant of the current spec binds
+any more. Two tests cover the two paths. The live check went from the
+three notes to none on the same data, with nothing written.
+
+The registry (``sbhdatabankacr``, repository ``sbh-data-bank``) held
+tag ``e7a5161`` beside ``9bf2fd7``, which both jobs run, and two
+untagged manifests from 2026-11-03 that the deleted tags of that day
+had left behind. The developer asked for the unused ones to go and
+the latest kept: ``e7a5161`` and the two orphans were deleted by
+manifest, after confirming each manifest carried no other tag (the
+lesson of 2026-11-06), and ``9bf2fd7`` stays until the image for the
+``dob`` change below replaces it.
+
+## The Monthly Payments date of birth is a date (2026-11-09, developer: "yes DOBs must be date column")
+
+``dob`` in Monthly Payments was text by a deliberate choice recorded in
+the spec: a direct identifier bound for encrypted storage, not a value
+anything computes on. Curve's new export (the files of 2026-11-06)
+zero-pads the day and month, so the same birth date arrived as
+different text and 83,683 rows were corrected on nothing but that. The
+developer decided the column is a date. Jay downloads the report and
+uploads it as it comes, so a change in the vendor's shape is always
+handled on our side, in the spec or the code, never by asking for a
+different upload.
+
+The spec now types ``dob`` as ``date`` with the explicit formats the
+file has used (US month-day-year and ISO), ``pii: direct`` unchanged,
+and the comment says why the earlier choice was reversed. Three
+sources already typed a birth date this way (WeInfuse patients and
+administrations, Allscripts eRx), so nothing new enters the DDL.
+
+The retype from ``landed`` under the edited spec, 1,422 s from the
+laptop: 43 files, 1,537,752 lines, every line with a value rehashed
+(a date column hashes as a date, and a text one hashed as its text),
+0 newly quarantined, 0 newly typed, 0 still quarantined, every control
+total agrees. The 46 lines that did not rehash have no birth date. No
+file fails to bind. The rebuild is therefore a type change plus a full
+rehash, the Curve money shape of 2026-11-04 on a larger source: the
+live ``dob`` column nulled and altered to DATE in ``typed`` and
+``curated``, typed replaced from landed, every live curated row
+retired as ``retyped`` and reinserted, history refilled. It runs in
+Azure as a one-off execution on the image built from this commit; the
+last Monthly Payments rebuild took 2 h 40 min on the 128 GB file, and
+this one writes 1.54 million lines where that one wrote 1.31.
+
+What the rebuild will not do: the 83,683 corrections already written
+stay as history. A rebuild replays the dedup rule over the retyped
+rows and reconciles the live generation; the pairs where only the
+padding differed now carry one hash, so the replay makes the later
+row "unchanged" and the earlier one the current row of its identity.
+The count of such pairs is the plan's to confirm.

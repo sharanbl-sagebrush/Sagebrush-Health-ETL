@@ -357,11 +357,15 @@ variants:
         sources: ["MI"]
         type: text
         pii: direct
-      # DOB is typed text, not date, deliberately: it is a direct identifier
-      # destined for encrypted storage, not a value anything computes on.
+      # DOB was text until 2026-11-09. Curve's new export zero-pads the day
+      # and month (the files of 2026-11-06), so the same birth date arrived
+      # as different text and 83,683 rows were "corrected" on nothing. As a
+      # date the two spellings are one value. Still a direct identifier,
+      # still encrypted at rest; the formats are the file's, never inferred.
       - target: dob
         sources: ["DOB"]
-        type: text
+        type: date
+        date_formats: ["%m/%d/%Y", "%Y-%m-%d"]
         pii: direct
       - target: gender
         sources: ["Gender"]

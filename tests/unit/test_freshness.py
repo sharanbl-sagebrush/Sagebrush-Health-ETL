@@ -32,6 +32,7 @@ from sbh_data_bank.observe.sql import (
     SEEN_BY_SOURCE,
     SPEC_CHECKS,
     collect,
+    unclaimed_columns,
 )
 from sbh_data_bank.registry.spec import SourceSpec
 
@@ -291,6 +292,51 @@ class TestCollect:
         statuses, _ = collect(db, "sagebrush", since=datetime(2026, 10, 15))
         assert statuses["t.a"].newest_file == "a.xlsx [Sheet1]"
         assert statuses["t.a"].unclaimed_columns == ("Rebate",)
+
+    def test_a_column_the_spec_has_since_claimed_is_no_longer_new(self):
+        """The recorded header says what bound when the file loaded; the
+        note is about the spec as it is now. After task 4 (2026-11-04) the
+        three sources whose new columns were claimed and rebuilt kept
+        reporting them, because the recorded target map is the landed
+        layout the replay reads by and is never rewritten."""
+        import json
+
+        header = json.dumps(
+            [
+                {"position": 0, "header": "ID", "target": "id"},
+                {"position": 1, "header": "Rebate", "target": None},
+                {"position": 2, "header": "Site Name", "target": None},
+            ]
+        )
+        spec = _spec(
+            "t.a",
+            variants=[
+                {
+                    "name": "only",
+                    "detect": {"require_all": ["ID"]},
+                    "columns": [
+                        {"target": "id", "sources": ["ID"], "required": True},
+                        {"target": "rebate", "sources": ["Rebate"]},
+                    ],
+                }
+            ],
+        )
+        db = _FakeDb({NEWEST_HEADER: [("t.a", "a.csv", None, header)]})
+        statuses, _ = collect(db, "sagebrush", since=datetime(2026, 10, 15), specs=[spec])
+        assert statuses["t.a"].unclaimed_columns == ("Site Name",)
+        # Without the spec the recorded map is all there is.
+        assert unclaimed_columns(header) == ("Rebate", "Site Name")
+
+    def test_a_header_no_variant_binds_any_more_falls_back_to_the_recorded_map(self):
+        import json
+
+        header = json.dumps(
+            [
+                {"position": 0, "header": "Old ID", "target": "id"},
+                {"position": 1, "header": "Rebate", "target": None},
+            ]
+        )
+        assert unclaimed_columns(header, _spec("t.a")) == ("Rebate",)
 
     def test_spec_checks_are_merged_per_digest(self):
         db = _FakeDb({SPEC_CHECKS: [("t.a", "a" * 64, 0), ("t.a", "b" * 64, 2)]})

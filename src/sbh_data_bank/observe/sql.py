@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from sbh_data_bank.observe.freshness import BENIGN_OUTCOMES, RunStatus, SourceStatus
+from sbh_data_bank.registry.binding import NoVariantMatchedError, bind
 from sbh_data_bank.registry.headers import HeaderIndex
 from sbh_data_bank.registry.spec import SourceSpec
 from sbh_data_bank.store.schema import table_name
@@ -86,13 +87,31 @@ RUN_SOURCES = (
 )
 
 
-def unclaimed_columns(header_json: str) -> tuple[str, ...]:
-    """The real (non-junk) headers in a recorded header row that bound to
-    no target, in file order, as the vendor wrote them."""
+def unclaimed_columns(header_json: str, spec: SourceSpec | None = None) -> tuple[str, ...]:
+    """The real (non-junk) headers in a recorded header row that no spec
+    column claims, in file order, as the vendor wrote them.
+
+    With ``spec`` the header is bound against the spec as it is now, so a
+    column the spec has since named (and a rebuild has since typed) stops
+    being reported. The recorded ``target`` map is not consulted for that:
+    it is the landed layout the replay reads a line by (``ingest.replay``),
+    a claimed column in ``cells`` and an unclaimed one in ``extra_cells``,
+    and a rebuild leaves landed alone, so the map must keep saying where
+    each cell lives, not what the spec claims today. Without a spec, or
+    when no variant of the spec binds the header any more, the recorded
+    map is what there is."""
     entries = sorted(json.loads(header_json), key=lambda e: e["position"])
-    headers = [e["header"] for e in entries]
-    matched = {int(e["position"]) for e in entries if e.get("target")}
-    loose = HeaderIndex(headers).unmatched_headers(matched)
+    headers = [str(e["header"]) for e in entries]
+    index = HeaderIndex(headers)
+    loose: set[str] | None = None
+    if spec is not None:
+        try:
+            loose = set(bind(spec, index).new_columns)
+        except NoVariantMatchedError:
+            loose = None
+    if loose is None:
+        matched = {int(e["position"]) for e in entries if e.get("target")}
+        loose = index.unmatched_headers(matched)
     return tuple(h for h in headers if h in loose)
 
 
@@ -106,7 +125,8 @@ def collect(
     """Every source's status and the runs since ``since`` (open runs
     regardless), from the metadata tables. With ``specs``, each source's
     typed table is asked for the digest of the spec its newest row was
-    typed under (a table that does not exist yet reads as no digest)."""
+    typed under (a table that does not exist yet reads as no digest), and
+    its newest recorded header is bound against the spec as it is now."""
     digests: dict[str, str] = {}
     for spec in specs or []:
         try:
@@ -125,10 +145,11 @@ def collect(
     checks: dict[str, dict[str, int]] = {}
     for key, digest, changed in db.execute(SPEC_CHECKS, tenant_id):
         checks.setdefault(key, {})[digest] = int(changed)
+    by_key = {spec.key: spec for spec in specs or []}
     newest: dict[str, tuple[str, tuple[str, ...]]] = {}
     for key, name, sheet, header_json in db.execute(NEWEST_HEADER, tenant_id):
         shown = f"{name} [{sheet}]" if sheet else name
-        newest[key] = (shown, unclaimed_columns(header_json))
+        newest[key] = (shown, unclaimed_columns(header_json, by_key.get(key)))
     statuses = {}
     keys = set(loaded) | set(seen) | set(refusals) | set(quarantine) | set(digests)
     keys |= set(newest) | set(checks)
