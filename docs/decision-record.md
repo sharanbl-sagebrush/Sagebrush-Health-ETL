@@ -1831,3 +1831,84 @@ rows and reconciles the live generation; the pairs where only the
 padding differed now carry one hash, so the replay makes the later
 row "unchanged" and the earlier one the current row of its identity.
 The count of such pairs is the plan's to confirm.
+
+## The ``dob`` rebuild lands on the second attempt; what it left in history (2026-11-10 to 11)
+
+The first apply (execution ``sbh-acquire-2xld52f``, 2026-11-10 00:07 UTC)
+was killed by the platform at the job's four-hour replica timeout and
+rolled back whole: ``dob`` still text in every layer, no batch on its
+run, the run row closed as ``INTERRUPTED`` by the developer. Query
+Store gives the time per statement, and none of it is the container's:
+the database is a two-vCore General Purpose one, its data-read IO sat
+at up to 97% of its cap with CPU under 12%, and every step rewrites or
+scans a table larger than its memory.
+
+| Step | First attempt |
+|---|---|
+| null ``dob`` in ``typed``, alter to DATE | 921 s + 157 s |
+| null ``dob`` in ``curated`` (2.79 M rows), alter | 2,006 s + 510 s |
+| the history hashes read | 245 s |
+| typed replaced, 43 files (delete 3,644 s, insert 903 s, landed read 612 s) | about 92 min |
+| retire the live rows | 4,414 s, aborted at the limit |
+
+The earlier Monthly Payments rebuild fitted in 2 h 40 min because it
+changed no column type. The developer raised the job's
+``replicaTimeout`` to 43,200 s for the run (it is back at 14,400). The
+plan on the 44 files (the 2026-11-09 delivery had loaded meanwhile,
+11,783 rows): 1,549,535 lines, 1,549,488 rehashed, 0 newly
+quarantined, totals agree, kept 43, retired and inserted 1,404,575,
+refilled 2,801,942, history rehashed 87,520. The apply (execution
+``sbh-acquire-8cynw2r``, image ``50bef75``, batch
+``bat_1794333502012_000000_de613ef6``) wrote exactly those counts in
+35,825 s, 9 h 58 min: the retire took 6,388 s, the insert 37 min, the
+refill of ``dob`` over the 4.2 million curated rows about four and a
+half hours. A scheduled run left at twelve hours is no risk worth
+keeping, and a type change on this source is a ten-hour job on this
+database: the next one either scales the database for the night or the
+null-then-refill of ``curated`` is made cheaper first.
+
+Read back: ``dob`` is DATE in ``typed``, ``curated`` and, after the
+migration re-created them, both ``pres`` views (a view keeps the types
+it was created with); landed = typed = 1,549,535; 1,404,618 current
+rows, 1,404,575 of them written by the rebuild; 0 identities with two
+current rows; 0 current rows whose hash or ``dob`` differs from their
+typed line. No file loaded between the commit (03:55 UTC) and the move
+of both jobs to ``50bef75`` (17:05 UTC), so nothing entered under the
+old spec. Tag ``9bf2fd7`` was deleted after the first scheduled run on
+``50bef75`` succeeded; the registry holds one tag.
+
+``verify_layers.py`` passed its one-hour query timeout on the
+completeness check a second time, with nothing else running. The check
+compared the six key columns for every typed line in one statement; it
+now asks in stages (the lines with no current-generation row, those of
+them whose content is on no current-generation row, and only that
+remainder against the key), which gives the recorded PRxP counts to
+the digit (359, 521, 162, 0) and Monthly Payments in 54 minutes.
+
+**The verdict is FAIL, and the failure is in history, not in the
+current rows.** 64,673 lines carry two current-generation rows, and
+every numeric total of "current generation plus unchanged" exceeds the
+typed total by exactly what those rows hold (amount 11,110,920.81, fee
+56,564,895.05). They are the corrections the new rule undid. The
+2026-11-07 load corrected 87,520 rows; on 64,673 of them the only
+difference was the padding of ``dob``, so under a date the later line
+is *unchanged* and the earlier line is the current row again. The
+rebuild wrote that: it retired the later line's row as ``retyped`` and
+inserted the earlier line as current. The earlier line's old row,
+superseded as ``corrected`` on 2026-11-07, is history the reconcile
+leaves in place, so the line now has it beside its new current row,
+with the same hash (the history refresh brought it to the new one).
+The other 22,847 ``corrected`` rows are corrections the new rule still
+makes and have no live row on their line. The previous entry said the
+corrections "stay as history"; this is what that costs, measured: a
+history that records 64,673 corrections the rule in force says never
+happened, and a history total that counts those lines twice. No reader
+of ``superseded_by IS NULL`` sees any of it.
+
+Open, the developer's to decide: retire those rows as ``retyped`` with
+the rebuild batch (the rebuild's reconcile would then do the same for
+any history row whose line the new rule makes current, and the check
+passes as written), or keep them and have the check report them as the
+rule's residue beside the lines a rebuild made history. Until then the
+result on record is the failing one,
+``docs/validation/verify_layers_2026-11-11_monthly_payments.json``.

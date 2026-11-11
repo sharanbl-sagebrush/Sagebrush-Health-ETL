@@ -1,0 +1,142 @@
+{
+  "started_at": "2026-11-11T18:12:57+00:00",
+  "finished_at": "2026-11-11T19:07:04+00:00",
+  "database": "sbh_data_bank on sagebrushhealth-data-analysis.database.windows.net as login 'pranav' (tenant 'sagebrush')",
+  "sources": 1,
+  "passed": 0,
+  "failed": 1,
+  "never_loaded": 0,
+  "results": [
+    {
+      "source": "finance.monthly_payments",
+      "identity": [
+        "clientid",
+        "voucher_number",
+        "service_id",
+        "seqnum",
+        "voidsign",
+        "transtype"
+      ],
+      "columns": 115,
+      "checks": {
+        "recorded": {
+          "files_loaded": 44,
+          "rebuilds": 2,
+          "rows_landed": 1549535,
+          "rows_read": 1549535,
+          "rows_unchanged": 57397,
+          "rows_quarantined": 0,
+          "rows_inserted": 1404618,
+          "rows_superseded": 87520,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 1549535,
+          "typed": 1549535,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 1549535
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 57397,
+          "typed_lines_unchanged": 122070,
+          "unchanged_recorded_by_loads": 57397,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 4206517,
+          "current": 1404618,
+          "superseded_corrected": 87520,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 2714379
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 64673,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 1492138,
+          "row_hash_mismatches": 0,
+          "columns_compared": 115,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "seqnum": {
+            "typed": "985494940208",
+            "current_generation_plus_unchanged": "1051844611676",
+            "current": "832603950516"
+          },
+          "voidsign": {
+            "typed": "1515279",
+            "current_generation_plus_unchanged": "1579030",
+            "current": "1372162"
+          },
+          "amount": {
+            "typed": "235423607.2600",
+            "current_generation_plus_unchanged": "246534528.0700",
+            "current": "210491285.2200"
+          },
+          "fee": {
+            "typed": "1326227336.4500",
+            "current_generation_plus_unchanged": "1382792231.5000",
+            "current": "1193275345.9300"
+          },
+          "units": {
+            "typed": "20188417.020000",
+            "current_generation_plus_unchanged": "21022635.020000",
+            "current": "18371255.020000"
+          },
+          "workrvu": {
+            "typed": "1884275.240000",
+            "current_generation_plus_unchanged": "1964877.210000",
+            "current": "1699486.550000"
+          }
+        }
+      },
+      "failures": [
+        {
+          "check": "duplicates",
+          "detail": "64673 lines have two current-generation curated rows",
+          "sample": []
+        },
+        {
+          "check": "aggregates",
+          "detail": "column seqnum: typed total 985494940208 but current generation plus unchanged lines total 1051844611676",
+          "sample": []
+        },
+        {
+          "check": "aggregates",
+          "detail": "column voidsign: typed total 1515279 but current generation plus unchanged lines total 1579030",
+          "sample": []
+        },
+        {
+          "check": "aggregates",
+          "detail": "column amount: typed total 235423607.2600 but current generation plus unchanged lines total 246534528.0700",
+          "sample": []
+        },
+        {
+          "check": "aggregates",
+          "detail": "column fee: typed total 1326227336.4500 but current generation plus unchanged lines total 1382792231.5000",
+          "sample": []
+        },
+        {
+          "check": "aggregates",
+          "detail": "column units: typed total 20188417.020000 but current generation plus unchanged lines total 21022635.020000",
+          "sample": []
+        },
+        {
+          "check": "aggregates",
+          "detail": "column workrvu: typed total 1884275.240000 but current generation plus unchanged lines total 1964877.210000",
+          "sample": []
+        }
+      ],
+      "status": "FAIL",
+      "seconds": 3246.9
+    }
+  ]
+}

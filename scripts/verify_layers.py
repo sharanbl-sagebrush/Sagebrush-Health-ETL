@@ -206,30 +206,55 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
         if identity
         else "1 = 0"
     )
-    # SQL Server refuses a subquery inside an aggregate, so the flags are
-    # computed per typed line in a derived table and summed outside it.
-    (missing, unchanged, made_history, lost) = _one(
-        cur,
-        f"SELECT SUM(x.missing), SUM(x.unchanged), SUM(x.made_history), SUM(x.lost) FROM ("
-        f"SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM {curated} c "
+    # The three questions are asked in stages, each over the lines the one
+    # before left open, because asked of every typed line in one statement
+    # the identity comparison ran for all of them and Monthly Payments
+    # (1.5 million lines against 4.2 million curated rows) passed the
+    # one-hour query timeout twice (2026-11-09, 2026-11-11). #gap holds the
+    # lines with no current-generation row; #stray those of them whose
+    # content is on no current-generation row either; only #stray, which is
+    # small, meets the identity comparison. The counts are the same ones.
+    # The tables are created by statements without parameters: a temporary
+    # table made inside a parameterised statement is gone when it returns.
+    cur.execute("DROP TABLE IF EXISTS #stray")
+    cur.execute("DROP TABLE IF EXISTS #gap")
+    cur.execute(
+        "CREATE TABLE #gap (source_file_id BIGINT NOT NULL, line_number INT NOT NULL, "
+        "row_hash CHAR(64) NOT NULL, missing INT NOT NULL)"
+    )
+    cur.execute("CREATE TABLE #stray (source_file_id BIGINT NOT NULL, line_number INT NOT NULL)")
+    cur.execute(
+        f"INSERT INTO #gap SELECT t.source_file_id, t.line_number, t.row_hash, "
+        f"CASE WHEN NOT EXISTS (SELECT 1 FROM {curated} c "
         f"WHERE c.source_file_id = t.source_file_id AND c.line_number = t.line_number) "
-        f"THEN 1 ELSE 0 END AS missing, "
-        f"CASE WHEN {no_current_gen} THEN 1 ELSE 0 END AS unchanged, "
-        f"CASE WHEN {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
-        f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
-        f"AND {superseded_by_newer} THEN 1 ELSE 0 END AS made_history, "
-        f"CASE WHEN {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
-        f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
-        f"AND NOT {superseded_by_newer} THEN 1 ELSE 0 END AS lost "
-        f"FROM {typed} t WHERE t.tenant_id = ?) AS x",
+        f"THEN 1 ELSE 0 END FROM {typed} t WHERE t.tenant_id = ? AND {no_current_gen}",
         tenant,
     )
-    missing, unchanged, made_history, lost = (
+    (unchanged, missing) = _one(cur, "SELECT COUNT(*), SUM(missing) FROM #gap")
+    cur.execute(
+        f"INSERT INTO #stray SELECT g.source_file_id, g.line_number FROM #gap g "
+        f"WHERE NOT EXISTS (SELECT 1 FROM {curated} c WHERE c.tenant_id = ? "
+        f"AND c.row_hash = g.row_hash AND {CURRENT_GEN})",
+        tenant,
+    )
+    stray = (
+        f"FROM #stray s JOIN {typed} t ON t.source_file_id = s.source_file_id "
+        f"AND t.line_number = s.line_number WHERE t.tenant_id = ?"
+    )
+    # SQL Server refuses a subquery inside an aggregate, so the flag is
+    # computed per line in a derived table and summed outside it.
+    (strays, made_history) = _one(
+        cur,
+        f"SELECT COUNT(*), SUM(x.made_history) FROM (SELECT CASE WHEN {superseded_by_newer} "
+        f"THEN 1 ELSE 0 END AS made_history {stray}) AS x",
+        tenant,
+    )
+    missing, unchanged, made_history = (
         int(missing or 0),
         int(unchanged or 0),
         int(made_history or 0),
-        int(lost or 0),
     )
+    lost = int(strays or 0) - made_history
     (orphans,) = _one(
         cur,
         f"SELECT COUNT(*) FROM {curated} c WHERE c.tenant_id = ? AND NOT EXISTS "
@@ -264,9 +289,7 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
     if lost:
         sample = _rows(
             cur,
-            f"SELECT TOP {SAMPLE} t.source_file_id, t.line_number FROM {typed} t "
-            f"WHERE t.tenant_id = ? AND {no_current_gen} AND NOT EXISTS (SELECT 1 FROM {curated} c "
-            f"WHERE c.tenant_id = t.tenant_id AND c.row_hash = t.row_hash AND {CURRENT_GEN}) "
+            f"SELECT TOP {SAMPLE} t.source_file_id, t.line_number {stray} "
             f"AND NOT {superseded_by_newer} "
             f"ORDER BY t.source_file_id, t.line_number",
             tenant,
