@@ -1,0 +1,106 @@
+{
+  "started_at": "2026-11-17T17:24:25+00:00",
+  "finished_at": "2026-11-17T18:22:43+00:00",
+  "database": "sbh_data_bank on sagebrushhealth-data-analysis.database.windows.net as login 'pranav' (tenant 'sagebrush')",
+  "sources": 1,
+  "passed": 1,
+  "failed": 0,
+  "never_loaded": 0,
+  "results": [
+    {
+      "source": "finance.monthly_payments",
+      "identity": [
+        "clientid",
+        "voucher_number",
+        "service_id",
+        "seqnum",
+        "voidsign",
+        "transtype"
+      ],
+      "columns": 115,
+      "checks": {
+        "recorded": {
+          "files_loaded": 45,
+          "rebuilds": 2,
+          "rows_landed": 1566107,
+          "rows_read": 1566107,
+          "rows_unchanged": 68626,
+          "rows_quarantined": 0,
+          "rows_inserted": 1409407,
+          "rows_superseded": 88074,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 1566107,
+          "typed": 1566107,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 1566107
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 68626,
+          "typed_lines_unchanged": 133299,
+          "unchanged_recorded_by_loads": 68626,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 4211860,
+          "current": 1409407,
+          "superseded_corrected": 23401,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 2779052
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 1432808,
+          "row_hash_mismatches": 0,
+          "columns_compared": 115,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "seqnum": {
+            "typed": "1005489164811",
+            "current_generation_plus_unchanged": "1005489164811",
+            "current": "838090236840"
+          },
+          "voidsign": {
+            "typed": "1531705",
+            "current_generation_plus_unchanged": "1531705",
+            "current": "1376895"
+          },
+          "amount": {
+            "typed": "238685468.0500",
+            "current_generation_plus_unchanged": "238685468.0500",
+            "current": "211290118.7500"
+          },
+          "fee": {
+            "typed": "1341327446.0900",
+            "current_generation_plus_unchanged": "1341327446.0900",
+            "current": "1197352066.7100"
+          },
+          "units": {
+            "typed": "20397348.020000",
+            "current_generation_plus_unchanged": "20397348.020000",
+            "current": "18435949.020000"
+          },
+          "workrvu": {
+            "typed": "1904324.860000",
+            "current_generation_plus_unchanged": "1904324.860000",
+            "current": "1704980.480000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 3498.0
+    }
+  ]
+}

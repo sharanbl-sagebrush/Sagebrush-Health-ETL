@@ -1977,3 +1977,13 @@ its spec says ``active`` again. The cadence stays on the spec for that
 purpose. The typing digest does not include the lifecycle, so nothing
 is raised as a spec change. Run against the live database from this
 tree the check reports 0 findings where the scheduled one reported 6.
+
+**Monthly Payments passes the layer check (2026-11-17).** Run after the
+64,673 rows were retired and with the 2026-11-15 delivery in, the first
+load onto the date-typed ``dob``: landed = typed = 1,566,107; 1,409,407
+current rows; 1,432,808 rows compared with their typed line; 0 lines
+with two current-generation rows; 58 minutes
+(``docs/validation/verify_layers_2026-11-17_monthly_payments.json``).
+Both jobs run ``f36c9a0``, the only tag in the registry: ``fc24996``
+was superseded within the hour and ``50bef75`` was deleted after the
+18:00 UTC acquire run on the new image succeeded.
