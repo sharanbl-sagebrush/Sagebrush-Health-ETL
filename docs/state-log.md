@@ -360,3 +360,12 @@ the end, one bullet per day or event, as before.
   and the freshness check then notes the source delivered so it can be
   made active again (`docs/decision-record.md`, "Six sources are
   paused")
+- 2026-11-17: **the CMS ASP crosswalk is loaded.** A 22nd spec,
+  `reference.cms.asp_crosswalk`, and a reader for the legacy `.xls`
+  CMS publishes it in. October 2026 quarter: 7,402 rows current, 1
+  quarantined (a device's barcode number in the NDC column), layer
+  check PASS. The layer check now accepts a quarantine the loads
+  recorded. The same day the other 20 sources passed the layer check,
+  the null-literal scan found 0, and `verify_load.py` found 0 row-count
+  mismatches (`docs/decision-record.md`, "The CMS ASP crosswalk is a
+  source")

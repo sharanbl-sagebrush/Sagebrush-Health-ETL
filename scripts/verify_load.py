@@ -101,13 +101,13 @@ def _csv_rows(data: bytes, read: ReadSpec) -> list[list[Any]]:
 
 
 def _sheet_rows(path: Path, sheet: str) -> list[list[Any]]:
-    import openpyxl
+    from sbh_data_bank.ingest.reader import workbook_rows
 
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    stream, close = workbook_rows(path, sheet)
     try:
-        return [list(r) for r in workbook[sheet].iter_rows(values_only=True)]
+        return [list(r) for r in stream]
     finally:
-        workbook.close()
+        close()
 
 
 def _read_for(spec: SourceSpec, variant_name: str | None) -> ReadSpec:
@@ -185,7 +185,7 @@ def part_files(db: Database, registry: SpecRegistry, root: Path, tenant: str, on
                 read = _read_for(spec, loaded[0][6])
                 if member:
                     raw = _csv_rows(data, read)
-                elif path.suffix.lower() in {".xlsx", ".xlsm"}:
+                elif path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
                     raw = _sheet_rows(path, sheet)
                 else:
                     raw = _csv_rows(path.read_bytes(), read)

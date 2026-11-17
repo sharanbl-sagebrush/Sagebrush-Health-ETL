@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -286,17 +286,65 @@ def _csv_header_and_rows(
     return header, rows()
 
 
-def _excel_header_and_rows(
-    path: Path, read: ReadSpec, sheet: str
-) -> tuple[list[str], Iterator[RawRow]]:
-    """The workbook counterpart of :func:`_csv_header_and_rows`.
+def _xls_cell(cell: Any, datemode: int) -> Any:
+    """One legacy-workbook cell as openpyxl would have handed it over.
 
-    Same contract: ``(header, rows)`` for one named worksheet, header located
-    by marker or by fixed preamble, :class:`HeaderNotFoundError` when a marker
-    is declared and absent. ``KeyError`` propagates from openpyxl if the sheet
-    name does not exist; ``load_file`` treats that as "this variant's read
-    settings do not fit" and tries the next variant.
+    The old binary format stores every number as a float, so a HCPCS code of
+    90371 arrives as 90371.0 and would be landed with a decimal point the
+    file never showed. A whole number comes back as an ``int``, a date cell
+    as a ``datetime``, an empty cell as ``None``; text is left alone.
     """
+    import xlrd
+
+    if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+        return None
+    if cell.ctype == xlrd.XL_CELL_NUMBER:
+        return int(cell.value) if float(cell.value).is_integer() else cell.value
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        return xlrd.xldate_as_datetime(cell.value, datemode)
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return bool(cell.value)
+    if cell.ctype == xlrd.XL_CELL_ERROR:
+        return None
+    return cell.value
+
+
+def workbook_sheet_names(path: Path) -> list[str]:
+    """The worksheet names of a workbook, in workbook order.
+
+    ``.xlsx`` and ``.xlsm`` go through openpyxl; the legacy ``.xls`` (what
+    CMS publishes the ASP crosswalk as, 2026-11-17) through xlrd, which
+    reads nothing else."""
+    if path.suffix.lower() == ".xls":
+        import xlrd
+
+        return list(xlrd.open_workbook(path, on_demand=True).sheet_names())
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        return list(workbook.sheetnames)
+    finally:
+        workbook.close()
+
+
+def workbook_rows(path: Path, sheet: str) -> tuple[Iterator[tuple[Any, ...]], Callable[[], None]]:
+    """One worksheet's rows as tuples of native cell values, and the call
+    that releases the file. ``KeyError`` when the sheet does not exist, in
+    either format."""
+    if path.suffix.lower() == ".xls":
+        import xlrd
+
+        book = xlrd.open_workbook(path, on_demand=True)
+        if sheet not in book.sheet_names():
+            book.release_resources()
+            raise KeyError(f"Worksheet {sheet} does not exist.")
+        worksheet = book.sheet_by_name(sheet)
+        stream = (
+            tuple(_xls_cell(c, book.datemode) for c in worksheet.row(r))
+            for r in range(worksheet.nrows)
+        )
+        return stream, book.release_resources
     # Imported here rather than at module level so that CSV-only use (and the
     # test suite's fast paths) never pay for loading openpyxl.
     import openpyxl
@@ -304,8 +352,26 @@ def _excel_header_and_rows(
     # read_only streams rows instead of building the whole sheet in memory;
     # data_only returns cached formula results rather than formula text.
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    worksheet = workbook[sheet]
-    stream = worksheet.iter_rows(values_only=True)
+    try:
+        worksheet = workbook[sheet]
+    except KeyError:
+        workbook.close()
+        raise
+    return worksheet.iter_rows(values_only=True), workbook.close
+
+
+def _excel_header_and_rows(
+    path: Path, read: ReadSpec, sheet: str
+) -> tuple[list[str], Iterator[RawRow]]:
+    """The workbook counterpart of :func:`_csv_header_and_rows`.
+
+    Same contract: ``(header, rows)`` for one named worksheet, header located
+    by marker or by fixed preamble, :class:`HeaderNotFoundError` when a marker
+    is declared and absent. ``KeyError`` propagates if the sheet name does
+    not exist; ``load_file`` treats that as "this variant's read settings do
+    not fit" and tries the next variant.
+    """
+    stream, close = workbook_rows(path, sheet)
 
     if read.header_marker is not None:
         # Identical scan to the CSV path. ABC's workbook form has one title
@@ -320,13 +386,13 @@ def _excel_header_and_rows(
                 break
             if skipped >= read.max_preamble_scan:
                 # Close before raising: read_only workbooks hold a file handle.
-                workbook.close()
+                close()
                 raise HeaderNotFoundError(
                     f"header marker {read.header_marker!r} not found in the first "
                     f"{read.max_preamble_scan} rows of sheet {sheet!r}"
                 )
         else:
-            workbook.close()
+            close()
             raise HeaderNotFoundError(
                 f"header marker {read.header_marker!r} not found in sheet {sheet!r}"
             )
@@ -347,7 +413,7 @@ def _excel_header_and_rows(
             for offset, cells in enumerate(stream, start=1):
                 yield RawRow(line_number=header_line + offset, values=tuple(cells), sheet=sheet)
         finally:
-            workbook.close()
+            close()
 
     return header, rows()
 
@@ -362,13 +428,7 @@ def resolve_sheet(path: Path, read: ReadSpec) -> list[str]:
     ``ingest.load_workbook`` calls this once per variant to decide which tabs
     to load.
     """
-    import openpyxl
-
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        return [n for n in workbook.sheetnames if read.selects_sheet(n)]
-    finally:
-        workbook.close()
+    return [n for n in workbook_sheet_names(path) if read.selects_sheet(n)]
 
 
 def _is_blank(row: RawRow) -> bool:

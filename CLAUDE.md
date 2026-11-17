@@ -23,8 +23,8 @@ Commit messages explain *why*, not just what. `git log` is part of the record.
 The chronology since 2026-10-16 is `docs/state-log.md`; the reasoning
 and numbers behind each step are `docs/decision-record.md`. In short:
 
-- 21 source specs, every one loaded into `sbh_data_bank` on Azure and
-  verified against the raw files and across the layers; 546 tests, no
+- 22 source specs, every one loaded into `sbh_data_bank` on Azure and
+  verified against the raw files and across the layers; 547 tests, no
   database required. Reconciliation is deliberately deferred
 - Two scheduled Container Apps jobs (acquire every half hour, freshness
   daily) run the image of the latest commit, the only tag in the registry. Monthly
@@ -40,6 +40,8 @@ and numbers behind each step are `docs/decision-record.md`. In short:
   halted and their reports come back empty. Paused silences the stale
   alert only; a file that arrives still loads, and the freshness check
   then notes it so the spec can go back to `active`
+- The CMS ASP crosswalk (NDC to HCPCS, billing units per package) is
+  loaded for the October 2026 quarter; earlier quarters are not
 - Open next: the asks for Jay (Curve's scientific-notation reference
   numbers, the upload guide)
 
@@ -206,7 +208,7 @@ gives 1,914 duplicate rows (8.2%) and overstates purchases by $1,387,175.46.
 ## Running things
 
 ```bash
-python -m pytest                    # 546 tests, no database
+python -m pytest                    # 547 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts

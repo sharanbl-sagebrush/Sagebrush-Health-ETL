@@ -1987,3 +1987,50 @@ with two current-generation rows; 58 minutes
 Both jobs run ``f36c9a0``, the only tag in the registry: ``fc24996``
 was superseded within the hour and ``50bef75`` was deleted after the
 18:00 UTC acquire run on the new image succeeded.
+
+## The CMS ASP crosswalk is a source; the loader reads legacy `.xls` (2026-11-17, developer: "Go ahead and load the crosswalk, commit and deploy")
+
+The definition of done names the conversion inputs: for each NDC, the
+HCPCS code it bills under and the billing units one package holds
+(BILLUNITSPKG). The developer downloaded the October 2026 quarter from
+cms.gov. It is a spec like any other, ``reference.cms.asp_crosswalk``,
+the 22nd: keyed on (hcpcs_code, ndc), which is unique in the file where
+ndc alone is not (181 NDCs bill under more than one code), and a
+snapshot like the Apexus price list, so a later quarter supersedes and
+vanishes against this one and the earlier quarter stays as history.
+
+CMS publishes the file as a legacy ``.xls`` workbook. The reader opens
+one through ``xlrd`` behind the two functions every caller already
+uses for a workbook (``workbook_sheet_names``, ``workbook_rows``); a
+whole number comes over without the ``.0`` the old format stores it
+with, because 25 codes are numeric cells (CPT codes).
+
+Loaded from the developer's machine: 7,403 lines landed, 7,402 typed
+and current, 1 quarantined. The quarantined line is J7331, SynoJoynt, a
+device whose NDC column holds a twelve-digit barcode number; that is
+not an NDC and nothing is guessed. It is the first quarantined row in
+the database, and the layer check had treated any quarantine as a
+failure because none existed. It now fails only when
+``stg.quarantine`` holds a different number than the loads recorded,
+and prints the count on every line
+(``docs/validation/verify_layers_2026-11-17_asp_crosswalk.json``, PASS).
+The freshness check lists the row daily as an open quarantine, a note
+and not an alert, until quarantine has a way to close a row a person
+has looked at.
+
+Two things the conversion will have to know. The quarter a file is
+effective for is in its name and title line, not in a column. And one
+quarter is loaded: converting 2025 and earlier 2026 purchases at the
+factor in force on their date needs those quarters' files, which CMS
+still publishes.
+
+**All 21 earlier sources verified the same day.** The layer check over
+the 20 sources other than Monthly Payments: 20 pass, 0 lines with two
+current rows
+(``docs/validation/verify_layers_2026-11-17_all_but_monthly_payments.json``).
+A scan of every text column of ``typed`` and ``curated`` for null-like
+literals ("nan", "none", "null", "n/a"): 0. ``verify_load.py``: 0
+row-count mismatches; three local files report as not in the database
+because they were re-saved on 2026-11-04 with different bytes, and the
+versions loaded on 2026-10-22 hold the same row counts (482, 503,
+7,700).

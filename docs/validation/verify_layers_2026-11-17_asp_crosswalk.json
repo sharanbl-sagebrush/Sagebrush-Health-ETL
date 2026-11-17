@@ -1,0 +1,92 @@
+{
+  "started_at": "2026-11-17T21:49:11+00:00",
+  "finished_at": "2026-11-17T21:49:12+00:00",
+  "database": "sbh_data_bank on sagebrushhealth-data-analysis.database.windows.net as login 'pranav' (tenant 'sagebrush')",
+  "sources": 1,
+  "passed": 1,
+  "failed": 0,
+  "never_loaded": 0,
+  "results": [
+    {
+      "source": "reference.cms.asp_crosswalk",
+      "identity": [
+        "hcpcs_code",
+        "ndc"
+      ],
+      "columns": 10,
+      "checks": {
+        "recorded": {
+          "files_loaded": 1,
+          "rebuilds": 0,
+          "rows_landed": 7403,
+          "rows_read": 7403,
+          "rows_unchanged": 0,
+          "rows_quarantined": 1,
+          "rows_inserted": 7402,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 7403,
+          "typed": 7402,
+          "quarantined": 1,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 7403
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 0,
+          "typed_lines_unchanged": 0,
+          "unchanged_recorded_by_loads": 0,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 7402,
+          "current": 7402,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 7402,
+          "row_hash_mismatches": 0,
+          "columns_compared": 10,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "pkg_size": {
+            "typed": "336653.205000",
+            "current_generation_plus_unchanged": "336653.205000",
+            "current": "336653.205000"
+          },
+          "pkg_qty": {
+            "typed": "68511.000000",
+            "current_generation_plus_unchanged": "68511.000000",
+            "current": "68511.000000"
+          },
+          "billunits": {
+            "typed": "1802938.933333",
+            "current_generation_plus_unchanged": "1802938.933333",
+            "current": "1802938.933333"
+          },
+          "billunitspkg": {
+            "typed": "5136219.100000",
+            "current_generation_plus_unchanged": "5136219.100000",
+            "current": "5136219.100000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 0.5
+    }
+  ]
+}

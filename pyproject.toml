@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.2",
     "openpyxl>=3.1",
+    "xlrd>=2.0",
     "pydantic>=2.7",
     "pyodbc>=5.1",
     "PyYAML>=6.0",

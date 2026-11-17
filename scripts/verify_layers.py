@@ -170,8 +170,17 @@ def verify_source(cur, spec: SourceSpec, tenant: str) -> dict[str, Any]:
             f"{skipped_found} landed lines are neither typed nor quarantined; "
             f"the batches recorded {skipped_recorded} skipped",
         )
-    if n_quar:
-        fail("lines", f"{n_quar} quarantined rows (no quarantine was expected on any source)")
+    # A quarantined line is accounted for, not lost: it is in landed and in
+    # stg.quarantine with its reason. It fails only when the table holds a
+    # different number than the loads recorded. (Until 2026-11-17 any
+    # quarantine failed, because no source had one; the CMS crosswalk
+    # carries a device's twelve-digit code in its NDC column.)
+    if n_quar != recorded["rows_quarantined"]:
+        fail(
+            "lines",
+            f"stg.quarantine holds {n_quar} rows, "
+            f"the batches recorded {recorded['rows_quarantined']}",
+        )
 
     # --- 2. completeness between typed and curated ------------------------
     # A typed line with no current-generation curated row is "unchanged":
@@ -490,7 +499,8 @@ def main() -> int:
                 continue
             print(
                 f"  {spec.key:40} {result['status']:4} landed={c['lines']['landed']} "
-                f"typed={c['lines']['typed']} current={c['completeness']['current']} "
+                f"typed={c['lines']['typed']} quarantined={c['lines']['quarantined']} "
+                f"current={c['completeness']['current']} "
                 f"compared={c['values']['rows_compared']} "
                 f"double_current={c['duplicates']['identities_with_two_current_rows']} "
                 f"({result['seconds']}s)"

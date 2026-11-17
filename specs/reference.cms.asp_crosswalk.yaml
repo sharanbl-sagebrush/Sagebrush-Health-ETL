@@ -1,0 +1,102 @@
+# reference.cms.asp_crosswalk - the CMS ASP NDC-HCPCS crosswalk for Medicare
+# Part B drugs
+#
+# Added 2026-11-17. The developer downloaded the October 2026 quarter from
+# cms.gov ("I downloaded the latest file"). This is the file the unit
+# conversion rests on: for each NDC it says which HCPCS code it bills
+# under and how many billing units one package holds (BILLUNITSPKG). A
+# wholesaler sells packages and a clinic bills units; without this factor
+# "purchased" and "administered" cannot be compared. Conversion itself is
+# reconciliation work and is not done here; the factors are captured, per
+# quarter, so the version in force on a transaction date can be found.
+#
+# Structure (probed 2026-11-17, a public file): a legacy .xls workbook,
+# one sheet named for the quarter ("Oct 26 NDC-HCPCS Crosswalk"), eight
+# title and blank rows above the header, ten columns, 7,403 rows. The
+# first header carries the year ("_2026_CODE"), so every year's spelling
+# is listed and a year not listed here fails as a missing column rather
+# than loading without its code. 25 codes are numeric cells (CPT codes
+# such as 90371); the reader hands a whole number over without the ".0"
+# the old format stores it with.
+#
+# ndc is the ndc type: 7,402 values are hyphenated 5-4-2 and normalise by
+# their segments. One is twelve digits without hyphens (J7331, SynoJoynt,
+# a device: the product has a barcode number, not an NDC) and quarantines
+# as CMS wrote it; its line stays in landed.
+#
+# natural_key (hcpcs_code, ndc): unique across the file. ndc alone is not
+# (181 NDCs bill under more than one code).
+#
+# A snapshot, like the Apexus price list: every delivery is the whole
+# crosswalk for its quarter, a newer one supersedes the rows it still
+# carries and vanishes the ones it dropped, and the earlier quarters stay
+# as history. The as-of is the dated folder the file is uploaded in. The
+# quarter a file is effective for is in its name and its title line
+# ("Effective October 1, 2026 through December 31, 2026"), not in a
+# column; whatever converts units reads it from the file name on
+# meta.source_file. Published quarterly, so the cadence is a quarter plus
+# a week.
+
+key: reference.cms.asp_crosswalk
+name: CMS ASP NDC-HCPCS crosswalk
+vendor: CMS
+group: Reference
+catalog_names: ["ASP NDC-HCPCS Crosswalk"]
+lifecycle: active
+expected_cadence_days: 98
+event_date: as_of
+coverage: as_of
+vanish: true
+filename_patterns:
+  - "asp.*ndc.*hcpcs.*crosswalk"
+natural_key: [hcpcs_code, ndc]
+on_new_column: warn
+on_missing_column: fail
+variants:
+  - name: quarterly_xls
+    description: >
+      The quarterly crosswalk as CMS publishes it: one sheet, title rows
+      above a ten-column header.
+    detect:
+      require_all: ["Short Description", "NDC", "BILLUNITS", "BILLUNITSPKG"]
+    read:
+      header_marker: "BILLUNITSPKG"
+    columns:
+      - target: hcpcs_code
+        sources: ["_2025_CODE", "_2026_CODE", "_2027_CODE", "_2028_CODE", "HCPCS Code"]
+        type: text
+        required: true
+        description: The HCPCS (or CPT) code the NDC bills under.
+      - target: short_description
+        sources: ["Short Description"]
+        type: text
+      - target: labeler_name
+        sources: ["LABELER NAME"]
+        type: text
+      - target: ndc
+        sources: ["NDC"]
+        type: ndc
+        required: true
+      - target: drug_name
+        sources: ["Drug Name"]
+        type: text
+      - target: hcpcs_dosage
+        sources: ["HCPCS dosage"]
+        type: text
+        description: The amount of drug one billing unit stands for, e.g. "1 MG".
+      - target: pkg_size
+        sources: ["PKG SIZE"]
+        type: decimal
+        description: Amount in one item of the package, in the dosage's unit.
+      - target: pkg_qty
+        sources: ["PKG QTY"]
+        type: decimal
+        description: Items in the package.
+      - target: billunits
+        sources: ["BILLUNITS"]
+        type: decimal
+        description: Billing units in one item.
+      - target: billunitspkg
+        sources: ["BILLUNITSPKG"]
+        type: decimal
+        description: Billing units in the whole package; the conversion factor.

@@ -1,0 +1,1847 @@
+{
+  "started_at": "2026-11-17T18:54:51+00:00",
+  "finished_at": "2026-11-17T19:25:02+00:00",
+  "database": "sbh_data_bank on sagebrushhealth-data-analysis.database.windows.net as login 'pranav' (tenant 'sagebrush')",
+  "sources": 20,
+  "passed": 20,
+  "failed": 0,
+  "never_loaded": 0,
+  "results": [
+    {
+      "source": "dispense.weinfuse.administered",
+      "identity": [
+        "order_id",
+        "inventory_item_id"
+      ],
+      "columns": 35,
+      "checks": {
+        "recorded": {
+          "files_loaded": 8,
+          "rebuilds": 0,
+          "rows_landed": 89750,
+          "rows_read": 89750,
+          "rows_unchanged": 23970,
+          "rows_quarantined": 0,
+          "rows_inserted": 65298,
+          "rows_superseded": 482,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 89750,
+          "typed": 89750,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 89750
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 23970,
+          "typed_lines_unchanged": 23970,
+          "unchanged_recorded_by_loads": 23970,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 65780,
+          "current": 65298,
+          "superseded_corrected": 482,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 65780,
+          "row_hash_mismatches": 0,
+          "columns_compared": 35,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "strength": {
+            "typed": "15638251.600000",
+            "current_generation_plus_unchanged": "15638251.600000",
+            "current": "11315131.100000"
+          },
+          "billing_units": {
+            "typed": "4706747.000000",
+            "current_generation_plus_unchanged": "4706747.000000",
+            "current": "3473887.500000"
+          },
+          "unit_price": {
+            "typed": "44767942.4300",
+            "current_generation_plus_unchanged": "44767942.4300",
+            "current": "32559755.9600"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 13.1
+    },
+    {
+      "source": "dispense.weinfuse.buybill",
+      "identity": [
+        "order_id",
+        "inventory_item_id"
+      ],
+      "columns": 33,
+      "checks": {
+        "recorded": {
+          "files_loaded": 3,
+          "rebuilds": 0,
+          "rows_landed": 66300,
+          "rows_read": 66300,
+          "rows_unchanged": 19975,
+          "rows_quarantined": 0,
+          "rows_inserted": 46323,
+          "rows_superseded": 2,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 66300,
+          "typed": 66300,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 66300
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 19975,
+          "typed_lines_unchanged": 19975,
+          "unchanged_recorded_by_loads": 19975,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 46325,
+          "current": 46323,
+          "superseded_corrected": 2,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 46325,
+          "row_hash_mismatches": 0,
+          "columns_compared": 33,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "strength": {
+            "typed": "11143230.200000",
+            "current_generation_plus_unchanged": "11143230.200000",
+            "current": "7662589.600000"
+          },
+          "unit_price": {
+            "typed": "37881344.0500",
+            "current_generation_plus_unchanged": "37881344.0500",
+            "current": "26525229.5000"
+          },
+          "billing_units": {
+            "typed": "3353215.000000",
+            "current_generation_plus_unchanged": "3353215.000000",
+            "current": "2406564.000000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 8.9
+    },
+    {
+      "source": "dispense.weinfuse.patients",
+      "identity": [
+        "patient_identifier"
+      ],
+      "columns": 57,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 3948,
+          "rows_read": 3948,
+          "rows_unchanged": 1112,
+          "rows_quarantined": 0,
+          "rows_inserted": 2228,
+          "rows_superseded": 608,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 3948,
+          "typed": 3948,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 3948
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 1112,
+          "typed_lines_unchanged": 1112,
+          "unchanged_recorded_by_loads": 1112,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 2836,
+          "current": 2228,
+          "superseded_corrected": 608,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 2836,
+          "row_hash_mismatches": 0,
+          "columns_compared": 57,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {}
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 1.0
+    },
+    {
+      "source": "ehr.allscripts.erx",
+      "identity": "every column",
+      "columns": 21,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 258890,
+          "rows_read": 258890,
+          "rows_unchanged": 85547,
+          "rows_quarantined": 0,
+          "rows_inserted": 173343,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 258890,
+          "typed": 258890,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 258890
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 85547,
+          "typed_lines_unchanged": 85547,
+          "unchanged_recorded_by_loads": 85547,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 173343,
+          "current": 173343,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 9954,
+          "vendor_repeats_recorded_as_findings": 13141,
+          "current_rows_sharing_a_row_hash": 9223
+        },
+        "values": {
+          "rows_compared": 173343,
+          "row_hash_mismatches": 0,
+          "columns_compared": 21,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "qty": {
+            "typed": "9130472709.190000",
+            "current_generation_plus_unchanged": "9130472709.190000",
+            "current": "4568525008.820000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 121.3
+    },
+    {
+      "source": "ehr.athena.eligibility",
+      "identity": [
+        "patientid"
+      ],
+      "columns": 10,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 169035,
+          "rows_read": 169035,
+          "rows_unchanged": 141933,
+          "rows_quarantined": 0,
+          "rows_inserted": 25212,
+          "rows_superseded": 1890,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 169035,
+          "typed": 169035,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 169035
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 141933,
+          "typed_lines_unchanged": 141933,
+          "unchanged_recorded_by_loads": 141933,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 27102,
+          "current": 25212,
+          "superseded_corrected": 1890,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 27102,
+          "row_hash_mismatches": 0,
+          "columns_compared": 10,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {}
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 11.7
+    },
+    {
+      "source": "ehr.athena.encounters",
+      "identity": "every column",
+      "columns": 11,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 41294,
+          "rows_read": 41294,
+          "rows_unchanged": 15724,
+          "rows_quarantined": 0,
+          "rows_inserted": 25570,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 41294,
+          "typed": 41294,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 41294
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 15724,
+          "typed_lines_unchanged": 15724,
+          "unchanged_recorded_by_loads": 15724,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 25570,
+          "current": 25570,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 25570,
+          "row_hash_mismatches": 0,
+          "columns_compared": 11,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {}
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 4.2
+    },
+    {
+      "source": "ehr.athena.prescriptions",
+      "identity": "every column",
+      "columns": 20,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 65804,
+          "rows_read": 65804,
+          "rows_unchanged": 17354,
+          "rows_quarantined": 0,
+          "rows_inserted": 48450,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 65804,
+          "typed": 65804,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 65804
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 17354,
+          "typed_lines_unchanged": 17354,
+          "unchanged_recorded_by_loads": 17354,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 48450,
+          "current": 48450,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 47,
+          "vendor_repeats_recorded_as_findings": 94,
+          "current_rows_sharing_a_row_hash": 47
+        },
+        "values": {
+          "rows_compared": 48450,
+          "row_hash_mismatches": 0,
+          "columns_compared": 20,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {}
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 8.3
+    },
+    {
+      "source": "ehr.curve.appointments",
+      "identity": "every column",
+      "columns": 112,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 1,
+          "rows_landed": 373857,
+          "rows_read": 373857,
+          "rows_unchanged": 11389,
+          "rows_quarantined": 0,
+          "rows_inserted": 362468,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 373857,
+          "typed": 373857,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 373857
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 11389,
+          "typed_lines_unchanged": 11389,
+          "unchanged_recorded_by_loads": 11389,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 721359,
+          "current": 362468,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 358891
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 511,
+          "vendor_repeats_recorded_as_findings": 431,
+          "current_rows_sharing_a_row_hash": 428
+        },
+        "values": {
+          "rows_compared": 362468,
+          "row_hash_mismatches": 0,
+          "columns_compared": 112,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {}
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 498.6
+    },
+    {
+      "source": "ehr.curve.monthly_services",
+      "identity": [
+        "service_id",
+        "voidsign"
+      ],
+      "columns": 114,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 1,
+          "rows_landed": 402674,
+          "rows_read": 402674,
+          "rows_unchanged": 8543,
+          "rows_quarantined": 0,
+          "rows_inserted": 283490,
+          "rows_superseded": 110641,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 402674,
+          "typed": 402674,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 402674
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 8543,
+          "typed_lines_unchanged": 8543,
+          "unchanged_recorded_by_loads": 8543,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 674838,
+          "current": 283490,
+          "superseded_corrected": 110641,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 280707
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 394131,
+          "row_hash_mismatches": 0,
+          "columns_compared": 114,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "voidsign": {
+            "typed": "388166",
+            "current_generation_plus_unchanged": "388166",
+            "current": "271308"
+          },
+          "fee": {
+            "typed": "320282061.0000",
+            "current_generation_plus_unchanged": "320282061.0000",
+            "current": "219067785.4700"
+          },
+          "units": {
+            "typed": "4612808.010000",
+            "current_generation_plus_unchanged": "4612808.010000",
+            "current": "3206301.010000"
+          },
+          "totpmt": {
+            "typed": "88264716.7900",
+            "current_generation_plus_unchanged": "88264716.7900",
+            "current": "63123732.8800"
+          },
+          "totadj": {
+            "typed": "195425701.5400",
+            "current_generation_plus_unchanged": "195425701.5400",
+            "current": "141382080.8200"
+          },
+          "totref": {
+            "typed": "-53463.6100",
+            "current_generation_plus_unchanged": "-53463.6100",
+            "current": "-46761.4000"
+          },
+          "workrvu": {
+            "typed": "536953.750000",
+            "current_generation_plus_unchanged": "536953.750000",
+            "current": "368165.050000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 755.4
+    },
+    {
+      "source": "reference.apexus.pricing",
+      "identity": [
+        "ndc",
+        "internal_pvp_contract_number",
+        "pvp_contracted_eff_date"
+      ],
+      "columns": 43,
+      "checks": {
+        "recorded": {
+          "files_loaded": 2,
+          "rebuilds": 0,
+          "rows_landed": 98069,
+          "rows_read": 98069,
+          "rows_unchanged": 0,
+          "rows_quarantined": 0,
+          "rows_inserted": 60454,
+          "rows_superseded": 37615,
+          "rows_vanished": 7936
+        },
+        "lines": {
+          "landed": 98069,
+          "typed": 98069,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 98069
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 0,
+          "typed_lines_unchanged": 0,
+          "unchanged_recorded_by_loads": 0,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 98069,
+          "current": 52518,
+          "superseded_corrected": 37615,
+          "superseded_vanished": 7936,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 98069,
+          "row_hash_mismatches": 0,
+          "columns_compared": 43,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "sell_price_340b": {
+            "typed": "104218332.5500",
+            "current_generation_plus_unchanged": "104218332.5500",
+            "current": "15513619.7200"
+          },
+          "pvp_contracted_price": {
+            "typed": "2120682.7000",
+            "current_generation_plus_unchanged": "2120682.7000",
+            "current": "1056653.8900"
+          },
+          "wac_price": {
+            "typed": "107872983.1500",
+            "current_generation_plus_unchanged": "107872983.1500",
+            "current": "35176901.2900"
+          },
+          "match_name": {
+            "typed": "3324",
+            "current_generation_plus_unchanged": "3324",
+            "current": "0"
+          },
+          "is_match": {
+            "typed": "156",
+            "current_generation_plus_unchanged": "156",
+            "current": "0"
+          },
+          "excluded_ndc": {
+            "typed": "107",
+            "current_generation_plus_unchanged": "107",
+            "current": "0"
+          },
+          "price_340b": {
+            "typed": "88704712.8300",
+            "current_generation_plus_unchanged": "88704712.8300",
+            "current": "0"
+          },
+          "asp": {
+            "typed": "7114687.5516",
+            "current_generation_plus_unchanged": "7114687.5516",
+            "current": "0"
+          },
+          "wac": {
+            "typed": "72696081.8600",
+            "current_generation_plus_unchanged": "72696081.8600",
+            "current": "0"
+          },
+          "pct_340b_plus": {
+            "typed": "106445655.396000",
+            "current_generation_plus_unchanged": "106445655.396000",
+            "current": "0"
+          },
+          "asp_less_pct": {
+            "typed": "6260925.045408",
+            "current_generation_plus_unchanged": "6260925.045408",
+            "current": "0"
+          },
+          "wac_less_pct": {
+            "typed": "58156865.488000",
+            "current_generation_plus_unchanged": "58156865.488000",
+            "current": "0"
+          },
+          "sell_price": {
+            "typed": "114445546.2202",
+            "current_generation_plus_unchanged": "114445546.2202",
+            "current": "0"
+          },
+          "partner_price": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "volume": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "margin_amount": {
+            "typed": "25740833.3902",
+            "current_generation_plus_unchanged": "25740833.3902",
+            "current": "0"
+          },
+          "margin_pct": {
+            "typed": "18876.871446",
+            "current_generation_plus_unchanged": "18876.871446",
+            "current": "0"
+          },
+          "cogs_pa": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "sell_price_pa": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "margin_pa": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "partner_price_pa": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "partner_savings_pa": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "partner_savings_pct": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "flag_include_ndc": {
+            "typed": "156",
+            "current_generation_plus_unchanged": "156",
+            "current": "0"
+          },
+          "flag_pricing_superior": {
+            "typed": "45551",
+            "current_generation_plus_unchanged": "45551",
+            "current": "0"
+          },
+          "flag_pricing_available": {
+            "typed": "33096",
+            "current_generation_plus_unchanged": "33096",
+            "current": "0"
+          },
+          "flag_exceeds_hurdle": {
+            "typed": "33096",
+            "current_generation_plus_unchanged": "33096",
+            "current": "0"
+          },
+          "master_filter": {
+            "typed": "135",
+            "current_generation_plus_unchanged": "135",
+            "current": "0"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 88.1
+    },
+    {
+      "source": "reference.wholesaler_accounts",
+      "identity": [
+        "source_sheet",
+        "payee",
+        "account_number",
+        "location"
+      ],
+      "columns": 8,
+      "checks": {
+        "recorded": {
+          "files_loaded": 6,
+          "rebuilds": 0,
+          "rows_landed": 247,
+          "rows_read": 247,
+          "rows_unchanged": 0,
+          "rows_quarantined": 0,
+          "rows_inserted": 247,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 247,
+          "typed": 247,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 247
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 0,
+          "typed_lines_unchanged": 0,
+          "unchanged_recorded_by_loads": 0,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 247,
+          "current": 247,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 247,
+          "row_hash_mismatches": 0,
+          "columns_compared": 8,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {}
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 0.9
+    },
+    {
+      "source": "tpa.pharmaforce.claims",
+      "identity": [
+        "claim_id"
+      ],
+      "columns": 65,
+      "checks": {
+        "recorded": {
+          "files_loaded": 13,
+          "rebuilds": 0,
+          "rows_landed": 255178,
+          "rows_read": 255178,
+          "rows_unchanged": 35906,
+          "rows_quarantined": 0,
+          "rows_inserted": 218509,
+          "rows_superseded": 763,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 255178,
+          "typed": 255178,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 255178
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 35906,
+          "typed_lines_unchanged": 35906,
+          "unchanged_recorded_by_loads": 35906,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 219272,
+          "current": 218509,
+          "superseded_corrected": 763,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 219272,
+          "row_hash_mismatches": 0,
+          "columns_compared": 65,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "package_size": {
+            "typed": "74766671.050000",
+            "current_generation_plus_unchanged": "74766671.050000",
+            "current": "62420206.350000"
+          },
+          "qty_dispensed": {
+            "typed": "16072104.939000",
+            "current_generation_plus_unchanged": "16072104.939000",
+            "current": "13489133.309000"
+          },
+          "days_supply": {
+            "typed": "11304136.000000",
+            "current_generation_plus_unchanged": "11304136.000000",
+            "current": "9167023.000000"
+          },
+          "patient_pay": {
+            "typed": "13553959.9100",
+            "current_generation_plus_unchanged": "13553959.9100",
+            "current": "9173371.3300"
+          },
+          "third_party_payment": {
+            "typed": "248778362.0200",
+            "current_generation_plus_unchanged": "248778362.0200",
+            "current": "174159166.9000"
+          },
+          "total_payment": {
+            "typed": "262332321.9300",
+            "current_generation_plus_unchanged": "262332321.9300",
+            "current": "183332538.2300"
+          },
+          "disp_fee": {
+            "typed": "13824073.8100",
+            "current_generation_plus_unchanged": "13824073.8100",
+            "current": "10102543.1100"
+          },
+          "ce_receivable": {
+            "typed": "134752615.9200",
+            "current_generation_plus_unchanged": "134752615.9200",
+            "current": "98788015.8200"
+          },
+          "n340b_drug_cost": {
+            "typed": "118668835.9000",
+            "current_generation_plus_unchanged": "118668835.9000",
+            "current": "81133955.2400"
+          },
+          "total_claim_cost": {
+            "typed": "70228101.5400",
+            "current_generation_plus_unchanged": "70228101.5400",
+            "current": "50426765.4800"
+          },
+          "profit_or_loss": {
+            "typed": "78630591.3900",
+            "current_generation_plus_unchanged": "78630591.3900",
+            "current": "58675331.4100"
+          },
+          "retail_drug_cost": {
+            "typed": "293441374.0100",
+            "current_generation_plus_unchanged": "293441374.0100",
+            "current": "199356425.3600"
+          },
+          "trued_up_units": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "trued_up_cost": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 271.3
+    },
+    {
+      "source": "tpa.prxp.transactions",
+      "identity": [
+        "rx_transaction_id"
+      ],
+      "columns": 97,
+      "checks": {
+        "recorded": {
+          "files_loaded": 6,
+          "rebuilds": 1,
+          "rows_landed": 9695,
+          "rows_read": 9695,
+          "rows_unchanged": 521,
+          "rows_quarantined": 0,
+          "rows_inserted": 7692,
+          "rows_superseded": 1482,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 9695,
+          "typed": 9695,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 9695
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 359,
+          "typed_lines_unchanged": 521,
+          "unchanged_recorded_by_loads": 521,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 162,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 16866,
+          "current": 7692,
+          "superseded_corrected": 1482,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 7692
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 9174,
+          "row_hash_mismatches": 0,
+          "columns_compared": 97,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "days_supply": {
+            "typed": "303328.000000",
+            "current_generation_plus_unchanged": "303328.000000",
+            "current": "241051.000000"
+          },
+          "qty_dispensed": {
+            "typed": "306057.460000",
+            "current_generation_plus_unchanged": "306057.460000",
+            "current": "243141.460000"
+          },
+          "patient_paid_amount": {
+            "typed": "14899.3100",
+            "current_generation_plus_unchanged": "14899.3100",
+            "current": "14645.1500"
+          },
+          "primary_paid_amount": {
+            "typed": "16656264.5100",
+            "current_generation_plus_unchanged": "16656264.5100",
+            "current": "13359920.4700"
+          },
+          "secondary_paid_amount": {
+            "typed": "521262.5600",
+            "current_generation_plus_unchanged": "521262.5600",
+            "current": "445411.2400"
+          },
+          "tertiary_paid_amount": {
+            "typed": "5311.4500",
+            "current_generation_plus_unchanged": "5311.4500",
+            "current": "5170.3500"
+          },
+          "ce_responsibility": {
+            "typed": "84575.9200",
+            "current_generation_plus_unchanged": "84575.9200",
+            "current": "81537.4200"
+          },
+          "total_amount_collected": {
+            "typed": "17197737.8300",
+            "current_generation_plus_unchanged": "17197737.8300",
+            "current": "13825147.2100"
+          },
+          "acquisition_cost": {
+            "typed": "8627967.6800",
+            "current_generation_plus_unchanged": "8627967.6800",
+            "current": "6892746.9100"
+          },
+          "wac": {
+            "typed": "18412673.7265",
+            "current_generation_plus_unchanged": "18412673.7265",
+            "current": "14857193.0804"
+          },
+          "awp": {
+            "typed": "26399884.7318",
+            "current_generation_plus_unchanged": "26399884.7318",
+            "current": "21311156.8696"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 2.4
+    },
+    {
+      "source": "tpa.wellpartner.claims",
+      "identity": [
+        "transaction"
+      ],
+      "columns": 119,
+      "checks": {
+        "recorded": {
+          "files_loaded": 7,
+          "rebuilds": 0,
+          "rows_landed": 51090,
+          "rows_read": 51090,
+          "rows_unchanged": 1077,
+          "rows_quarantined": 0,
+          "rows_inserted": 46024,
+          "rows_superseded": 3989,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 51090,
+          "typed": 51090,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 51090
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 1077,
+          "typed_lines_unchanged": 1077,
+          "unchanged_recorded_by_loads": 1077,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 50013,
+          "current": 46024,
+          "superseded_corrected": 3989,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 50013,
+          "row_hash_mismatches": 0,
+          "columns_compared": 119,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "mdq": {
+            "typed": "9263664.030000",
+            "current_generation_plus_unchanged": "9263664.030000",
+            "current": "8708107.830000"
+          },
+          "dispensed_qty": {
+            "typed": "3908979.340000",
+            "current_generation_plus_unchanged": "3908979.340000",
+            "current": "3513403.980000"
+          },
+          "days_supply": {
+            "typed": "2692399.000000",
+            "current_generation_plus_unchanged": "2692399.000000",
+            "current": "2412907.000000"
+          },
+          "packages_dispensed": {
+            "typed": "60666.090000",
+            "current_generation_plus_unchanged": "60666.090000",
+            "current": "53341.080000"
+          },
+          "program_revenue": {
+            "typed": "67734462.4900",
+            "current_generation_plus_unchanged": "67734462.4900",
+            "current": "56744289.9200"
+          },
+          "patient_paid": {
+            "typed": "813126.2900",
+            "current_generation_plus_unchanged": "813126.2900",
+            "current": "725855.2200"
+          },
+          "est_340b_cost": {
+            "typed": "29192262.8100",
+            "current_generation_plus_unchanged": "29192262.8100",
+            "current": "24115279.8400"
+          },
+          "est_wholesale_cost": {
+            "typed": "76830535.0441",
+            "current_generation_plus_unchanged": "76830535.0441",
+            "current": "64661796.1124"
+          },
+          "admin_fee": {
+            "typed": "4762283.6000",
+            "current_generation_plus_unchanged": "4762283.6000",
+            "current": "3931277.2900"
+          },
+          "dispensing_fee": {
+            "typed": "9282919.2900",
+            "current_generation_plus_unchanged": "9282919.2900",
+            "current": "7816681.5700"
+          },
+          "entity_subsidy": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "est_entity_net_savings": {
+            "typed": "24496996.7900",
+            "current_generation_plus_unchanged": "24496996.7900",
+            "current": "20881051.2200"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 12.0
+    },
+    {
+      "source": "tpa.wellpartner.invoices",
+      "identity": [
+        "wholesaler_invoice",
+        "wholesaler_name",
+        "wholesaler_account",
+        "wholesaler_invoice_date"
+      ],
+      "columns": 10,
+      "checks": {
+        "recorded": {
+          "files_loaded": 7,
+          "rebuilds": 0,
+          "rows_landed": 10554,
+          "rows_read": 10554,
+          "rows_unchanged": 1654,
+          "rows_quarantined": 0,
+          "rows_inserted": 8900,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 10554,
+          "typed": 10554,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 10554
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 1654,
+          "typed_lines_unchanged": 1654,
+          "unchanged_recorded_by_loads": 1654,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 8900,
+          "current": 8900,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 10,
+          "vendor_repeats_recorded_as_findings": 10,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 8900,
+          "row_hash_mismatches": 0,
+          "columns_compared": 10,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "invoice_net_amount": {
+            "typed": "29962706.8100",
+            "current_generation_plus_unchanged": "29962706.8100",
+            "current": "24594421.8200"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 1.8
+    },
+    {
+      "source": "wholesaler.abc.purchases",
+      "identity": [
+        "account",
+        "invoice",
+        "ndc",
+        "abc"
+      ],
+      "columns": 26,
+      "checks": {
+        "recorded": {
+          "files_loaded": 7,
+          "rebuilds": 1,
+          "rows_landed": 7984,
+          "rows_read": 7984,
+          "rows_unchanged": 1173,
+          "rows_quarantined": 0,
+          "rows_inserted": 5746,
+          "rows_superseded": 1065,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 7984,
+          "typed": 7984,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 7984
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 1173,
+          "typed_lines_unchanged": 1173,
+          "unchanged_recorded_by_loads": 1173,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 12557,
+          "current": 5746,
+          "superseded_corrected": 1065,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 5746
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 6811,
+          "row_hash_mismatches": 0,
+          "columns_compared": 26,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "order_qty": {
+            "typed": "29015.000000",
+            "current_generation_plus_unchanged": "29015.000000",
+            "current": "21092.000000"
+          },
+          "shipped_qty": {
+            "typed": "32183.000000",
+            "current_generation_plus_unchanged": "32183.000000",
+            "current": "22766.000000"
+          },
+          "invoice_ext_amt": {
+            "typed": "27951533.8400",
+            "current_generation_plus_unchanged": "27951533.8400",
+            "current": "20621226.3900"
+          },
+          "non_merchandise": {
+            "typed": "-112071.5500",
+            "current_generation_plus_unchanged": "-112071.5500",
+            "current": "-66697.4800"
+          },
+          "tax_amount": {
+            "typed": "143.1600",
+            "current_generation_plus_unchanged": "143.1600",
+            "current": "143.1600"
+          },
+          "current_acq_cost": {
+            "typed": "17538671.3900",
+            "current_generation_plus_unchanged": "17538671.3900",
+            "current": "14281953.9500"
+          },
+          "total_ext_cost": {
+            "typed": "27839605.4500",
+            "current_generation_plus_unchanged": "27839605.4500",
+            "current": "20554672.0700"
+          },
+          "awp": {
+            "typed": "35545054.6100",
+            "current_generation_plus_unchanged": "35545054.6100",
+            "current": "27006082.4800"
+          },
+          "customer_pack_size": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "fdb_awp_wholesale_factor": {
+            "typed": "8513.000000",
+            "current_generation_plus_unchanged": "8513.000000",
+            "current": "6269.000000"
+          },
+          "fdb_package_size_qty": {
+            "typed": "139343.870000",
+            "current_generation_plus_unchanged": "139343.870000",
+            "current": "100296.490000"
+          },
+          "package_awp": {
+            "typed": "342085.2000",
+            "current_generation_plus_unchanged": "342085.2000",
+            "current": "200392.1800"
+          },
+          "unit_size_qty": {
+            "typed": "138136.680000",
+            "current_generation_plus_unchanged": "138136.680000",
+            "current": "100052.580000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 1.2
+    },
+    {
+      "source": "wholesaler.cardinal.invoice",
+      "identity": [
+        "account_number",
+        "invoice_number",
+        "invoice_line_number"
+      ],
+      "columns": 17,
+      "checks": {
+        "recorded": {
+          "files_loaded": 7,
+          "rebuilds": 0,
+          "rows_landed": 31767,
+          "rows_read": 31760,
+          "rows_unchanged": 8534,
+          "rows_quarantined": 0,
+          "rows_inserted": 23226,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 31767,
+          "typed": 31760,
+          "quarantined": 0,
+          "skipped": 7,
+          "skipped_recorded": 7,
+          "landed_recorded": 31767
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 8534,
+          "typed_lines_unchanged": 8534,
+          "unchanged_recorded_by_loads": 8534,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 23226,
+          "current": 23226,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 0,
+          "vendor_repeats_recorded_as_findings": 0,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 23226,
+          "row_hash_mismatches": 0,
+          "columns_compared": 17,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "unit_price": {
+            "typed": "22115165.1500",
+            "current_generation_plus_unchanged": "22115165.1500",
+            "current": "15228048.6000"
+          },
+          "ordered_quantity": {
+            "typed": "61067.000000",
+            "current_generation_plus_unchanged": "61067.000000",
+            "current": "42982.000000"
+          },
+          "shipped_quantity": {
+            "typed": "59530.000000",
+            "current_generation_plus_unchanged": "59530.000000",
+            "current": "41902.000000"
+          },
+          "purchase_amount": {
+            "typed": "33136460.2100",
+            "current_generation_plus_unchanged": "33136460.2100",
+            "current": "21620582.9000"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 4.0
+    },
+    {
+      "source": "wholesaler.cardinal.invoice_summary",
+      "identity": [
+        "account_number",
+        "invoice_number"
+      ],
+      "columns": 9,
+      "checks": {
+        "recorded": {
+          "files_loaded": 3,
+          "rebuilds": 0,
+          "rows_landed": 16004,
+          "rows_read": 16001,
+          "rows_unchanged": 517,
+          "rows_quarantined": 0,
+          "rows_inserted": 15484,
+          "rows_superseded": 0,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 16004,
+          "typed": 16001,
+          "quarantined": 0,
+          "skipped": 3,
+          "skipped_recorded": 3,
+          "landed_recorded": 16004
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 517,
+          "typed_lines_unchanged": 517,
+          "unchanged_recorded_by_loads": 517,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 15484,
+          "current": 15484,
+          "superseded_corrected": 0,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 1300,
+          "vendor_repeats_recorded_as_findings": 532,
+          "current_rows_sharing_a_row_hash": 13
+        },
+        "values": {
+          "rows_compared": 15484,
+          "row_hash_mismatches": 0,
+          "columns_compared": 9,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "purchase_amount": {
+            "typed": "37456858.6500",
+            "current_generation_plus_unchanged": "37456858.6500",
+            "current": "37184226.1600"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 2.8
+    },
+    {
+      "source": "wholesaler.mckesson.custom",
+      "identity": [
+        "invoice_credit_number",
+        "mckesson_item_number",
+        "po_number"
+      ],
+      "columns": 35,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 8111,
+          "rows_read": 8111,
+          "rows_unchanged": 1239,
+          "rows_quarantined": 0,
+          "rows_inserted": 6856,
+          "rows_superseded": 16,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 8111,
+          "typed": 8111,
+          "quarantined": 0,
+          "skipped": 0,
+          "skipped_recorded": 0,
+          "landed_recorded": 8111
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 1239,
+          "typed_lines_unchanged": 1239,
+          "unchanged_recorded_by_loads": 1239,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 6872,
+          "current": 6856,
+          "superseded_corrected": 16,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 4,
+          "vendor_repeats_recorded_as_findings": 3,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 6872,
+          "row_hash_mismatches": 0,
+          "columns_compared": 35,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "awp_current": {
+            "typed": "59972949.3800",
+            "current_generation_plus_unchanged": "59972949.3800",
+            "current": "50041326.7900"
+          },
+          "standard_suggested_retail_price": {
+            "typed": "293.2900",
+            "current_generation_plus_unchanged": "293.2900",
+            "current": "293.2900"
+          },
+          "price_per_package": {
+            "typed": "17696032.7600",
+            "current_generation_plus_unchanged": "17696032.7600",
+            "current": "14435587.9000"
+          },
+          "package_size_multiplier": {
+            "typed": "12677.000000",
+            "current_generation_plus_unchanged": "12677.000000",
+            "current": "11115.000000"
+          },
+          "package_size": {
+            "typed": "148847.550000",
+            "current_generation_plus_unchanged": "148847.550000",
+            "current": "128919.970000"
+          },
+          "ordered_quantity": {
+            "typed": "18751.000000",
+            "current_generation_plus_unchanged": "18751.000000",
+            "current": "15655.000000"
+          },
+          "received_quantity": {
+            "typed": "0",
+            "current_generation_plus_unchanged": "0",
+            "current": "0"
+          },
+          "net_quantity": {
+            "typed": "15284.000000",
+            "current_generation_plus_unchanged": "15284.000000",
+            "current": "12726.000000"
+          },
+          "extended_price": {
+            "typed": "29755939.9600",
+            "current_generation_plus_unchanged": "29755939.9600",
+            "current": "23614162.4100"
+          },
+          "invoiced_price_per_dose": {
+            "typed": "9088954.6100",
+            "current_generation_plus_unchanged": "9088954.6100",
+            "current": "7502941.7000"
+          },
+          "average_quantity_per_invoice_pkg": {
+            "typed": "14947.000000",
+            "current_generation_plus_unchanged": "14947.000000",
+            "current": "12531.000000"
+          },
+          "invoice_quantity_omitted": {
+            "typed": "3534.000000",
+            "current_generation_plus_unchanged": "3534.000000",
+            "current": "2996.000000"
+          },
+          "invoice_quantity_filled": {
+            "typed": "15284.000000",
+            "current_generation_plus_unchanged": "15284.000000",
+            "current": "12726.000000"
+          },
+          "total_ordered_quantity": {
+            "typed": "18774.000000",
+            "current_generation_plus_unchanged": "18774.000000",
+            "current": "15678.000000"
+          },
+          "net_purchases": {
+            "typed": "29755939.9600",
+            "current_generation_plus_unchanged": "29755939.9600",
+            "current": "23614162.4100"
+          },
+          "gross_purchases": {
+            "typed": "30091327.5300",
+            "current_generation_plus_unchanged": "30091327.5300",
+            "current": "23918231.0900"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 1.6
+    },
+    {
+      "source": "wholesaler.mckesson.invoice",
+      "identity": [
+        "invoice_credit_number",
+        "mckesson_item_number"
+      ],
+      "columns": 44,
+      "checks": {
+        "recorded": {
+          "files_loaded": 9,
+          "rebuilds": 0,
+          "rows_landed": 9524,
+          "rows_read": 9515,
+          "rows_unchanged": 1591,
+          "rows_quarantined": 0,
+          "rows_inserted": 7905,
+          "rows_superseded": 19,
+          "rows_vanished": 0
+        },
+        "lines": {
+          "landed": 9524,
+          "typed": 9515,
+          "quarantined": 0,
+          "skipped": 9,
+          "skipped_recorded": 9,
+          "landed_recorded": 9524
+        },
+        "completeness": {
+          "typed_lines_without_curated_row": 1591,
+          "typed_lines_unchanged": 1591,
+          "unchanged_recorded_by_loads": 1591,
+          "unchanged_lines_a_rebuild_made_history_without_writing": 0,
+          "unchanged_lines_whose_content_is_on_no_current_generation_row": 0,
+          "curated_rows_without_typed_line": 0,
+          "curated_rows": 7924,
+          "current": 7905,
+          "superseded_corrected": 19,
+          "superseded_vanished": 0,
+          "superseded_late": 0,
+          "retired_retyped": 0
+        },
+        "duplicates": {
+          "identities_with_two_current_rows": 0,
+          "lines_with_two_current_generation_rows": 0,
+          "vendor_repeats_as_occurrences": 15,
+          "vendor_repeats_recorded_as_findings": 18,
+          "current_rows_sharing_a_row_hash": 0
+        },
+        "values": {
+          "rows_compared": 7924,
+          "row_hash_mismatches": 0,
+          "columns_compared": 44,
+          "columns_with_a_difference": {}
+        },
+        "aggregates": {
+          "price_per_package": {
+            "typed": "20004172.7200",
+            "current_generation_plus_unchanged": "20004172.7200",
+            "current": "16196966.9800"
+          },
+          "extended_price": {
+            "typed": "32886250.7900",
+            "current_generation_plus_unchanged": "32886250.7900",
+            "current": "26024796.6000"
+          },
+          "net_quantity": {
+            "typed": "17643.000000",
+            "current_generation_plus_unchanged": "17643.000000",
+            "current": "14494.000000"
+          },
+          "ordered_quantity": {
+            "typed": "21200.000000",
+            "current_generation_plus_unchanged": "21200.000000",
+            "current": "17499.000000"
+          },
+          "invoice_quantity_filled": {
+            "typed": "17643.000000",
+            "current_generation_plus_unchanged": "17643.000000",
+            "current": "14494.000000"
+          },
+          "returned_credited_quantity": {
+            "typed": "-180.000000",
+            "current_generation_plus_unchanged": "-180.000000",
+            "current": "-132.000000"
+          },
+          "invoiced_price_per_dose": {
+            "typed": "9852261.9400",
+            "current_generation_plus_unchanged": "9852261.9400",
+            "current": "8107847.7000"
+          },
+          "invoiced_dose_quantity_extended": {
+            "typed": "306675.340000",
+            "current_generation_plus_unchanged": "306675.340000",
+            "current": "262104.120000"
+          },
+          "gross_purchases": {
+            "typed": "33528468.7400",
+            "current_generation_plus_unchanged": "33528468.7400",
+            "current": "26515189.8600"
+          },
+          "gross_credits_and_returns": {
+            "typed": "-642217.9500",
+            "current_generation_plus_unchanged": "-642217.9500",
+            "current": "-490393.2600"
+          },
+          "net_handling_charge_amount": {
+            "typed": "4413.6200",
+            "current_generation_plus_unchanged": "4413.6200",
+            "current": "4413.6200"
+          },
+          "net_returned_credited_price": {
+            "typed": "-637804.3300",
+            "current_generation_plus_unchanged": "-637804.3300",
+            "current": "-485979.6400"
+          }
+        }
+      },
+      "failures": [],
+      "status": "PASS",
+      "seconds": 2.1
+    }
+  ]
+}
