@@ -21,7 +21,7 @@ startup failure, not a setting that silently does nothing.
 | `vendor` | Who produces the file. |
 | `group` | The delivery folder the file arrives in, e.g. `"1 Wholesalers"`. |
 | `catalog_names` | What the finance team calls this feed in their source catalogue (`"R and S"` is McKesson Custom). |
-| `lifecycle` | `active` sources are expected to deliver, so silence alerts. See `SourceLifecycle`. |
+| `lifecycle` | `active` sources are expected to deliver, so silence alerts. `paused` is silent until it delivers again, which the freshness check then notes. See `SourceLifecycle`. |
 | `filename_patterns` | Case-insensitive regexes over the filename. A routing hint only; the variant detector decides what a file is. |
 | `period_from_filename` | Regex with named groups `year` and `month`, for sources delivered one file per period. Only Monthly Payments uses it. |
 | `variants` | The shapes this file can take, each with its own detector, read settings and column map. At least one. See `SchemaVariant`. |

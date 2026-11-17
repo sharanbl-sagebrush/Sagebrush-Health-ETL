@@ -33,7 +33,11 @@ group: "4 TPA"
 # What the finance team calls this source in the delivery catalogue.
 catalog_names: ['Pharmaforce - Firemesa', 'Pharmaforce - Southington']
 # active: the source is expected to keep delivering, so silence raises an alert.
-lifecycle: active
+# paused 2026-11-17: the 340B program is halted and this report comes back
+# empty ("no data" on the upload sheet), so its silence is not an alert. A
+# file that arrives still loads, and the freshness check then says to set
+# this back to active.
+lifecycle: paused
 # Staleness threshold for freshness alerting, NOT a run schedule: alert when no
 # new file has been seen for this many days. Files are uploaded every Sunday
 # with ad hoc midweek re-uploads (CLAUDE.md, "How files arrive"); a midweek

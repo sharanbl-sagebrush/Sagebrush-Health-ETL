@@ -41,7 +41,11 @@ group: "1 Wholesalers"
 catalog_names: ["Cardinal"]
 # lifecycle: active sources are expected to keep delivering, so silence
 # raises a freshness alert. discontinued / no_access / planned do not.
-lifecycle: active
+# paused 2026-11-17: the 340B program is halted and this report comes back
+# empty ("no data" on the upload sheet), so its silence is not an alert. A
+# file that arrives still loads, and the freshness check then says to set
+# this back to active.
+lifecycle: paused
 # expected_cadence_days: a staleness threshold for alerting ("alert if no new
 # file has been seen in N days"), NOT a schedule. Files are uploaded by hand
 # every Sunday with ad hoc midweek re-uploads; an early upload just resets the

@@ -105,6 +105,23 @@ class TestStaleness:
         ]
         assert assess(specs, {}, [], today=TODAY) == []
 
+    def test_a_paused_source_is_silent_until_it_delivers_again(self):
+        """The 340B program was halted in November 2026 and six reports
+        come back empty. Paused, their silence is no alert; when one loads
+        a delivery inside its cadence again the check says so, as a note,
+        every day until the spec is active again."""
+        spec = _spec(lifecycle="paused")
+        assert stale_after(spec) is None
+        assert assess([spec], {}, [], today=TODAY) == []
+        old = {spec.key: SourceStatus(spec.key, latest_loaded_as_of=date(2026, 10, 18))}
+        assert assess([spec], old, [], today=TODAY) == []
+        back = {spec.key: SourceStatus(spec.key, latest_loaded_as_of=date(2026, 11, 1))}
+        (finding,) = assess([spec], back, [], today=TODAY)
+        assert (finding.kind, finding.is_alert) == ("RESUMED", False)
+        assert "as of 2026-11-01" in finding.message and "active" in finding.message
+        # An active source in the same state says nothing.
+        assert assess([_spec()], back, [], today=TODAY) == []
+
     def test_a_held_file_is_not_a_delivery(self):
         """Only a LOADED delivery's as-of counts; the held one is listed as
         an open refusal instead, which is the alert that says why."""

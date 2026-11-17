@@ -68,6 +68,7 @@ LABELS = {
     "SPEC_CHANGED": "Spec changed",
     "NEW_COLUMNS": "New vendor columns",
     "OPEN_QUARANTINE": "Open quarantine",
+    "RESUMED": "Paused source delivered",
 }
 
 

@@ -1955,3 +1955,25 @@ refused again adds one batch to the file and one "needs attention"
 line to that pass's mail, and the freshness check reads the newest
 batch as before. It takes effect when the jobs run an image built from
 this commit.
+
+## Six sources are paused while the 340B program is halted (2026-11-17, developer: "This will be a norm for a few months since our 340b program has been halted")
+
+The six sources the freshness mail has listed as stale every day since
+2026-11-11 are not missing uploads. Jay's upload sheet for 11/02 to
+11/15 marks each "no data": ABC purchases, the Cardinal invoice review,
+PRxP, PharmaForce claims, and WellPartner claims and invoices. They
+carry only 340B activity, the program is halted, and the developer
+expects that for a few months.
+
+A new lifecycle value says so: ``paused``. It is read where every
+lifecycle value is read, the staleness rule of the freshness check, and
+nowhere else; a file for a paused source is fetched, recognised and
+loaded exactly as before (the developer's question, and the reason the
+value is not ``discontinued`` in meaning: the source is expected back).
+So that nobody has to remember to undo it, a paused source that loads a
+delivery with an as-of inside its cadence plus grace raises a note,
+``RESUMED`` ("Paused source delivered" in the mail), every day until
+its spec says ``active`` again. The cadence stays on the spec for that
+purpose. The typing digest does not include the lifecycle, so nothing
+is raised as a spec change. Run against the live database from this
+tree the check reports 0 findings where the scheduled one reported 6.

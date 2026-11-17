@@ -352,3 +352,11 @@ the end, one bullet per day or event, as before.
   mail has listed daily since 2026-11-11, now fifteen days stale
   (`docs/decision-record.md`, "A rebuild retires the history its own
   rule undoes")
+- 2026-11-17: **six sources are paused.** Jay's upload sheet marks ABC,
+  Cardinal invoice review, PRxP, PharmaForce and both WellPartner
+  reports "no data" for 11/02 to 11/15: the 340B program is halted,
+  for a few months. Their specs say `lifecycle: paused`, which silences
+  the stale alert and nothing else; a file that arrives still loads,
+  and the freshness check then notes the source delivered so it can be
+  made active again (`docs/decision-record.md`, "Six sources are
+  paused")

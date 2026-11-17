@@ -41,8 +41,14 @@ Findings, in the order an operator should read them:
                       spec column claims; they are kept in ``extra_cells``
                       and nothing types them until the spec names them
 ``OPEN_QUARANTINE``   rows in ``stg.quarantine`` nobody has resolved
+``RESUMED``           a ``paused`` source has a loaded delivery with an
+                      as-of inside cadence + grace days: it is delivering
+                      again, and its spec should say ``active`` so that
+                      its silence is watched once more
 
-The first six are alerts; new columns and open quarantine are notes. :func:`assess` is
+The first six are alerts; the last three are notes. A paused source
+(2026-11-17: the six reports that carry only 340B activity, while the
+program is halted) is never stale. :func:`assess` is
 pure, so the rules are tested without a database; ``scripts/freshness.py``
 fills the inputs from the metadata tables and prints the findings.
 """
@@ -53,7 +59,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from sbh_data_bank.commit.engine import spec_sha256
-from sbh_data_bank.registry.spec import SourceSpec
+from sbh_data_bank.registry.spec import SourceLifecycle, SourceSpec
 
 __all__ = [
     "ALERTS",
@@ -151,8 +157,9 @@ class Finding:
 
 def stale_after(spec: SourceSpec, grace_days: int = DEFAULT_GRACE_DAYS) -> int | None:
     """Days of silence after which this source is stale, or ``None`` when
-    its silence is never an alert: a discontinued, no-access or planned
-    source, or one with no cadence (the reference register, BuyBill)."""
+    its silence is never an alert: a discontinued, paused, no-access or
+    planned source, or one with no cadence (the reference register,
+    BuyBill)."""
     if not spec.is_expected_to_deliver or spec.expected_cadence_days is None:
         return None
     return spec.expected_cadence_days + grace_days
@@ -216,6 +223,18 @@ def assess(
                         f"({silent} days); expected every {spec.expected_cadence_days} days "
                         f"plus {grace_days} grace",
                     )
+        if (
+            spec.lifecycle is SourceLifecycle.PAUSED
+            and spec.expected_cadence_days is not None
+            and status.latest_loaded_as_of is not None
+            and (today - status.latest_loaded_as_of).days < spec.expected_cadence_days + grace_days
+        ):
+            out.add(
+                "RESUMED",
+                spec.key,
+                f"paused, yet a delivery as of {status.latest_loaded_as_of} has loaded; "
+                "set lifecycle back to active so its silence is watched again",
+            )
         digest = spec_sha256(spec)
         if (
             status.latest_spec_digest is not None

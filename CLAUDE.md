@@ -24,22 +24,24 @@ The chronology since 2026-10-16 is `docs/state-log.md`; the reasoning
 and numbers behind each step are `docs/decision-record.md`. In short:
 
 - 21 source specs, every one loaded into `sbh_data_bank` on Azure and
-  verified against the raw files and across the layers; 545 tests, no
+  verified against the raw files and across the layers; 546 tests, no
   database required. Reconciliation is deliberately deferred
 - Two scheduled Container Apps jobs (acquire every half hour, freshness
-  daily) run image `50bef75`, the only tag in the registry. Monthly
+  daily) run the image of the latest commit, the only tag in the registry. Monthly
   Payments `dob` is a DATE since the rebuild of 2026-11-11 (9 h 58 min
   on this database; a type change on that source is a ten-hour job).
   Every Azure change waits for the developer's word
 - A rebuild retires the history rows its own rule undoes (the 64,673
   the `dob` rebuild left were retired 2026-11-17), and a held or
   refused file is fetched again once a day, so a corrected spec in the
-  image is enough to load it. The retry is in the code, not yet in the
-  image the jobs run
-- Open next: move the jobs to an image with the daily retry, and the
-  asks for Jay (six sources missing from the 2026-11-09 and 2026-11-15
-  uploads, Curve's scientific-notation reference numbers, the upload
-  guide)
+  image is enough to load it.
+- Six sources are `lifecycle: paused` since 2026-11-17 (ABC, Cardinal
+  invoice, PRxP, PharmaForce, both WellPartner): the 340B program is
+  halted and their reports come back empty. Paused silences the stale
+  alert only; a file that arrives still loads, and the freshness check
+  then notes it so the spec can go back to `active`
+- Open next: the asks for Jay (Curve's scientific-notation reference
+  numbers, the upload guide)
 
 ## Rules that came from real defects
 
@@ -204,7 +206,7 @@ gives 1,914 duplicate rows (8.2%) and overstates purchases by $1,387,175.46.
 ## Running things
 
 ```bash
-python -m pytest                    # 545 tests, no database
+python -m pytest                    # 546 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts

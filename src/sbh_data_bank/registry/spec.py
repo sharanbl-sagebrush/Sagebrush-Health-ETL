@@ -289,6 +289,14 @@ class SourceLifecycle(StrEnum):
     DISCONTINUED = "discontinued"
     """The vendor stopped producing it. WeInfuse BuyBill, as of the June 2026
     reporting-module change. Historical data stays; absence is not an alert."""
+    PAUSED = "paused"
+    """Nothing to deliver for now, for a reason the business has given, and
+    expected back. The 340B program was halted in November 2026, so the
+    wholesaler and TPA reports that only carry 340B activity come back
+    empty and are not uploaded ("no data" on the upload sheet). Silence is
+    not an alert; a file that does arrive loads as ever, and the freshness
+    check then notes that the source delivered so it can be made active
+    again."""
     NO_ACCESS = "no_access"
     """Known to exist but not obtainable. CuraScript, Rosemont and Trinity are
     listed in the source catalogue as "no access on reporting tool"."""
