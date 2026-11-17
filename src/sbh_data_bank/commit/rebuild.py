@@ -21,9 +21,18 @@ That state is reconciled with the live curated rows:
 
 So there is always one current version of an identity, every reader keeps
 ``superseded_by IS NULL``, and the history before the rebuild stays as it
-was recorded. What the new rule would have made history (a correction
-within the replay, a late row) is not written: the rebuild guarantees the
-current state, and the batch that did it is on every row it touched.
+was recorded, with one exception: a history row whose own line the new
+rule makes current. Its supersession (a correction, say) never happened
+under the new rule, the reconcile writes or keeps a current row for that
+line, and left alone the line would stand in the current generation
+twice. Such a row is retired as ``retyped`` with the rest of the previous
+generation and counted as ``history_retired``. (Found 2026-11-11: Monthly
+Payments ``dob`` became a date, 64,673 corrections that differed only in
+the date's zero padding stopped being corrections, and their history rows
+were left beside the current row of the same line.) What the new rule
+would have made history (a correction within the replay, a late row) is
+not written: the rebuild guarantees the current state, and the batch that
+did it is on every row it touched.
 
 A column type change (2026-11-04: the three Curve money columns, text to
 currency) is applied here too, since the migration never alters a live
@@ -127,6 +136,9 @@ class RebuildCounts:
     kept: int
     retired: int
     inserted: int
+    history_retired: int = 0
+    """History rows retired as ``retyped`` because the new rule makes
+    their own line current (module docstring)."""
 
 
 class RebuildStore(LayerReader, Protocol):
@@ -154,8 +166,9 @@ class RebuildStore(LayerReader, Protocol):
     def reconcile_curated(
         self, spec: SourceSpec, ctx: WriteContext, target: list[TargetRow], *, apply: bool
     ) -> RebuildCounts:
-        """Hold the live curated rows against ``target`` (module docstring).
-        With ``apply`` retire and insert; without, only count."""
+        """Hold the live curated rows against ``target`` (module docstring),
+        and retire the history rows on a target line. With ``apply`` retire
+        and insert; without, only count."""
         ...
 
     def column_retypes(self, spec: SourceSpec) -> list[ColumnRetype]:
@@ -232,6 +245,8 @@ class RebuildResult:
         c = self.counts
         verb = "applied" if self.applied else "would apply"
         tail = f"curated kept {c.kept}, retired {c.retired}, inserted {c.inserted}"
+        if c.history_retired:
+            tail += f", history retired {c.history_retired}"
         if self.retypes:
             tail += f", history refilled {self.refilled}"
         if self.rehashed_history:
@@ -324,7 +339,7 @@ def rebuild_source(
             # hash they carry now; every replayed line is checked against
             # them, so the count is the plan's as much as the apply's.
             history = store.history_hashes(spec, tenant_id)
-            stale_history = 0
+            stale_lines: set[tuple[int, int]] = set()
             for file in files:
                 replay, typed, findings, facts = _retype(store, spec, file)
                 _check(replay)
@@ -334,7 +349,7 @@ def rebuild_source(
                 for row in typed:
                     old = history.get((file.source_file_id, row.line_number))
                     if old is not None and old != row.row_hash:
-                        stale_history += 1
+                        stale_lines.add((file.source_file_id, row.line_number))
                 result.rehashed += replay.rehashed
                 if on_file is not None:
                     on_file(replay)
@@ -371,6 +386,12 @@ def rebuild_source(
             target = list(iter_target(ledger, outcomes))
             counts = store.reconcile_curated(spec, ctx, target, apply=apply)
             result.counts = counts
+            # A history row on a target line is retired by the reconcile and
+            # keeps its old hash with the rest of the previous generation,
+            # so it is not one the history refresh will touch.
+            for row in target:
+                stale_lines.discard((row.source_file_id, row.line_number))
+            stale_history = len(stale_lines)
             if retypes and apply:
                 store.refill_curated(spec, ctx, retypes, apply=True)
             # The reconcile rewrote the live rows; the history rows it left
@@ -397,6 +418,8 @@ def rebuild_source(
                     f"rows replaced ({result.rehashed} rehashed); curated kept {counts.kept}, "
                     f"retired {counts.retired} as {RETYPED}, inserted {counts.inserted}"
                 )
+                if counts.history_retired:
+                    batch.detail += f"; {counts.history_retired} history rows retired as {RETYPED}"
                 batch.finished_at = clock()
                 store.finish_batch(batch)
                 result.batch_id = batch.batch_id

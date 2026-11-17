@@ -390,10 +390,17 @@ class MemoryStore:
         retire = [r for r in live if not matched(r)]
         kept_lines = {(r["source_file_id"], r["line_number"]) for r in live if matched(r)}
         insert = [t for t in target if (t.source_file_id, t.line_number) not in kept_lines]
-        counts = RebuildCounts(len(target) - len(insert), len(retire), len(insert))
+        # History on a line the new rule makes current: retired with the
+        # previous generation (rebuild module docstring).
+        history = [
+            r
+            for r in self._history_rows(spec, ctx.tenant_id)
+            if (r["source_file_id"], r["line_number"]) in by_line
+        ]
+        counts = RebuildCounts(len(target) - len(insert), len(retire), len(insert), len(history))
         if not apply:
             return counts
-        for row in retire:
+        for row in [*history, *retire]:
             row["superseded_by"] = ctx.batch_id
             row["superseded_at"] = ctx.created_at
             row["supersede_reason"] = RETYPED

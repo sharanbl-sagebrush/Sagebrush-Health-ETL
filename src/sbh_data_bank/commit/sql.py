@@ -74,7 +74,9 @@ __all__ = [
     "landed_input_sizes",
     "landed_select_sql",
     "rebuilt_insert_sql",
+    "retire_history_sql",
     "retire_sql",
+    "stale_history_sql",
     "supersede_sql",
     "typed_columns",
     "typed_delete_sql",
@@ -438,6 +440,46 @@ def retire_sql(spec: SourceSpec, *, count_only: bool) -> str:
     where = (
         f"FROM {table} AS c LEFT JOIN #target AS t ON {_MATCH} "
         "WHERE c.tenant_id = ? AND c.superseded_by IS NULL AND t.source_file_id IS NULL"
+    )
+    if count_only:
+        return f"SELECT COUNT(*) {where}"
+    return (
+        "UPDATE c SET superseded_by = ?, superseded_at = ?, supersede_reason = ?, "
+        f"updated_at = ?, updated_by = ? {where}"
+    )
+
+
+def retire_history_sql(spec: SourceSpec, *, count_only: bool) -> str:
+    """Retire (or count) the history rows whose own line is a target line:
+    the new rule makes the line current, so the supersession on record
+    never happened under it (rebuild module docstring). Parameters:
+    :func:`retire_sql`'s, then the ``retyped`` reason once more, for the
+    rows already of the previous generation, which are passed by."""
+    where = (
+        f"FROM {table_name(spec, 'curated')} AS c JOIN #target AS t "
+        "ON t.source_file_id = c.source_file_id AND t.line_number = c.line_number "
+        "WHERE c.tenant_id = ? AND c.superseded_by IS NOT NULL AND c.supersede_reason <> ?"
+    )
+    if count_only:
+        return f"SELECT COUNT(*) {where}"
+    return (
+        "UPDATE c SET superseded_by = ?, superseded_at = ?, supersede_reason = ?, "
+        f"updated_at = ?, updated_by = ? {where}"
+    )
+
+
+def stale_history_sql(spec: SourceSpec, *, count_only: bool) -> str:
+    """The same rows without a ``#target``, for a rebuild that has already
+    committed (``scripts/retire_stale_history.py``): a history row with a
+    live row on its own line. After a rebuild the live rows are exactly
+    the target rows, so the two statements name the same set. Parameters
+    as :func:`retire_history_sql`."""
+    table = table_name(spec, "curated")
+    where = (
+        f"FROM {table} AS c WHERE c.tenant_id = ? AND c.superseded_by IS NOT NULL "
+        f"AND c.supersede_reason <> ? AND EXISTS (SELECT 1 FROM {table} AS l "
+        "WHERE l.tenant_id = c.tenant_id AND l.source_file_id = c.source_file_id "
+        "AND l.line_number = c.line_number AND l.superseded_by IS NULL)"
     )
     if count_only:
         return f"SELECT COUNT(*) {where}"
@@ -866,7 +908,18 @@ class SqlStore:
                 retired = int(cursor.fetchone()[0])
                 cursor.execute(rebuilt_insert_sql(spec, count_only=True), ctx.tenant_id)
                 inserted = int(cursor.fetchone()[0])
-                return RebuildCounts(len(target) - inserted, retired, inserted)
+                cursor.execute(retire_history_sql(spec, count_only=True), ctx.tenant_id, RETYPED)
+                history = int(cursor.fetchone()[0])
+                return RebuildCounts(len(target) - inserted, retired, inserted, history)
+            # The history rows first: once the live rows are retired they are
+            # ``retyped`` themselves and the statement would pass them by
+            # anyway, but this order needs no such argument.
+            cursor.execute(
+                retire_history_sql(spec, count_only=False),
+                ctx.batch_id, ctx.created_at, RETYPED, ctx.created_at, ctx.created_by,
+                ctx.tenant_id, RETYPED,
+            )  # fmt: skip
+            history = int(cursor.rowcount)
             cursor.execute(
                 retire_sql(spec, count_only=False),
                 ctx.batch_id, ctx.created_at, RETYPED, ctx.created_at, ctx.created_by,
@@ -879,7 +932,7 @@ class SqlStore:
                 ctx.tenant_id, ctx.tenant_id,
             )  # fmt: skip
             inserted = int(cursor.rowcount)
-            return RebuildCounts(len(target) - inserted, retired, inserted)
+            return RebuildCounts(len(target) - inserted, retired, inserted, history)
         finally:
             cursor.execute(_TARGET_DROP)
 

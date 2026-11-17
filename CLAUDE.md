@@ -18,26 +18,28 @@ against the definition of done in `docs/architecture-and-plan.md`.
 
 Commit messages explain *why*, not just what. `git log` is part of the record.
 
-## Where things stand (2026-11-11)
+## Where things stand (2026-11-17)
 
 The chronology since 2026-10-16 is `docs/state-log.md`; the reasoning
 and numbers behind each step are `docs/decision-record.md`. In short:
 
 - 21 source specs, every one loaded into `sbh_data_bank` on Azure and
-  verified against the raw files and across the layers; 541 tests, no
+  verified against the raw files and across the layers; 545 tests, no
   database required. Reconciliation is deliberately deferred
 - Two scheduled Container Apps jobs (acquire every half hour, freshness
   daily) run image `50bef75`, the only tag in the registry. Monthly
   Payments `dob` is a DATE since the rebuild of 2026-11-11 (9 h 58 min
   on this database; a type change on that source is a ten-hour job).
   Every Azure change waits for the developer's word
-- Open next: decide what becomes of the 64,673 `corrected` history
-  rows the `dob` rebuild left beside the current row of their line
-  (`verify_layers.py` fails Monthly Payments on them; the current rows
-  are clean), let a held file be retried daily (`acquire/ledger.py`,
-  explained 2026-11-09), and the asks for Jay (six sources missing
-  from the 2026-11-09 upload, Curve's scientific-notation reference
-  numbers, the upload guide)
+- A rebuild retires the history rows its own rule undoes (the 64,673
+  the `dob` rebuild left were retired 2026-11-17), and a held or
+  refused file is fetched again once a day, so a corrected spec in the
+  image is enough to load it. The retry is in the code, not yet in the
+  image the jobs run
+- Open next: move the jobs to an image with the daily retry, and the
+  asks for Jay (six sources missing from the 2026-11-09 and 2026-11-15
+  uploads, Curve's scientific-notation reference numbers, the upload
+  guide)
 
 ## Rules that came from real defects
 
@@ -202,7 +204,7 @@ gives 1,914 duplicate rows (8.2%) and overstates purchases by $1,387,175.46.
 ## Running things
 
 ```bash
-python -m pytest                    # 525 tests, no database
+python -m pytest                    # 545 tests, no database
 python -m ruff check . && python -m ruff format .
 
 python scripts/bind_real_files.py   # bind every spec against the real extracts

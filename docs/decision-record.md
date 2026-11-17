@@ -1912,3 +1912,46 @@ passes as written), or keep them and have the check report them as the
 rule's residue beside the lines a rebuild made history. Until then the
 result on record is the failing one,
 ``docs/validation/verify_layers_2026-11-11_monthly_payments.json``.
+
+## A rebuild retires the history its own rule undoes; a held file is retried daily (2026-11-17, developer: "Go ahead with all the pending items")
+
+**The 64,673 rows are retired as ``retyped``.** The developer took the
+recommended course. The rule, now the rebuild's own: a history row
+whose line the new rule makes current is retired with the previous
+generation, pointed at the rebuild batch, and counted as
+``history_retired`` on the result, in the summary and in the batch
+detail. The reconcile does it against the staged target rows
+(``retire_history_sql``), plan and apply give the same count, and the
+history refresh no longer counts those lines, since a retired row
+keeps the hash it had. A test replays the case in small: a correction
+that differs only in how an amount is spelled, undone when the column
+becomes currency, leaves its line in the current generation once.
+
+What is lost by it is the old supersession on those rows (which batch
+corrected them, and when); it is recorded here instead. All 64,673
+were superseded as ``corrected`` by one batch,
+``bat_1794013295803_000000_4b183212``, the 2026-11-07 load, and every
+one carried the hash of the live row on its line. They now point at
+``bat_1794333502012_000000_de613ef6``, the rebuild that undid them,
+with 2026-11-17 as the time and the operator on the row. The one-time
+write was ``scripts/retire_stale_history.py``, which selects the same
+rows without a target table (a history row with a live row on its own
+line; after a rebuild the live rows are the target rows), refuses on a
+hash difference or a source with no rebuild batch, and wrote exactly
+the count it had announced. No live row changed.
+
+**A held or refused file is fetched again once a day.** Until now any
+batch made a blob version seen for good, so the two Monthly Payments
+files held on 2026-11-06 could not be loaded by the corrected spec
+without a re-upload under a new folder. ``acquire/ledger.py`` now
+counts a version as seen only when a batch has settled its content
+(``LOADED``, ``DUPLICATE_FILE``, ``RECOGNISED_NOT_LOADED``, the set the
+freshness check calls benign; a test holds the two equal) or for a day
+after its last fetch. A fetch of a version already on record moves the
+fetch time on its one row instead of inserting a second, which the
+table's unique key would have refused; that is also what spaces the
+retries a day apart rather than a pass apart. Each retry that is
+refused again adds one batch to the file and one "needs attention"
+line to that pass's mail, and the freshness check reads the newest
+batch as before. It takes effect when the jobs run an image built from
+this commit.

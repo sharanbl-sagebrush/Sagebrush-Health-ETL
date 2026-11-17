@@ -22,7 +22,8 @@ from sbh_data_bank.acquire import (
     SqlBlobLedger,
     sync,
 )
-from sbh_data_bank.acquire.ledger import INSERT_SQL, SEEN_SQL
+from sbh_data_bank.acquire.ledger import INSERT_SQL, REFETCH_SQL, SEEN_SQL, SETTLED_OUTCOMES
+from sbh_data_bank.observe.freshness import BENIGN_OUTCOMES
 from sbh_data_bank.store.schema import meta_statements
 
 T0 = datetime(2026, 10, 26, 9, 0)
@@ -149,7 +150,37 @@ class TestSqlLedger:
         assert ledger.seen("t1", "acct", "box") == {("n", "e")}
         ledger.record(BlobRecord("t1", "acct", "box", "n", "e", 1, T0, "0" * 64, T0, "n"))
         assert db.calls[0] == (SEEN_SQL, ("t1", "acct", "box"))
-        # Seen means "reached the engine" or "fetched today", so an
+        # Seen means "settled by the engine" or "fetched today", so an
         # ephemeral landing root never loses a file whose load died.
         assert "JOIN meta.batch" in SEEN_SQL and "DATEADD(hour, -24" in SEEN_SQL
-        assert db.calls[1][0] == INSERT_SQL and len(db.calls[1][1]) == 10
+        # A version fetched again moves its one row's fetch time; the
+        # insert that follows writes only when there was no row.
+        key = ("t1", "acct", "box", "n", "e")
+        rest = (1, T0, "0" * 64, T0, "n")
+        assert db.calls[1] == (REFETCH_SQL, (*rest, *key))
+        assert db.calls[2] == (INSERT_SQL, (*key, *rest, *key))
+        assert REFETCH_SQL.startswith("UPDATE meta.blob SET content_length = ?, ")
+        assert "fetched_at = ?" in REFETCH_SQL
+        assert REFETCH_SQL.endswith(
+            "WHERE tenant_id = ? AND account_name = ? AND container_name = ? "
+            "AND blob_name = ? AND etag = ?"
+        )
+        assert "WHERE NOT EXISTS (SELECT 1 FROM meta.blob WHERE tenant_id = ?" in INSERT_SQL
+
+    def test_only_a_settled_batch_makes_a_version_seen_for_good(self):
+        """A held or refused file has a batch and is still fetched again
+        once its day is up, so a corrected spec loads it without a
+        re-upload. The settled outcomes are the ones the freshness check
+        calls benign; any other is an open refusal there and a retry here."""
+        assert set(SETTLED_OUTCOMES) == BENIGN_OUTCOMES
+        assert (
+            "AND bt.outcome IN ('DUPLICATE_FILE', 'LOADED', 'RECOGNISED_NOT_LOADED')))"
+        ) in SEEN_SQL
+        assert "HELD" not in SEEN_SQL
+
+    def test_a_version_fetched_again_keeps_one_record(self):
+        ledger = MemoryBlobLedger()
+        later = datetime(2026, 10, 27, 9, 30)
+        ledger.record(BlobRecord("t1", "acct", "box", "n", "e", 1, T0, "0" * 64, T0, "n"))
+        ledger.record(BlobRecord("t1", "acct", "box", "n", "e", 1, T0, "0" * 64, later, "n"))
+        assert [r.fetched_at for r in ledger.records] == [later]

@@ -338,3 +338,17 @@ the end, one bullet per day or event, as before.
   attempt"). The 2026-11-11 freshness mail: six sources stale at nine
   days (ABC, Cardinal invoice, PRxP, PharmaForce, both WellPartner),
   none of them in the 2026-11-09 upload
+- 2026-11-17: **the stale history is retired and a held file is
+  retried daily.** The developer chose to retire the 64,673 rows: the
+  rebuild now retires any history row whose line its rule makes
+  current (`history_retired`), and `scripts/retire_stale_history.py`
+  did the same once for Monthly Payments, exactly 64,673 rows, all
+  from the 2026-11-07 load, no live row touched. `acquire/ledger.py`
+  counts a blob version as seen only when a batch settled it or for a
+  day after its last fetch, so a held or refused file comes back daily
+  and a corrected spec is enough to load it; in force once the jobs
+  run an image with it. The 2026-11-15 upload loaded on 2026-11-16 (10
+  files, all `LOADED`), again without the six sources the freshness
+  mail has listed daily since 2026-11-11, now fifteen days stale
+  (`docs/decision-record.md`, "A rebuild retires the history its own
+  rule undoes")

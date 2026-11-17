@@ -29,7 +29,9 @@ from sbh_data_bank.commit.sql import (
     rebuilt_insert_sql,
     refill_sql,
     refresh_history_sql,
+    retire_history_sql,
     retire_sql,
+    stale_history_sql,
     typed_delete_sql,
 )
 from sbh_data_bank.registry.spec import SourceSpec
@@ -300,6 +302,44 @@ class TestTypeChange:
         assert "retyping amount NVARCHAR(1000)->DECIMAL(38,4)" in result.summary()
         assert "history refilled 4" in result.summary()
 
+    def test_a_correction_the_new_type_undoes_leaves_its_line_once(self, tmp_path):
+        """February repeats B with the amount spelled another way. As text
+        that is a correction: January's row becomes history. As currency
+        the two are one value, so January's line is current again and
+        February's is unchanged. The rebuild retires February's live row,
+        writes January's line anew, and retires January's old ``corrected``
+        row with them: left in place it would put the line in the current
+        generation twice (Monthly Payments, 2026-11-11: 64,673 lines)."""
+        old = _spec()
+        store = MemoryStore()
+        engine = CommitEngine(
+            store, tenant_id="t1", actor="loader", clock=lambda: CLOCK, deterministic_ids=True
+        )
+        engine.commit_path(old, _write(tmp_path, JAN, A1, B), run_id="r", root=tmp_path)
+        engine.commit_path(
+            old, _write(tmp_path, FEB, A1, "B,X,2026-01-12,20.0,b"), run_id="r", root=tmp_path
+        )
+        (corrected,) = [r for r in store.curated[old.key] if r["supersede_reason"] == "corrected"]
+        line = (corrected["source_file_id"], corrected["line_number"])
+        new = _with_columns({}, amount={"type": "currency"})
+
+        plan = _rebuild(store, new, apply=False)
+        result = _rebuild(store, new, apply=True)
+
+        assert not result.refused, result.refusal
+        assert plan.counts == result.counts
+        assert result.counts.history_retired == 1
+        assert plan.rehashed_history == result.rehashed_history == 0
+        assert "history retired 1" in result.summary()
+        assert "1 history rows retired as retyped" in store.batches[result.batch_id].detail
+        assert corrected["supersede_reason"] == RETYPED
+        assert corrected["superseded_by"] == result.batch_id
+        generation = [r for r in store.curated[new.key] if r["supersede_reason"] != RETYPED]
+        lines = [(r["source_file_id"], r["line_number"]) for r in generation]
+        assert len(lines) == len(set(lines)) == 2
+        assert line in lines
+        assert all(r["superseded_by"] is None for r in generation)
+
     def test_a_curated_row_with_no_typed_line_refuses_the_source(self, tmp_path):
         """The refill rests on every curated row having its line in typed.
         A stray row breaks that, and the rebuild refuses rather than leave
@@ -414,3 +454,20 @@ class TestStatements:
         assert "JOIN typed.t_vendor_report AS ty" in insert
         assert "NOT EXISTS" in insert
         assert "'" not in insert and "'" not in retire
+
+    def test_history_on_a_target_line_is_retired_by_line(self):
+        spec = _spec()
+        history = retire_history_sql(spec, count_only=False)
+        assert history.startswith("UPDATE c SET superseded_by = ?, superseded_at = ?")
+        assert history.endswith(
+            "FROM curated.t_vendor_report AS c JOIN #target AS t "
+            "ON t.source_file_id = c.source_file_id AND t.line_number = c.line_number "
+            "WHERE c.tenant_id = ? AND c.superseded_by IS NOT NULL AND c.supersede_reason <> ?"
+        )
+        assert retire_history_sql(spec, count_only=True).startswith("SELECT COUNT(*) FROM")
+        # The same rows after the rebuild has committed: no #target, a live
+        # row on the line instead.
+        stale = stale_history_sql(spec, count_only=False)
+        assert "#target" not in stale and "'" not in stale
+        assert stale.endswith("AND l.line_number = c.line_number AND l.superseded_by IS NULL)")
+        assert stale_history_sql(spec, count_only=True).startswith("SELECT COUNT(*) FROM")
